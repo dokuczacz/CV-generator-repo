@@ -8,13 +8,26 @@
 <body>
   <div class="page">
     <header class="header">
-      <h1 class="name">{{ full_name }}</h1>
-      <div class="contact">
-        {% if address_lines %}<span>{{ address_lines|join(", ") }}</span>{% endif %}
-        {% if phone %}<span>{{ phone }}</span>{% endif %}
-        {% if email %}<span><a href="mailto:{{ email }}">{{ email }}</a></span>{% endif %}
-        {% if birth_date %}<span>{{ birth_date }}</span>{% endif %}
-        {% if nationality %}<span>{{ nationality }}</span>{% endif %}
+      <div class="header-left">
+        <h1 class="name">{{ full_name }}</h1>
+        <div class="contact">
+          <div class="contact-block">
+            {% if address_lines %}<span>{{ address_lines|join(", ") }}</span>{% endif %}
+            {% if phone %}<span>{{ phone }}</span>{% endif %}
+            {% if email %}<span><a href="mailto:{{ email }}">{{ email }}</a></span>{% endif %}
+          </div>
+          <div class="contact-block">
+            {% if birth_date %}<span>{{ birth_date }}</span>{% endif %}
+            {% if nationality %}<span>Nationality: {{ nationality }}</span>{% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="photo-box">
+        {% if photo_url %}
+          <img src="{{ photo_url }}" alt="Professional application photo" />
+        {% else %}
+          <div class="photo-placeholder">Professional application photo</div>
+        {% endif %}
       </div>
     </header>
 
@@ -28,8 +41,8 @@
       {% for job in work_experience or [] %}
       <div class="entry">
         <div class="entry-head">
-          <span>{{ job.date_range }}</span>
-          <span>{{ job.title }}{% if job.employer %} – {{ job.employer }}{% endif %}{% if job.location %}, {{ job.location }}{% endif %}</span>
+          <span class="entry-date">{{ job.date_range }}</span>
+          <span class="entry-title">{{ job.title }}{% if job.employer %} – {{ job.employer }}{% endif %}{% if job.location %}, {{ job.location }}{% endif %}</span>
         </div>
         {% if job.bullets %}
         <ul class="bullets">
@@ -45,8 +58,8 @@
       {% for edu in education or [] %}
       <div class="entry">
         <div class="entry-head">
-          <span>{{ edu.date_range }}</span>
-          <span>{{ edu.title }}{% if edu.institution %} – {{ edu.institution }}{% endif %}</span>
+          <span class="entry-date">{{ edu.date_range }}</span>
+          <span class="entry-title">{{ edu.title }}{% if edu.institution %} – {{ edu.institution }}{% endif %}</span>
         </div>
         {% if edu.details %}
           <p class="entry-sub">{{ edu.details|join("; ") }}</p>
@@ -57,16 +70,16 @@
 
     <section class="section">
       <div class="section-title">Sprachen</div>
-      <div class="pill-list">
-        {% for lang in languages or [] %}<span class="pill">{{ lang }}</span>{% endfor %}
-      </div>
+      <ul class="simple-list">
+        {% for lang in languages or [] %}<li>{{ lang }}</li>{% endfor %}
+      </ul>
     </section>
 
     <section class="section">
       <div class="section-title">Fähigkeiten & KI</div>
-      <div class="pill-list">
-        {% for sk in it_ai_skills or [] %}<span class="pill">{{ sk }}</span>{% endfor %}
-      </div>
+      <ul class="simple-list">
+        {% for sk in it_ai_skills or [] %}<li>{{ sk }}</li>{% endfor %}
+      </ul>
     </section>
 
     <section class="section">
@@ -80,6 +93,13 @@
       <div class="section-title">Interessen</div>
       <p class="small">{{ interests or "" }}</p>
     </section>
+
+    {% if data_privacy %}
+    <section class="section">
+      <div class="section-title">Datenschutzerklärung</div>
+      <p class="small">{{ data_privacy }}</p>
+    </section>
+    {% endif %}
 
     <footer class="footer">
       {% if references %}{{ references }}{% else %}Will be announced on request.{% endif %}

@@ -34,6 +34,8 @@ full_name: str
 address_lines: list[str]
 phone: str
 email: str
+birth_date: str
+nationality: str
 profile: str
 work_experience: [
   { date_range, employer, location, title, bullets: [..] }
@@ -45,6 +47,7 @@ languages: list[str]
 it_ai_skills: list[str]
 trainings: list[str]
 interests: str
+data_privacy: str
 references: str
 ```
 
@@ -52,5 +55,6 @@ references: str
 - Custom GPT może uzupełnić wzorcowe CV, zwracając JSON z polami jak wyżej (teksty + listy).
 - Backend potrafi przyjąć JSON, wyrenderować HTML (szablon `cv_template_2pages_2025.html`) i PDF (Playwright/Chromium), bez edycji layoutu przez GPT.
 - PDF zapisuje się poprawnie i otwiera w czytnikach (prawidłowe linki mailto/URL).
+- Wygenerowany plik ma taki sam styl i układ jak wzór 2-stronicowy (CV_template_2pages_2025).
 - Źródłowy wzór DOCX (`templates/CV_template_2pages_2025.docx`) i przykładowe dane (`samples/Lebenslauf_Mariusz_Horodecki_CH.docx`) są w repo.
 - Render samodzielny: `python src/render.py` tworzy `preview.pdf` na danych przykładowych.
