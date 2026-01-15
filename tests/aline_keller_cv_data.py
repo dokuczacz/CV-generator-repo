@@ -11,6 +11,9 @@ CV_DATA = {
     "email": "aline.keller@uzh.ch",
     "birth_date": "14 October 2002",
     "nationality": "Switzerland",
+
+    # Deterministic inline image (1x1 transparent PNG) so tests don't depend on local files.
+    "photo_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax2nS8AAAAASUVORK5CYII=",
     
     "education": [
         {

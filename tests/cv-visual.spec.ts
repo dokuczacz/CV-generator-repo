@@ -31,6 +31,10 @@ test.describe('CV Template Visual Regression', () => {
     await expect(page.locator('.name')).toBeVisible();
     await expect(page.locator('.contact')).toBeVisible();
     await expect(page.locator('.photo-box')).toBeVisible();
+    await expect(page.locator('.photo-box img')).toBeVisible();
+
+    const imgSrc = await page.locator('.photo-box img').getAttribute('src');
+    expect(imgSrc || '').toContain('data:image/');
 
     // Name: verify extracted styles injected via CSS variables and direct styles
     const nameStyle = await page.locator('.name').evaluate(el => {

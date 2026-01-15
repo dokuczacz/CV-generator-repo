@@ -52,6 +52,7 @@ Runs Flask server on http://localhost:5000
 
 ### Endpoints
 - `POST /generate-cv` — Generate PDF from JSON
+- `POST /generate-cv-action` — Generate PDF as JSON (`pdf_base64`), optional photo extraction from DOCX
 - `POST /preview-html` — Preview HTML from JSON
 - `GET /health` — Health check
 

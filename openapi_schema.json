@@ -84,10 +84,103 @@
           }
         }
       }
+    },
+    "/generate-cv-action": {
+      "post": {
+        "operationId": "generateCVAction",
+        "summary": "Generate CV PDF (Actions-friendly JSON response)",
+        "description": "Same rendering/validation as /generate-cv, but returns JSON with pdf_base64. Optionally extracts the profile photo from an uploaded source DOCX (base64) and injects it into the template.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateCVActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CV generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateCVActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed - content exceeds 2-page limit or character constraints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error during PDF generation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "GenerateCVActionRequest": {
+        "oneOf": [
+          {
+            "allOf": [
+              { "$ref": "#/components/schemas/CVData" },
+              {
+                "type": "object",
+                "properties": {
+                  "source_docx_base64": {
+                    "type": "string",
+                    "description": "Optional base64-encoded .docx of the original CV. Backend extracts the first embedded image (photo) and injects it into the template.",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": ["cv_data"],
+            "properties": {
+              "cv_data": { "$ref": "#/components/schemas/CVData" },
+              "source_docx_base64": {
+                "type": "string",
+                "description": "Optional base64-encoded .docx of the original CV to extract the photo.",
+                "minLength": 1
+              }
+            }
+          }
+        ]
+      },
+      "GenerateCVActionResponse": {
+        "type": "object",
+        "required": ["pdf_base64", "filename", "pages"],
+        "properties": {
+          "pdf_base64": { "type": "string", "description": "Base64-encoded PDF" },
+          "filename": { "type": "string" },
+          "pages": { "type": "integer", "enum": [2] }
+        }
+      },
       "CVData": {
         "type": "object",
         "required": [
@@ -95,7 +188,6 @@
           "address_lines",
           "phone",
           "email",
-          "profile",
           "work_experience"
         ],
         "properties": {
@@ -129,6 +221,12 @@
             "description": "Professional email address",
             "example": "mariusz.horodecki@gmail.com"
           },
+          "birth_date": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Optional birth date (rendered in header)",
+            "example": "14 October 2002"
+          },
           "nationality": {
             "type": "string",
             "maxLength": 30,
@@ -140,6 +238,13 @@
             "maxLength": 500,
             "description": "Professional profile/summary. MAX 500 characters including spaces. Target: ~7-8 lines. Focus on key strengths, experience level, and career goals.",
             "example": "Experienced Project Manager with 10+ years in quality systems, process optimization, and infrastructure projects. Proven leadership of cross-functional teams..."
+          },
+          "professional_summary": {
+            "description": "Optional GPT-style summary. Backend normalizes this into 'profile' for compatibility. Current Zurich template does not render a separate summary section.",
+            "anyOf": [
+              { "type": "string", "maxLength": 500 },
+              { "type": "array", "maxItems": 5, "items": { "type": "string", "maxLength": 200 } }
+            ]
           },
           "work_experience": {
             "type": "array",
@@ -158,14 +263,20 @@
               "$ref": "#/components/schemas/Education"
             }
           },
+          "further_experience": {
+            "type": "array",
+            "maxItems": 6,
+            "description": "Further experience / commitment section.",
+            "items": {
+              "$ref": "#/components/schemas/FurtherExperience"
+            }
+          },
           "languages": {
             "type": "array",
             "maxItems": 5,
             "description": "Language skills. MAX 5 items, 50 chars each.",
             "items": {
-              "type": "string",
-              "maxLength": 50,
-              "example": "Deutsch (Muttersprache)"
+              "$ref": "#/components/schemas/LanguageItem"
             }
           },
           "it_ai_skills": {
@@ -189,16 +300,39 @@
             }
           },
           "interests": {
+            "description": "Personal interests. Backend accepts either a single string or a list and normalizes into a string for rendering.",
+            "anyOf": [
+              { "type": "string", "maxLength": 350 },
+              { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 120 } }
+            ]
+          },
+          "references": {
             "type": "string",
-            "maxLength": 350,
-            "description": "Personal interests/hobbies. MAX 350 characters, target ~6-7 lines.",
-            "example": "Traveling, photography, hiking in the Swiss Alps..."
+            "maxLength": 120,
+            "description": "Optional references line",
+            "example": "Will be announced on request."
+          },
+          "photo_url": {
+            "type": "string",
+            "description": "Optional photo as a data URI (data:image/...;base64,...) or URL. If omitted, a placeholder is shown.",
+            "example": "data:image/png;base64,iVBORw0K..."
+          },
+          "source_docx_base64": {
+            "type": "string",
+            "description": "Optional base64-encoded .docx of original CV. Backend extracts photo from it.",
+            "minLength": 1
           },
           "data_privacy": {
             "type": "string",
             "maxLength": 180,
             "description": "Data privacy consent statement in German. MAX 180 characters.",
             "example": "Ich erkläre mich damit einverstanden, dass meine Daten zum Zwecke der Bewerbung gespeichert und verarbeitet werden."
+          },
+          "data_privacy_consent": {
+            "type": "string",
+            "maxLength": 250,
+            "description": "Alternate field name accepted by backend; normalized into data_privacy.",
+            "example": "I consent to the processing of my personal data for recruitment purposes..."
           }
         }
       },
@@ -209,9 +343,9 @@
           "date_range": {
             "type": "string",
             "maxLength": 25,
-            "pattern": "^\\d{4}-\\d{2}\\s*–\\s*(\\d{4}-\\d{2}|Present)$",
-            "description": "Date range in format 'YYYY-MM – YYYY-MM' or 'YYYY-MM – Present'. MAX 25 chars.",
-            "example": "2020-01 – Present"
+            "pattern": "^(\\d{4}-\\d{2}|\\d{2}/\\d{4})\\s*–\\s*(\\d{4}-\\d{2}|\\d{2}/\\d{4}|Present)$",
+            "description": "Date range. Accepts 'YYYY-MM – YYYY-MM', 'MM/YYYY – MM/YYYY', or Present. MAX 25 chars.",
+            "example": "01/2020 – 04/2025"
           },
           "employer": {
             "type": "string",
@@ -244,6 +378,44 @@
             }
           }
         }
+      },
+      "FurtherExperience": {
+        "type": "object",
+        "required": ["date_range", "title"],
+        "properties": {
+          "date_range": {
+            "type": "string",
+            "maxLength": 25,
+            "description": "Date label (e.g. since 01/2024 or 07/2023 – 09/2023)",
+            "example": "since 01/2024"
+          },
+          "title": { "type": "string", "maxLength": 120 },
+          "organization": { "type": "string", "maxLength": 120 },
+          "bullets": {
+            "type": "array",
+            "maxItems": 4,
+            "items": { "type": "string", "maxLength": 120 }
+          },
+          "details": {
+            "type": "array",
+            "maxItems": 6,
+            "items": { "type": "string", "maxLength": 120 }
+          }
+        }
+      },
+      "LanguageItem": {
+        "description": "Language item can be a simple string or an object with name/level.",
+        "anyOf": [
+          { "type": "string", "maxLength": 50 },
+          {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 30 },
+              "level": { "type": "string", "maxLength": 30 }
+            }
+          }
+        ]
       },
       "Education": {
         "type": "object",

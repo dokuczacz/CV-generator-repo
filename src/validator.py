@@ -58,8 +58,8 @@ CV_LIMITS = {
         "per_entry": {
             "date_range": {
                 "max_chars": 25,
-                "pattern": r"^\d{4}-\d{2}( – (\d{4}-\d{2}|Present))?$",
-                "reason": "Format: 2020-01 – 2025-04"
+                "pattern": r"^(\d{4}-\d{2}|\d{2}/\d{4})\s*(–\s*(\d{4}-\d{2}|\d{2}/\d{4}|Present))?$",
+                "reason": "Format: 2020-01 – 2025-04 OR 01/2020 – 04/2025"
             },
             "employer": {
                 "max_chars": 60,
@@ -109,8 +109,8 @@ CV_LIMITS = {
         "per_entry": {
             "date_range": {
                 "max_chars": 25,
-                "pattern": r"^\d{4}-\d{2}( – (\d{4}-\d{2}|Present))?$",
-                "reason": "Format: 2020-01 – 2025-04"
+                "pattern": r"^(\d{4}-\d{2}|\d{2}/\d{4}|since\s+(\d{4}-\d{2}|\d{2}/\d{4}))\s*(–\s*(\d{4}-\d{2}|\d{2}/\d{4}|Present))?$",
+                "reason": "Format: 2020-01 – 2025-04 OR 01/2020 – 04/2025 OR since 01/2024"
             },
             "organization": {
                 "max_chars": 70,
@@ -508,7 +508,6 @@ class CVValidator:
         interests_height = SECTION_TITLE_HEIGHT_MM + (interests_lines * 4.5)
         total += interests_height
         details["interests"] = interests_height
-        details["data_privacy"] = privacy_height
         
         # Add margins
         total += MARGINS_HEIGHT_MM

@@ -41,6 +41,14 @@ def _load_env() -> Environment:
 
 
 def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
+    # Normalize GPT/backend payload differences (e.g. interests list -> string)
+    try:
+        from src.normalize import normalize_cv_data  # type: ignore
+    except Exception:
+        from normalize import normalize_cv_data  # type: ignore
+
+    cv = normalize_cv_data(cv)
+
     env = _load_env()
     template = env.get_template(TEMPLATE_NAME)
     css = ""

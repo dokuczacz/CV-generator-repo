@@ -106,3 +106,11 @@ Final behavior in `tests/generate_test_artifacts.py`:
   - `npm test`
 - Quick local preview (minimal always-valid input):
   - `python src/render.py` → writes `preview.html` and `preview.pdf`
+
+## Incoming JSON compatibility notes
+
+The template expects `interests` as a single string, but GPTs often return an array.
+The backend normalizes these payloads:
+
+- `interests`: string OR list of strings (list is joined with `; `)
+- `professional_summary`: optional list/string; mapped to `profile` for compatibility (the current Zurich template does not render a separate summary section)
