@@ -1,0 +1,386 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Swiss CV Generator API",
+    "description": "Backend API for generating professional 2-page Swiss CVs in PDF format. CRITICAL: All content MUST fit within 2 A4 pages (594mm vertical space). The API performs pre-flight validation and REJECTS requests that would exceed this limit.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://your-backend-url.com",
+      "description": "Production backend"
+    },
+    {
+      "url": "http://localhost:5000",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/generate-cv": {
+      "post": {
+        "operationId": "generateCV",
+        "summary": "Generate 2-page Swiss CV PDF",
+        "description": "Generates a professional CV in PDF format following Swiss market standards. Validates that content fits within 2 A4 pages before generation. Returns 400 error with detailed suggestions if validation fails.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CVData"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CV generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pdf_base64": {
+                      "type": "string",
+                      "description": "Base64-encoded PDF file"
+                    },
+                    "filename": {
+                      "type": "string",
+                      "description": "Suggested filename (e.g., CV_John_Doe_2025.pdf)"
+                    },
+                    "pages": {
+                      "type": "number",
+                      "description": "Actual page count (should be ≤ 2.0)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed - content exceeds 2-page limit or character constraints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error during PDF generation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Error message"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CVData": {
+        "type": "object",
+        "required": [
+          "full_name",
+          "address_lines",
+          "phone",
+          "email",
+          "profile",
+          "work_experience"
+        ],
+        "properties": {
+          "full_name": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Full name of the candidate",
+            "example": "Mariusz Horodecki"
+          },
+          "address_lines": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "description": "Address split into max 2 lines",
+            "example": ["Hardturmstrasse 161", "8005 Zürich"]
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 30,
+            "pattern": "^\\+?[0-9\\s\\-()]+$",
+            "description": "Phone number in international format",
+            "example": "+41 77 952 24 37"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 60,
+            "description": "Professional email address",
+            "example": "mariusz.horodecki@gmail.com"
+          },
+          "nationality": {
+            "type": "string",
+            "maxLength": 30,
+            "description": "Nationality or citizenship",
+            "example": "Polish"
+          },
+          "profile": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Professional profile/summary. MAX 500 characters including spaces. Target: ~7-8 lines. Focus on key strengths, experience level, and career goals.",
+            "example": "Experienced Project Manager with 10+ years in quality systems, process optimization, and infrastructure projects. Proven leadership of cross-functional teams..."
+          },
+          "work_experience": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "description": "Work history. MAX 5 positions (prioritize recent and relevant).",
+            "items": {
+              "$ref": "#/components/schemas/WorkExperience"
+            }
+          },
+          "education": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Educational background. MAX 3 entries.",
+            "items": {
+              "$ref": "#/components/schemas/Education"
+            }
+          },
+          "languages": {
+            "type": "array",
+            "maxItems": 5,
+            "description": "Language skills. MAX 5 items, 50 chars each.",
+            "items": {
+              "type": "string",
+              "maxLength": 50,
+              "example": "Deutsch (Muttersprache)"
+            }
+          },
+          "it_ai_skills": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "IT/AI/technical skills. MAX 8 items, 70 chars each.",
+            "items": {
+              "type": "string",
+              "maxLength": 70,
+              "example": "Python, Machine Learning, Azure"
+            }
+          },
+          "trainings": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "Certifications and trainings. MAX 8 items, 110 chars each (includes date + title + provider).",
+            "items": {
+              "type": "string",
+              "maxLength": 110,
+              "example": "05/2024 – Advanced Project Management – PMI Institute"
+            }
+          },
+          "interests": {
+            "type": "string",
+            "maxLength": 350,
+            "description": "Personal interests/hobbies. MAX 350 characters, target ~6-7 lines.",
+            "example": "Traveling, photography, hiking in the Swiss Alps..."
+          },
+          "data_privacy": {
+            "type": "string",
+            "maxLength": 180,
+            "description": "Data privacy consent statement in German. MAX 180 characters.",
+            "example": "Ich erkläre mich damit einverstanden, dass meine Daten zum Zwecke der Bewerbung gespeichert und verarbeitet werden."
+          }
+        }
+      },
+      "WorkExperience": {
+        "type": "object",
+        "required": ["date_range", "employer", "title", "bullets"],
+        "properties": {
+          "date_range": {
+            "type": "string",
+            "maxLength": 25,
+            "pattern": "^\\d{4}-\\d{2}\\s*–\\s*(\\d{4}-\\d{2}|Present)$",
+            "description": "Date range in format 'YYYY-MM – YYYY-MM' or 'YYYY-MM – Present'. MAX 25 chars.",
+            "example": "2020-01 – Present"
+          },
+          "employer": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Company/organization name. MAX 60 characters.",
+            "example": "Acme Corporation AG"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "City/location (optional). MAX 50 characters.",
+            "example": "Zürich, Switzerland"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Job title/position. MAX 80 characters.",
+            "example": "Senior Project Manager"
+          },
+          "bullets": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "description": "Key achievements/responsibilities. MAX 4 bullets per position, 90 chars each. Use action verbs, quantify results.",
+            "items": {
+              "type": "string",
+              "maxLength": 90,
+              "description": "Single achievement bullet. MAX 90 characters. Start with action verb, include metrics/results.",
+              "example": "Led team of 8 developers, reducing deployment time by 50% through CI/CD"
+            }
+          }
+        }
+      },
+      "Education": {
+        "type": "object",
+        "required": ["date_range", "institution", "title"],
+        "properties": {
+          "date_range": {
+            "type": "string",
+            "maxLength": 20,
+            "pattern": "^\\d{4}\\s*–\\s*\\d{4}$",
+            "description": "Date range in format 'YYYY – YYYY'. MAX 20 chars.",
+            "example": "2015 – 2019"
+          },
+          "institution": {
+            "type": "string",
+            "maxLength": 70,
+            "description": "University/school name. MAX 70 characters.",
+            "example": "ETH Zürich"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 90,
+            "description": "Degree/qualification title. MAX 90 characters.",
+            "example": "Master of Science in Computer Science"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional details (specialization, thesis, GPA). Combined text MAX 150 chars.",
+            "example": ["Specialization: Artificial Intelligence", "Thesis: Deep Learning for NLP"]
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "High-level error message",
+            "example": "CV validation failed - exceeds 2-page limit"
+          },
+          "is_valid": {
+            "type": "boolean",
+            "description": "Validation status (always false in error responses)"
+          },
+          "estimated_pages": {
+            "type": "number",
+            "description": "Estimated page count based on content height",
+            "example": 2.3
+          },
+          "estimated_height_mm": {
+            "type": "number",
+            "description": "Estimated total content height in millimeters",
+            "example": 682.5
+          },
+          "max_height_mm": {
+            "type": "number",
+            "description": "Maximum allowed height (2 pages = 594mm)",
+            "example": 594.0
+          },
+          "error_count": {
+            "type": "integer",
+            "description": "Number of validation errors found"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "JSON path to the problematic field",
+                  "example": "work_experience[2].bullets[1]"
+                },
+                "current": {
+                  "type": "integer",
+                  "description": "Current value (character count or item count)"
+                },
+                "limit": {
+                  "type": "integer",
+                  "description": "Maximum allowed value"
+                },
+                "excess": {
+                  "type": "integer",
+                  "description": "How much over the limit (current - limit)"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Human-readable error message"
+                },
+                "suggestion": {
+                  "type": "string",
+                  "description": "Specific action to fix the error",
+                  "example": "Shorten by 15 characters"
+                }
+              }
+            }
+          },
+          "height_breakdown": {
+            "type": "object",
+            "description": "Detailed space usage by section (in millimeters)",
+            "properties": {
+              "header": {
+                "type": "number"
+              },
+              "profile": {
+                "type": "number"
+              },
+              "work_experience": {
+                "type": "number"
+              },
+              "education": {
+                "type": "number"
+              },
+              "languages": {
+                "type": "number"
+              },
+              "it_ai_skills": {
+                "type": "number"
+              },
+              "trainings": {
+                "type": "number"
+              },
+              "interests": {
+                "type": "number"
+              },
+              "data_privacy": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

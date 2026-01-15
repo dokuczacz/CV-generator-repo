@@ -1,0 +1,84 @@
+{
+  "full_name": "John Doe",
+  "address_lines": ["Street 123", "12345 City"],
+  "phone": "+1 234 567 890",
+  "email": "john.doe@example.com",
+  "nationality": "American",
+  "profile": "Experienced professional with over 10 years in software development and team leadership. Proven track record in building scalable applications, leading cross-functional teams, and implementing best practices across organizations.",
+  "work_experience": [
+    {
+      "date_range": "2020-01 – Present",
+      "employer": "Tech Corp",
+      "location": "New York, USA",
+      "title": "Senior Software Engineer",
+      "bullets": [
+        "Led team of 5 developers in building cloud-native applications",
+        "Implemented CI/CD pipeline reducing deployment time by 50%",
+        "Architected microservices infrastructure handling 1M+ daily users",
+        "Mentored junior developers and conducted code reviews"
+      ]
+    },
+    {
+      "date_range": "2017-01 – 2020-01",
+      "employer": "Startup Inc",
+      "location": "San Francisco, USA",
+      "title": "Full Stack Developer",
+      "bullets": [
+        "Built responsive web applications using React and Node.js",
+        "Designed and implemented RESTful APIs",
+        "Improved application performance by 40%",
+        "Collaborated with product team on feature development"
+      ]
+    },
+    {
+      "date_range": "2015-01 – 2017-01",
+      "employer": "Digital Agency",
+      "location": "Boston, USA",
+      "title": "Junior Developer",
+      "bullets": [
+        "Developed client websites using modern web technologies",
+        "Maintained legacy codebases and fixed bugs",
+        "Participated in agile development processes",
+        "Gained experience in multiple programming languages"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "date_range": "2011–2015",
+      "institution": "University of Technology",
+      "title": "Bachelor of Science in Computer Science",
+      "details": ["GPA: 3.8/4.0", "Dean's List all semesters", "Capstone: Machine Learning recommendation system"]
+    },
+    {
+      "date_range": "2009–2011",
+      "institution": "Community College",
+      "title": "Associate Degree in Information Technology",
+      "details": ["Honor Roll", "Programming Club President"]
+    }
+  ],
+  "languages": [
+    "English (native)",
+    "Spanish (fluent)",
+    "French (intermediate)"
+  ],
+  "it_ai_skills": [
+    "Programming: Python, JavaScript, TypeScript, Java, Go",
+    "Frontend: React, Vue.js, Angular, HTML5, CSS3",
+    "Backend: Node.js, Django, Flask, Express.js",
+    "Cloud: AWS (EC2, S3, Lambda), Azure, Google Cloud Platform",
+    "DevOps: Docker, Kubernetes, Jenkins, GitHub Actions",
+    "Databases: PostgreSQL, MongoDB, Redis, MySQL",
+    "AI/ML: TensorFlow, PyTorch, scikit-learn, GPT integration",
+    "Tools: Git, VS Code, Jira, Confluence"
+  ],
+  "trainings": [
+    "2023 – AWS Certified Solutions Architect - Professional",
+    "2022 – Docker & Kubernetes Masterclass – Udemy",
+    "2021 – Advanced React Patterns – Frontend Masters",
+    "2020 – Machine Learning Specialization – Coursera",
+    "2019 – Agile Scrum Master Certification – Scrum Alliance"
+  ],
+  "interests": "Open source contribution (maintain 2 popular npm packages), technical blogging (50k+ monthly readers), hiking and outdoor photography, competitive programming, teaching coding to beginners",
+  "data_privacy": "I consent to the processing of my personal data for recruitment purposes in accordance with applicable data protection regulations."
+}

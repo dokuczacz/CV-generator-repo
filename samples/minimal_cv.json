@@ -1,0 +1,43 @@
+{
+  "full_name": "Aline Keller",
+  "address_lines": ["Example Street 1", "8000 Zürich"],
+  "phone": "+41 00 000 00 00",
+  "email": "aline.keller@example.com",
+  "birth_date": "14 October 2002",
+  "nationality": "Switzerland",
+  "education": [
+    {
+      "date_range": "09/2024 – today",
+      "institution": "University of Zurich",
+      "title": "Master of Arts",
+      "details": ["Major: History", "Minor: Media and Communication Studies"]
+    }
+  ],
+  "work_experience": [
+    {
+      "date_range": "06/2024 – 08/2024",
+      "employer": "Example Company",
+      "location": "Zürich",
+      "title": "Intern",
+      "bullets": ["Supported day-to-day operations and documentation."]
+    }
+  ],
+  "further_experience": [
+    {
+      "date_range": "2023",
+      "title": "Volunteer",
+      "organization": "Student Association",
+      "bullets": ["Helped organize events and coordinate logistics."]
+    }
+  ],
+  "languages": [
+    {"name": "German", "level": "(native)"},
+    {"name": "English", "level": "(fluent)"}
+  ],
+  "it_ai_skills": [
+    "MS Office (Word, Excel, PowerPoint)",
+    "Basic data analysis and research tooling"
+  ],
+  "interests": "Reading, hiking, and cultural events.",
+  "references": "Will be announced on request."
+}

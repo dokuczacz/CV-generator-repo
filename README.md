@@ -2,24 +2,74 @@
 
 Minimal, self-contained CV renderer for the 2-page template (HTML/CSS → PDF via Playwright).
 
+## Quick Start
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+python -m playwright install chromium
+npm install
+
+# Generate a quick local preview (uses samples/minimal_cv.json)
+python src/render.py
+
+# Start API server
+python api.py
+
+# Run deterministic template/DoD checks (Playwright)
+npm test
+```
+
 ## Structure
-- `templates/CV_template_2pages_2025.docx` — oryginalny wzór (referencja).
-- `templates/html/cv_template_2pages_2025.html` — szablon HTML.
-- `templates/html/cv_template_2pages_2025.css` — styl.
-- `samples/Lebenslauf_Mariusz_Horodecki_CH.docx` — przykładowe dane źródłowe (referencja treści).
-- `src/render.py` — funkcje renderujące (HTML i PDF).
+- `src/render.py` — Core rendering functions (HTML & PDF generation)
+- `templates/CV_template_2pages_2025.spec.md` — Layout specification (reference)
+- `templates/html/cv_template_2pages_2025.html` — Jinja2 HTML template
+- `templates/html/cv_template_2pages_2025.css` — Stylesheet
+- `api.py` — Flask API endpoint for GPT integration
+- `tests/` — Playwright visual regression tests
+- `samples/` — Reference outputs and test data
+- `wzory/CV_template_2pages_2025.docx` — Original DOCX template (reference)
+- `wzory/Lebenslauf_Mariusz_Horodecki_CH.docx` — Sample data source (reference)
 
 ## Install
 ```
 pip install -r requirements.txt
 python -m playwright install chromium
+npm install
 ```
 
-## Render
+## Quick Test
 ```
 python src/render.py
 ```
-Zapisze `preview.pdf` w katalogu głównym projektu.
+Generates `preview.html` and `preview.pdf` in the project root.
+
+## API Server (for GPT Integration)
+```
+python api.py
+```
+Runs Flask server on http://localhost:5000
+
+### Endpoints
+- `POST /generate-cv` — Generate PDF from JSON
+- `POST /preview-html` — Preview HTML from JSON
+- `GET /health` — Health check
+
+See [TESTING.md](TESTING.md) for detailed API usage and GPT integration.
+
+## Playwright Testing
+```
+npm test              # Run all tests
+npm run test:ui       # Interactive UI mode
+npm run show-report   # View test report
+```
+
+Generate test artifacts:
+```
+python tests/generate_test_artifacts.py
+```
+
+See [FINAL_PROCESS.md](FINAL_PROCESS.md) for the exact “how we got here” playbook and pitfalls to avoid when mirroring a new DOCX template.
 
 ## API (Python)
 ```python

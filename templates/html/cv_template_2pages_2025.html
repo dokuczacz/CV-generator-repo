@@ -3,7 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  {% if _inline_css %}<style>{{ _inline_css }}</style>{% endif %}
+  {% if _inline_css %}<style>{{ _inline_css | safe }}</style>{% endif %}
+  {% if _styles %}
+  <style>
+    :root{
+      --font-main: "{{ _styles.font_family }}", "Helvetica", sans-serif;
+      --text: {{ _styles.body_color_hex }};
+      --accent: {{ _styles.title_color_hex }};
+    }
+    body{ font-size: {{ _styles.body_font_size_pt }}pt; }
+    .name{ font-size: {{ _styles.name_font_size_pt }}pt; }
+    .section-title{ font-size: {{ _styles.title_font_size_pt }}pt; }
+    .page{ padding: {{ _styles.margin_top_mm }}mm {{ _styles.margin_right_mm|round(1) }}mm {{ _styles.margin_bottom_mm }}mm {{ _styles.margin_left_mm }}mm; }
+    .section{ margin-top: {{ _styles.section_gap_mm }}mm; }
+    .bullets{ margin-left: 42.5mm; padding-left: {{ _styles.bullet_hanging_mm }}mm; }
+  </style>
+  {% endif %}
 </head>
 <body>
   <div class="page">
@@ -31,79 +46,104 @@
       </div>
     </header>
 
-    <section class="section">
-      <div class="section-title">Profil</div>
-      <p class="small">{{ profile or "" }}</p>
-    </section>
+    <main class="content">
 
     <section class="section">
-      <div class="section-title">Berufserfahrung</div>
-      {% for job in work_experience or [] %}
-      <div class="entry">
-        <div class="entry-head">
-          <span class="entry-date">{{ job.date_range }}</span>
-          <span class="entry-title">{{ job.title }}{% if job.employer %} – {{ job.employer }}{% endif %}{% if job.location %}, {{ job.location }}{% endif %}</span>
-        </div>
-        {% if job.bullets %}
-        <ul class="bullets">
-          {% for b in job.bullets %}<li>{{ b }}</li>{% endfor %}
-        </ul>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </section>
-
-    <section class="section">
-      <div class="section-title">Ausbildung</div>
+      <div class="section-title">Education</div>
       {% for edu in education or [] %}
       <div class="entry">
         <div class="entry-head">
           <span class="entry-date">{{ edu.date_range }}</span>
-          <span class="entry-title">{{ edu.title }}{% if edu.institution %} – {{ edu.institution }}{% endif %}</span>
+          <span class="entry-title">{{ edu.institution }}{% if edu.title %}, {{ edu.title }}{% endif %}</span>
         </div>
         {% if edu.details %}
-          <p class="entry-sub">{{ edu.details|join("; ") }}</p>
+          <div class="entry-body">
+            {% for d in edu.details %}<div class="entry-line">{{ d }}</div>{% endfor %}
+          </div>
         {% endif %}
       </div>
       {% endfor %}
     </section>
 
     <section class="section">
-      <div class="section-title">Sprachen</div>
-      <ul class="simple-list">
-        {% for lang in languages or [] %}<li>{{ lang }}</li>{% endfor %}
-      </ul>
+      <div class="section-title">Work experience</div>
+      {% for job in work_experience or [] %}
+      <div class="entry">
+        <div class="entry-head">
+          <span class="entry-date">{{ job.date_range }}</span>
+          <span class="entry-title">
+            {{ job.employer }}{% if job.location %}, {{ job.location }}{% endif %}{% if job.title %}, {{ job.title }}{% endif %}
+          </span>
+        </div>
+        {% if job.bullets %}
+          <ul class="bullets">
+            {% for b in job.bullets %}<li>{{ b }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+
+    <div class="page-break" aria-hidden="true"></div>
+
+    <section class="section">
+      <div class="section-title">Further experience / commitment</div>
+      {% for exp in further_experience or [] %}
+      <div class="entry">
+        <div class="entry-head">
+          <span class="entry-date">{{ exp.date_range }}</span>
+          <span class="entry-title">{{ exp.title }}{% if exp.organization %}, {{ exp.organization }}{% endif %}</span>
+        </div>
+        {% if exp.bullets %}
+          <ul class="bullets">
+            {% for b in exp.bullets %}<li>{{ b }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        {% if exp.details %}
+          <div class="entry-body">
+            {% for d in exp.details %}<div class="entry-line">{{ d }}</div>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      {% endfor %}
     </section>
 
     <section class="section">
-      <div class="section-title">Fähigkeiten & KI</div>
+      <div class="section-title">Language Skills</div>
+      <div class="two-col-list">
+        {% for lang in languages or [] %}
+          {% if lang is mapping %}
+            <div class="two-col-row"><div>{{ lang.name }}</div><div>{{ lang.level }}</div></div>
+          {% else %}
+            {% set parts = lang.split("(", 1) %}
+            {% if parts|length > 1 %}
+              <div class="two-col-row"><div>{{ parts[0].strip() }}</div><div>({{ parts[1].strip() }}</div></div>
+            {% else %}
+              <div class="two-col-row"><div>{{ lang }}</div><div></div></div>
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">IT &amp; AI Skills</div>
       <ul class="simple-list">
         {% for sk in it_ai_skills or [] %}<li>{{ sk }}</li>{% endfor %}
       </ul>
     </section>
 
     <section class="section">
-      <div class="section-title">Weiterbildungen</div>
-      {% for course in trainings or [] %}
-      <div class="entry small">{{ course }}</div>
-      {% endfor %}
-    </section>
-
-    <section class="section">
-      <div class="section-title">Interessen</div>
+      <div class="section-title">Interests</div>
       <p class="small">{{ interests or "" }}</p>
     </section>
 
-    {% if data_privacy %}
     <section class="section">
-      <div class="section-title">Datenschutzerklärung</div>
-      <p class="small">{{ data_privacy }}</p>
+      <div class="section-title">References</div>
+      <p class="small">{{ references or "Will be announced on request." }}</p>
     </section>
-    {% endif %}
 
-    <footer class="footer">
-      {% if references %}{{ references }}{% else %}Will be announced on request.{% endif %}
-    </footer>
-  </div>
+    </main>
+
 </body>
 </html>
