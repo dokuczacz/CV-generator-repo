@@ -80,24 +80,20 @@ a {
 .photo-box {
   width: 45mm;
   height: 55mm;
-  border: 1px solid var(--accent);
-  background: #eeece1;
+  background: white;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  /* Subtle frame: thin border + soft shadow for depth */
+  border: 0.5pt solid var(--border);
+  box-shadow: 0 1pt 3pt rgba(0, 0, 0, 0.08);
 }
 
 .photo-box img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-.photo-placeholder {
-  text-align: center;
-  font-size: 9pt;
-  color: var(--muted);
-  padding: 4mm;
 }
 
 .content {
