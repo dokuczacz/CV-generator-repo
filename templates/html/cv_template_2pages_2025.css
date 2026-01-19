@@ -36,6 +36,17 @@ body {
   background: white;
 }
 
+/* Each .page is a physical PDF page */
+.page {
+  break-after: page;
+  page-break-after: always;
+}
+
+.page:last-of-type {
+  break-after: auto;
+  page-break-after: auto;
+}
+
 .page {
   position: relative;
 }
@@ -210,16 +221,3 @@ a {
   column-gap: 3mm;
 }
 
-.page-break {
-  height: 0;
-  break-before: page;
-  page-break-before: always;
-}
-
-/* Page break styling for PDF generation */
-@media print {
-  .page-break {
-    break-before: page;
-    page-break-before: always;
-  }
-}
