@@ -1,0 +1,61 @@
+*.pyc
+__pycache__/
+.Python
+env/
+venv/
+.venv
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Azure Functions specific
+bin/
+obj/
+appsettings.json
+local.settings.json
+.funcignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright
+.playwright/
+
+# Node
+node_modules/
+package-lock.json
+npm-debug.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated files
+artifacts/
+test-output/
+logs/
+
+# Temp
+tmp/
+temp/

@@ -1,0 +1,16 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "AzureWebJobsStorage": "***STORAGE_CONNECTION_STRING***",
+    "STORAGE_ACCOUNT_URL": "https://YOUR_STORAGE_ACCOUNT.blob.core.windows.net",
+    "STORAGE_CONNECTION_STRING": "***STORAGE_CONNECTION_STRING***",
+    "STORAGE_CONTAINER_THEMES": "cv-themes",
+    "STORAGE_CONTAINER_TEMPLATES": "cv-templates",
+    "STORAGE_CONTAINER_FONTS": "cv-fonts",
+    "PLAYWRIGHT_BROWSERS_PATH": "/home/site/wwwroot/.playwright",
+    "AZURE_SDK_LOG_LEVEL": "WARNING",
+    "CV_DEFAULT_THEME": "zurich"
+  }
+}
