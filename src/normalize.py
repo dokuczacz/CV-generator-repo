@@ -15,6 +15,21 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
     if "full_name" not in normalized and "name" in normalized:
         normalized["full_name"] = normalized.get("name")
 
+    # Support alternate work_experience field names
+    if "work_experience" not in normalized:
+        if "experience" in normalized:
+            normalized["work_experience"] = normalized.get("experience")
+        elif "employment" in normalized:
+            normalized["work_experience"] = normalized.get("employment")
+
+    # Ensure further_experience exists (can be empty)
+    if "further_experience" not in normalized:
+        normalized["further_experience"] = []
+
+    # Ensure languages exists (can be empty)
+    if "languages" not in normalized:
+        normalized["languages"] = []
+
     # Interests: template expects a string.
     interests = normalized.get("interests")
     if isinstance(interests, list):
