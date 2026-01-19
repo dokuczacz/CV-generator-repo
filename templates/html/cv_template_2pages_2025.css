@@ -36,15 +36,10 @@ body {
   background: white;
 }
 
-/* Each .page is a physical PDF page */
-.page {
-  break-after: page;
-  page-break-after: always;
-}
-
-.page:last-of-type {
-  break-after: auto;
-  page-break-after: auto;
+/* Force a page break between the two explicit pages */
+.page + .page {
+  break-before: page;
+  page-break-before: always;
 }
 
 .page {
