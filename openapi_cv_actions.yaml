@@ -1,0 +1,372 @@
+openapi: 3.0.0
+info:
+  title: CV Generator API
+  description: Premium CV generation with ATS compliance, photo extraction, and multi-language support
+  version: 1.0.0
+  contact:
+    name: CV Generator Support
+
+servers:
+  - url: https://cv-generator-6695.azurewebsites.net/api
+    description: Azure Functions Production
+
+paths:
+  /extract-photo:
+    post:
+      operationId: extractPhoto
+      summary: Extract photo from DOCX file
+      description: Extracts the first embedded image from a DOCX file and returns it as a data URI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - docx_base64
+              properties:
+                docx_base64:
+                  type: string
+                  description: Base64-encoded DOCX file containing embedded image
+      responses:
+        '200':
+          description: Photo extracted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo_data_uri:
+                    type: string
+                    description: 'Data URI of extracted photo (e.g., data:image/png;base64,...)'
+        '400':
+          description: Invalid input or no photo found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /validate-cv:
+    post:
+      operationId: validateCV
+      summary: Validate CV data structure and content limits
+      description: Validates CV JSON against schema and 2-page content constraints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cv_data
+              properties:
+                cv_data:
+                  $ref: '#/components/schemas/CVData'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_valid:
+                    type: boolean
+                    description: Whether CV passes all validation rules
+                  errors:
+                    type: array
+                    items:
+                      type: string
+                    description: List of validation errors (blocking)
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                    description: List of warnings (non-blocking)
+                  estimated_pages:
+                    type: number
+                    description: Estimated page count (should be 2)
+
+  /generate-cv-action:
+    post:
+      operationId: generateCVAction
+      summary: Generate CV PDF (returns base64)
+      description: Generates a professional 2-page PDF CV from structured JSON data. Returns base64-encoded PDF suitable for Custom GPT Actions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cv_data
+              properties:
+                cv_data:
+                  $ref: '#/components/schemas/CVData'
+                language:
+                  type: string
+                  enum:
+                    - en
+                    - de
+                    - pl
+                  default: en
+                  description: Language for section headers (English, German, Polish)
+                source_docx_base64:
+                  type: string
+                  description: 'Optional: Base64-encoded source DOCX for photo extraction'
+      responses:
+        '200':
+          description: PDF generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  pdf_base64:
+                    type: string
+                    description: Base64-encoded PDF file
+                  validation:
+                    type: object
+                    properties:
+                      warnings:
+                        type: array
+                        items:
+                          type: string
+                      estimated_pages:
+                        type: number
+                        example: 2
+        '400':
+          description: Validation failed or invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: PDF generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /preview-html:
+    post:
+      operationId: previewHTML
+      summary: Generate HTML preview (for debugging)
+      description: Returns rendered HTML without PDF conversion (useful for testing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cv_data
+              properties:
+                cv_data:
+                  $ref: '#/components/schemas/CVData'
+                source_docx_base64:
+                  type: string
+                  description: 'Optional: Base64-encoded DOCX for photo extraction'
+      responses:
+        '200':
+          description: HTML preview generated
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  schemas:
+    CVData:
+      type: object
+      required:
+        - full_name
+        - email
+        - address_lines
+        - profile
+      properties:
+        full_name:
+          type: string
+          example: John Doe
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          example: john.doe@example.com
+        phone:
+          type: string
+          example: +41 76 123 45 67
+        address_lines:
+          type: array
+          items:
+            type: string
+          example:
+            - Zurich, Switzerland
+          maxItems: 3
+        photo_url:
+          type: string
+          description: 'Photo data URI (data:image/png;base64,...) or HTTP URL'
+          example: 'data:image/png;base64,iVBORw0KGgo...'
+        profile:
+          type: string
+          description: Professional summary (2-3 sentences)
+          maxLength: 400
+          example: Full-stack engineer with 8+ years building scalable cloud applications. Expertise in Python, AWS, and microservices architecture. Led teams delivering high-impact solutions for fintech and e-commerce.
+        work_experience:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkExperience'
+          maxItems: 5
+        further_experience:
+          type: array
+          items:
+            $ref: '#/components/schemas/FurtherExperience'
+          description: Additional experience (compact format for page 2)
+        education:
+          type: array
+          items:
+            $ref: '#/components/schemas/Education'
+          maxItems: 3
+        languages:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                required:
+                  - name
+                  - level
+                properties:
+                  name:
+                    type: string
+                    example: English
+                  level:
+                    type: string
+                    example: C2 (Native)
+              - type: string
+                example: English (Native)
+          maxItems: 5
+        it_ai_skills:
+          type: array
+          items:
+            type: string
+          example:
+            - Python
+            - Docker
+            - AWS
+            - PostgreSQL
+            - React
+          maxItems: 30
+        certifications:
+          type: array
+          items:
+            type: string
+          example:
+            - AWS Solutions Architect
+            - Certified Kubernetes Administrator
+        interests:
+          oneOf:
+            - type: string
+              example: 'Photography, hiking, open-source contributions'
+            - type: array
+              items:
+                type: string
+        references:
+          type: string
+          example: Available upon request
+        data_privacy_consent:
+          type: string
+          example: I agree to the processing of my personal data in accordance with EU GDPR.
+
+    WorkExperience:
+      type: object
+      required:
+        - title
+        - company
+        - dates
+      properties:
+        title:
+          type: string
+          example: Senior Backend Engineer
+          maxLength: 100
+        company:
+          type: string
+          example: TechCorp AG
+          maxLength: 100
+        location:
+          type: string
+          example: 'Zurich, Switzerland'
+          maxLength: 80
+        dates:
+          type: string
+          example: 03/2020 - Present
+          pattern: '^\d{2}/\d{4}\s*-\s*(Present|\d{2}/\d{4}|since)$'
+        bullets:
+          type: array
+          items:
+            type: string
+            maxLength: 90
+          minItems: 2
+          maxItems: 4
+          example:
+            - Led migration to microservices, reducing deployment time by 60%
+            - Architected real-time data pipeline processing 2M events/day
+            - Mentored 5 junior engineers, improving team velocity by 35%
+
+    FurtherExperience:
+      type: object
+      required:
+        - title
+        - company
+        - dates
+      properties:
+        title:
+          type: string
+          maxLength: 80
+        company:
+          type: string
+          maxLength: 80
+        dates:
+          type: string
+        location:
+          type: string
+          maxLength: 60
+
+    Education:
+      type: object
+      required:
+        - degree
+        - institution
+        - dates
+      properties:
+        degree:
+          type: string
+          example: M.Sc. Computer Science
+          maxLength: 120
+        institution:
+          type: string
+          example: ETH Zurich
+          maxLength: 120
+        location:
+          type: string
+          example: 'Zurich, Switzerland'
+          maxLength: 80
+        dates:
+          type: string
+          example: 2015 - 2017
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        details:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Detailed error information

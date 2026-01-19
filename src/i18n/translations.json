@@ -1,0 +1,65 @@
+{
+  "en": {
+    "sections": {
+      "profile": "Professional Summary",
+      "work_experience": "Work Experience",
+      "further_experience": "Further Experience",
+      "education": "Education",
+      "languages": "Languages",
+      "it_ai_skills": "Technical Skills",
+      "certifications": "Certifications",
+      "interests": "Interests",
+      "references": "References",
+      "data_privacy": "Data Privacy Consent"
+    },
+    "labels": {
+      "email": "Email",
+      "phone": "Phone",
+      "location": "Location",
+      "present": "Present",
+      "references_available": "Available upon request"
+    }
+  },
+  "de": {
+    "sections": {
+      "profile": "Berufsprofil",
+      "work_experience": "Berufserfahrung",
+      "further_experience": "Weitere Erfahrung",
+      "education": "Ausbildung",
+      "languages": "Sprachen",
+      "it_ai_skills": "IT- und KI-Kenntnisse",
+      "certifications": "Zertifizierungen",
+      "interests": "Interessen",
+      "references": "Referenzen",
+      "data_privacy": "Datenschutzerklärung"
+    },
+    "labels": {
+      "email": "E-Mail",
+      "phone": "Telefon",
+      "location": "Standort",
+      "present": "Heute",
+      "references_available": "Auf Anfrage verfügbar"
+    }
+  },
+  "pl": {
+    "sections": {
+      "profile": "Profil zawodowy",
+      "work_experience": "Doświadczenie zawodowe",
+      "further_experience": "Dodatkowe doświadczenie",
+      "education": "Wykształcenie",
+      "languages": "Języki",
+      "it_ai_skills": "Umiejętności IT i AI",
+      "certifications": "Certyfikaty",
+      "interests": "Zainteresowania",
+      "references": "Referencje",
+      "data_privacy": "Zgoda na przetwarzanie danych"
+    },
+    "labels": {
+      "email": "E-mail",
+      "phone": "Telefon",
+      "location": "Lokalizacja",
+      "present": "Obecnie",
+      "references_available": "Dostępne na żądanie"
+    }
+  }
+}

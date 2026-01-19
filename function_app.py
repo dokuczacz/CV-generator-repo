@@ -250,3 +250,97 @@ def preview_html(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=500
         )
+
+
+@app.route(route="extract-photo", methods=["POST"])
+def extract_photo(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Extract photo from DOCX (standalone endpoint)
+    """
+    logging.info('Extract photo requested')
+    
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    docx_base64 = req_body.get("docx_base64")
+    if not docx_base64:
+        return func.HttpResponse(
+            json.dumps({"error": "Missing docx_base64 in request"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    try:
+        docx_bytes = base64.b64decode(docx_base64)
+        photo_data_uri = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
+        
+        if not photo_data_uri:
+            return func.HttpResponse(
+                json.dumps({"error": "No photo found in DOCX"}),
+                mimetype="application/json",
+                status_code=404
+            )
+        
+        return func.HttpResponse(
+            json.dumps({"photo_data_uri": photo_data_uri}),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"Photo extraction failed: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Photo extraction failed",
+                "details": str(e)
+            }),
+            mimetype="application/json",
+            status_code=500
+        )
+
+
+@app.route(route="validate-cv", methods=["POST"])
+def validate_cv_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Validate CV structure (standalone endpoint)
+    """
+    logging.info('Validate CV requested')
+    
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    cv_data = req_body.get("cv_data")
+    if not cv_data:
+        return func.HttpResponse(
+            json.dumps({"error": "Missing cv_data in request"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Normalize first
+    cv_data = normalize_cv_data(cv_data)
+    
+    # Validate
+    validation_result = validate_cv(cv_data)
+    
+    return func.HttpResponse(
+        json.dumps({
+            "is_valid": validation_result.is_valid,
+            "errors": validation_result.errors,
+            "warnings": validation_result.warnings,
+            "estimated_pages": validation_result.estimated_pages
+        }),
+        mimetype="application/json",
+        status_code=200
+    )
