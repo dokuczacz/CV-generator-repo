@@ -191,6 +191,29 @@ class CVValidator:
         # Estimate total height
         estimated_height = self._estimate_height(cv_data, height_details)
         estimated_pages = estimated_height / PAGE_HEIGHT_MM
+
+        # Template-specific layout rule: hard page break after Work experience.
+        # If either page exceeds the physical A4 height, WeasyPrint will spill to a 3rd page.
+        page1_height = height_details.get("page1_estimated_height_mm")
+        page2_height = height_details.get("page2_estimated_height_mm")
+        if page1_height and page1_height > PAGE_HEIGHT_MM:
+            errors.append(ValidationError(
+                field="_page1_overflow",
+                current_value=page1_height,
+                limit=PAGE_HEIGHT_MM,
+                excess=page1_height - PAGE_HEIGHT_MM,
+                message="Page 1 content exceeds A4 height (template forces a page break)",
+                suggestion="Reduce Education/Work Experience content (fewer entries/bullets or shorter text)."
+            ))
+        if page2_height and page2_height > PAGE_HEIGHT_MM:
+            errors.append(ValidationError(
+                field="_page2_overflow",
+                current_value=page2_height,
+                limit=PAGE_HEIGHT_MM,
+                excess=page2_height - PAGE_HEIGHT_MM,
+                message="Page 2 content exceeds A4 height (will spill to a 3rd page)",
+                suggestion="Reduce Further Experience / Languages / Skills / Interests / References content."
+            ))
         
         # Check page limit
         if estimated_pages > MAX_PAGES:
@@ -462,8 +485,9 @@ class CVValidator:
         
         # Profile section
         profile = cv_data.get("profile", "")
+        profile = profile.strip() if isinstance(profile, str) else ""
         profile_lines = max(1, len(profile) // 70)  # ~70 chars per line
-        profile_height = SECTION_TITLE_HEIGHT_MM + (profile_lines * 4.5)
+        profile_height = (SECTION_TITLE_HEIGHT_MM + (profile_lines * 4.5)) if profile else 0
         total += profile_height
         details["profile"] = profile_height
         
@@ -508,10 +532,24 @@ class CVValidator:
         interests_height = SECTION_TITLE_HEIGHT_MM + (interests_lines * 4.5)
         total += interests_height
         details["interests"] = interests_height
+
+        # References (always rendered by the template; defaults to a short sentence)
+        references = cv_data.get("references") or "Will be announced on request."
+        references_lines = max(1, len(str(references)) // 70)
+        references_height = SECTION_TITLE_HEIGHT_MM + (references_lines * 4.5)
+        total += references_height
+        details["references"] = references_height
         
         # Add margins
         total += MARGINS_HEIGHT_MM
         details["margins"] = MARGINS_HEIGHT_MM
+
+        # Template page split: Page 1 = header + education + work; Page 2 = rest.
+        # Include margins per page to catch spillover realistically.
+        page1 = header_height + edu_height + work_height + MARGINS_HEIGHT_MM
+        page2 = further_exp_height + lang_height + skill_height + interests_height + references_height + MARGINS_HEIGHT_MM
+        details["page1_estimated_height_mm"] = round(page1, 1)
+        details["page2_estimated_height_mm"] = round(page2, 1)
         
         return total
     
