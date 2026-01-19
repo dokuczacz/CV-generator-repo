@@ -491,5 +491,16 @@
         }
       }
     }
+  },
+  "securitySchemes": {
+    "FunctionKeyAuth": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "x-functions-key",
+      "description": "Azure Functions API Key for authentication"
+    }
   }
 }
+
+security:
+  - FunctionKeyAuth: []
