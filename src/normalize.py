@@ -11,6 +11,10 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
 
     normalized: Dict[str, Any] = dict(cv_data)
 
+    # Support alternate name field: 'name' -> 'full_name'
+    if "full_name" not in normalized and "name" in normalized:
+        normalized["full_name"] = normalized.get("name")
+
     # Interests: template expects a string.
     interests = normalized.get("interests")
     if isinstance(interests, list):
