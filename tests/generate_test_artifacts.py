@@ -25,7 +25,7 @@ def main():
     html_content = render_html(CV_DATA, inline_css=True)
     html_path = output_dir / "preview.html"
     html_path.write_text(html_content, encoding="utf-8")
-    print(f"✓ HTML saved to: {html_path}")
+    print(f"[OK] HTML saved to: {html_path}")
     
     # Generate PDF
     pdf_bytes = render_pdf(CV_DATA)
@@ -34,14 +34,14 @@ def main():
     ts_pdf_path = output_dir / f"preview.generated-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pdf"
     try:
         pdf_path.write_bytes(pdf_bytes)
-        print(f"✓ PDF saved to: {pdf_path}")
+        print(f"[OK] PDF saved to: {pdf_path}")
     except PermissionError:
         try:
             alt_pdf_path.write_bytes(pdf_bytes)
-            print(f"! preview.pdf is locked; wrote: {alt_pdf_path}")
+            print(f"[WARN] preview.pdf is locked; wrote: {alt_pdf_path}")
         except PermissionError:
             ts_pdf_path.write_bytes(pdf_bytes)
-            print(f"! preview.pdf and preview.generated.pdf are locked; wrote: {ts_pdf_path}")
+            print(f"[WARN] preview.pdf and preview.generated.pdf are locked; wrote: {ts_pdf_path}")
     
     # Also save reference in repo-root samples
     samples_dir = Path(__file__).parent.parent / "samples"
@@ -49,9 +49,9 @@ def main():
     
     ref_pdf = samples_dir / "reference_output.pdf"
     ref_pdf.write_bytes(pdf_bytes)
-    print(f"✓ Reference PDF saved to: {ref_pdf}")
+    print(f"[OK] Reference PDF saved to: {ref_pdf}")
     
-    print("\nTest artifacts generated successfully!")
+    print("\n[OK] Test artifacts generated successfully!")
     print(f"  HTML: {html_path.relative_to(Path(__file__).parent)}")
     if pdf_path.exists():
         print(f"  PDF:  {pdf_path.relative_to(Path(__file__).parent)}")
