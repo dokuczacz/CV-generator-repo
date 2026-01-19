@@ -179,13 +179,15 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
     
     # Generate PDF
     try:
-        pdf_bytes = render_pdf(cv_data)
+        debug_allow_pages = bool(req_body.get("debug_allow_pages"))
+        pdf_bytes = render_pdf(cv_data, enforce_two_pages=not debug_allow_pages)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         
         return func.HttpResponse(
             json.dumps({
                 "success": True,
                 "pdf_base64": pdf_base64,
+                "debug_allow_pages": debug_allow_pages,
                 "validation": {
                     "warnings": validation_result.warnings,
                     "estimated_pages": validation_result.estimated_pages,

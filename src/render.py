@@ -85,15 +85,16 @@ def _render_pdf_weasyprint(html: str) -> bytes:
     return HTML(string=html).write_pdf()
 
 
-def render_pdf(cv: Dict[str, Any]) -> bytes:
-    """Generate PDF from CV data using WeasyPrint"""
+def render_pdf(cv: Dict[str, Any], *, enforce_two_pages: bool = True) -> bytes:
+    """Generate PDF from CV data using WeasyPrint."""
     html = render_html(cv, inline_css=True)
     pdf = _render_pdf_weasyprint(html)
     
-    # DoD: PDF must have exactly 2 pages
-    pages = _count_pdf_pages(pdf)
-    if pages != 2:
-        raise RenderError(f"DoD violation: pages != 2 (got {pages}).")
+    if enforce_two_pages:
+        # DoD: PDF must have exactly 2 pages
+        pages = _count_pdf_pages(pdf)
+        if pages != 2:
+            raise RenderError(f"DoD violation: pages != 2 (got {pages}).")
     
     return pdf
 
