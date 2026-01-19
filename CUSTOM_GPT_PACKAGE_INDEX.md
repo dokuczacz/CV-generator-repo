@@ -182,7 +182,7 @@ Generate a CV for:
          ▼
 ┌──────────────────────────────┐
 │ PDF/HTML Rendering Engine    │
-│ - Chromium (PDF)             │
+│ - WeasyPrint (PDF)           │
 │ - Jinja2 (Templates)         │
 │ - python-docx (Photo extract)│
 │ - YAML (Config)              │
@@ -234,7 +234,7 @@ Generate a CV for:
 | Health check | <100ms | Instant response |
 | CV validation | 100-200ms | JSON validation only |
 | Photo extraction | 300-500ms | DOCX parsing |
-| PDF generation | 3-8 seconds | Chromium rendering |
+| PDF generation | 2-4 seconds | WeasyPrint rendering |
 | Full workflow | 8-15 seconds | End-to-end (validate + generate) |
 | Cold start | 15-30 seconds | First request after idle |
 | Subsequent requests | 3-8 seconds | Normal operation |

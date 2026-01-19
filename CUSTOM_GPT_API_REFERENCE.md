@@ -405,11 +405,11 @@ except requests.exceptions.HTTPError as e:
 - Validation: 150-300ms
 - Photo extraction: 200-400ms
 - HTML preview: 2-3 seconds
-- PDF generation: 4-8 seconds (includes Chromium cold start)
+- PDF generation: 2-4 seconds (WeasyPrint rendering)
 
 **Cold start vs warm start**:
-- First request after idle: 15-30 seconds
-- Subsequent requests: 3-8 seconds
+- First request after idle: 8-15 seconds
+- Subsequent requests: 2-4 seconds
 
 ---
 

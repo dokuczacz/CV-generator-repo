@@ -391,7 +391,7 @@ Invoke-RestMethod -Uri "https://cv-generator-6695.azurewebsites.net/api/validate
 
 ### Issue: "PDF generation timeout"
 **Solution**:
-- First request may take 20-30 seconds (Playwright cold start)
+- First request may take 5-10 seconds (cold start)
 - Retry once
 - Check logs: `az functionapp log tail --resource-group cv-generator-rg --name cv-generator-6695`
 

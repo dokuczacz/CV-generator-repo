@@ -9,6 +9,7 @@ import json
 import base64
 import io
 from pathlib import Path
+from dataclasses import asdict
 import sys
 
 # Add src to path
@@ -18,6 +19,18 @@ from src.render import render_pdf, render_html
 from src.validator import validate_cv
 from src.docx_photo import extract_first_photo_data_uri_from_docx_bytes
 from src.normalize import normalize_cv_data
+
+
+def _serialize_validation_result(validation_result):
+    """Convert ValidationResult to JSON-safe dict."""
+    return {
+        "is_valid": validation_result.is_valid,
+        "errors": [asdict(err) for err in validation_result.errors],
+        "warnings": validation_result.warnings,
+        "estimated_pages": validation_result.estimated_pages,
+        "estimated_height_mm": validation_result.estimated_height_mm,
+        "details": validation_result.details,
+    }
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -84,7 +97,7 @@ def generate_cv(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "error": "Validation failed",
-                "details": validation_result.errors
+                "validation": _serialize_validation_result(validation_result)
             }),
             mimetype="application/json",
             status_code=400
@@ -158,7 +171,7 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "error": "Validation failed",
-                "details": validation_result.errors
+                "validation": _serialize_validation_result(validation_result)
             }),
             mimetype="application/json",
             status_code=400
@@ -175,7 +188,8 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
                 "pdf_base64": pdf_base64,
                 "validation": {
                     "warnings": validation_result.warnings,
-                    "estimated_pages": validation_result.estimated_pages
+                    "estimated_pages": validation_result.estimated_pages,
+                    "errors": _serialize_validation_result(validation_result)["errors"]
                 }
             }),
             mimetype="application/json",

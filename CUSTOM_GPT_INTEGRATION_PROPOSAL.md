@@ -7,7 +7,7 @@
 | Feature | Custom GPT Spec (v4.2) | Backend Status | Action Required |
 |---------|------------------------|----------------|-----------------|
 | **Photo extraction** | ✅ Detect & extract from DOCX/PDF | ✅ Implemented (`src/docx_photo.py`) | Update GPT prompt to call backend |
-| **PDF generation** | ✅ Premium template rendering | ✅ Chromium/Playwright (`src/render.py`) | Expose via Actions |
+| **PDF generation** | ✅ Premium template rendering | ✅ WeasyPrint (`src/render.py`) | Expose via Actions |
 | **Multi-language** | ✅ EN/DE/PL support | ⚠️ Template only (no i18n) | Add language parameter + translations |
 | **Job offer alignment** | ✅ Parse & align skills | ❌ Not implemented | Add NLP matching endpoint |
 | **DOCX export** | ✅ Optional output | ❌ Only PDF currently | Add python-docx renderer |

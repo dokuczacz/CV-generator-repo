@@ -130,7 +130,7 @@ az functionapp log tail \
 ```
 
 **Common causes**:
-- Playwright binary not installed (cold start issue)
+- WeasyPrint font loading (cold start optimization)
 - Invalid CV JSON structure
 - Photo extraction failed
 
@@ -167,7 +167,7 @@ az functionapp log tail \
 | `/health` | <100ms | Instant |
 | `/validate-cv` | <200ms | JSON validation only |
 | `/extract-photo` | <500ms | DOCX parsing |
-| `/generate-cv-action` | 3-8 seconds | Chromium PDF rendering |
+| `/generate-cv-action` | 2-4 seconds | WeasyPrint PDF rendering |
 | Cold start | 15-30 seconds | First request after idle |
 
 ---
