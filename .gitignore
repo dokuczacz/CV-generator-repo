@@ -44,6 +44,7 @@ yarn.lock
 preview.pdf
 preview.html
 preview.generated*.pdf
+debug_output.html
 
 # Generated test artifacts
 tests/test-output/
