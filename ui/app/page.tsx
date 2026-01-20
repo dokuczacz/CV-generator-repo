@@ -10,6 +10,8 @@ interface Message {
   pdfBase64?: string;
 }
 
+const LAST_RESPONSE_ID_KEY = 'cvgen:last_response_id';
+
 export default function CVGenerator() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -20,6 +22,7 @@ export default function CVGenerator() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [cvFile, setCvFile] = useState<File | null>(null);
+  const [lastResponseId, setLastResponseId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -29,6 +32,15 @@ export default function CVGenerator() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(LAST_RESPONSE_ID_KEY);
+      if (stored) setLastResponseId(stored);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -40,6 +52,15 @@ export default function CVGenerator() {
         file.name.endsWith('.pdf')
       ) {
         setCvFile(file);
+
+        // New file = new conversation chain.
+        setLastResponseId(null);
+        try {
+          window.localStorage.removeItem(LAST_RESPONSE_ID_KEY);
+        } catch {
+          // ignore
+        }
+
         setMessages((prev) => [
           ...prev,
           {
@@ -107,6 +128,7 @@ export default function CVGenerator() {
       const payload = {
         message: userMessage,
         docx_base64,
+        previous_response_id: lastResponseId,
       };
       
       console.log('=== Frontend Request ===');
@@ -131,6 +153,15 @@ export default function CVGenerator() {
 
       const result = await response.json();
       console.log('Result:', { success: result.success, hasResponse: !!result.response, hasPDF: !!result.pdf_base64 });
+
+      if (result?.last_response_id) {
+        setLastResponseId(result.last_response_id);
+        try {
+          window.localStorage.setItem(LAST_RESPONSE_ID_KEY, result.last_response_id);
+        } catch {
+          // ignore
+        }
+      }
 
       if (result.success) {
         const assistantMsg: Message = {

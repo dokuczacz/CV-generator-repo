@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import mammoth from 'mammoth';
 import { CV_SYSTEM_PROMPT } from '@/lib/prompts';
 import { CV_TOOLS_RESPONSES } from '@/lib/tools';
 
@@ -7,11 +8,139 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const DEBUG_TOKENS = process.env.CV_DEBUG_TOKENS === '1';
+
+function getResponseUsageSummary(response: any): {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+} | null {
+  const usage = response?.usage;
+  if (!usage) return null;
+
+  // Responses API typically returns { input_tokens, output_tokens, total_tokens }.
+  const input_tokens = usage.input_tokens ?? usage.prompt_tokens;
+  const output_tokens = usage.output_tokens ?? usage.completion_tokens;
+  const total_tokens = usage.total_tokens ?? usage.total;
+
+  if (
+    typeof input_tokens !== 'number' &&
+    typeof output_tokens !== 'number' &&
+    typeof total_tokens !== 'number'
+  ) {
+    return null;
+  }
+
+  return { input_tokens, output_tokens, total_tokens };
+}
+
+function roughInputChars(input: any[]): number {
+  // Approximate size of the input we send to OpenAI.
+  // Avoid JSON.stringify of big objects; focus on known large string fields.
+  let total = 0;
+  for (const item of input || []) {
+    if (!item) continue;
+    if (typeof item.content === 'string') total += item.content.length;
+    if (Array.isArray(item.content)) {
+      for (const c of item.content) {
+        if (typeof c?.text === 'string') total += c.text.length;
+      }
+    }
+    if (typeof item.output === 'string') total += item.output.length;
+    if (typeof item.arguments === 'string') total += item.arguments.length;
+  }
+  return total;
+}
+
+function sanitizeToolOutputForModel(toolName: string, toolOutput: string): string {
+  // The model does not need base64 blobs (photo_data_uri/pdf_base64) and they can
+  // easily exceed the context window on the next iteration.
+  // Return a small, stable summary string for the model.
+
+  const maxLen = 4000;
+  const clamp = (s: string) => (s.length <= maxLen ? s : `${s.slice(0, maxLen)}\n...[truncated ${s.length - maxLen} chars]`);
+
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(toolOutput);
+  } catch {
+    return clamp(toolOutput);
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return clamp(toolOutput);
+  }
+
+  if (toolName === 'extract_photo') {
+    const hasPhoto = typeof parsed.photo_data_uri === 'string' && parsed.photo_data_uri.length > 0;
+    const err = typeof parsed.error === 'string' ? parsed.error : undefined;
+    return JSON.stringify({
+      ok: !err && hasPhoto,
+      has_photo: hasPhoto,
+      error: err,
+      // Never include photo_data_uri.
+    });
+  }
+
+  if (toolName === 'generate_cv_action') {
+    const pdfLen = typeof parsed.pdf_base64 === 'string' ? parsed.pdf_base64.length : 0;
+    const err = typeof parsed.error === 'string' ? parsed.error : undefined;
+    const success = parsed.success === true || pdfLen > 0;
+    return JSON.stringify({
+      ok: success && !err,
+      success,
+      pdf_generated: pdfLen > 0,
+      pdf_base64_length: pdfLen,
+      validation: parsed.validation,
+      error: err,
+      // Never include pdf_base64.
+    });
+  }
+
+  // Generic sanitizer: drop known huge fields and clamp long strings.
+  const out: Record<string, any> = { ...parsed };
+  for (const key of ['photo_data_uri', 'pdf_base64', 'docx_base64', 'source_docx_base64']) {
+    if (key in out) delete out[key];
+  }
+
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === 'string' && v.length > 1500) {
+      out[k] = `${v.slice(0, 1500)}...[truncated ${v.length - 1500} chars]`;
+    }
+  }
+
+  return clamp(JSON.stringify(out));
+}
+
 function extractFirstUrl(text: string): string | null {
   const m = text.match(/https?:\/\/[^\s)\]]+/i);
   if (!m) return null;
   // Trim common trailing punctuation
   return m[0].replace(/[),.]+$/, '');
+}
+
+function wantsSkipPhoto(text: string): boolean {
+  return /\b(skip photo|omit photo|without photo|no photo|bez zdj[eę]cia|pomi[nń] zdj[eę]cie)\b/i.test(
+    text
+  );
+}
+
+function detectLanguage(text: string): 'pl' | 'en' | 'de' {
+  if (/\b(de|deutsch|german)\b/i.test(text)) return 'de';
+  if (/\b(en|eng|english)\b/i.test(text)) return 'en';
+  if (/\b(pl|polski|polish)\b/i.test(text)) return 'pl';
+  return 'en';
+}
+
+async function extractDocxTextFromBase64(docxBase64: string): Promise<string | null> {
+  try {
+    const buffer = Buffer.from(docxBase64, 'base64');
+    const result = await mammoth.extractRawText({ buffer });
+    const text = (result?.value || '').replace(/\s+/g, ' ').trim();
+    return text || null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchJobPostingText(url: string): Promise<string | null> {
@@ -60,7 +189,16 @@ async function callAzureFunction(endpoint: string, body: any) {
   });
 
   if (!response.ok) {
-    throw new Error(`Azure Function error: ${response.statusText}`);
+    let details = '';
+    try {
+      details = await response.text();
+    } catch {
+      details = '';
+    }
+    const snippet = details ? details.slice(0, 800) : '';
+    throw new Error(
+      `Azure Function error: ${response.status} ${response.statusText}${snippet ? ` - ${snippet}` : ''}`
+    );
   }
 
   return response.json();
@@ -95,21 +233,66 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
   }
 }
 
-async function chatWithCV(userMessage: string, docx_base64?: string) {
+async function chatWithCV(
+  userMessage: string,
+  docx_base64?: string,
+  previousResponseId?: string
+) {
   console.log('\n🤖 Starting chatWithCV');
 
   const hasDocx = !!docx_base64;
+  const skipPhoto = wantsSkipPhoto(userMessage);
+  const language = detectLanguage(userMessage);
+  const isContinuation = !!previousResponseId;
   const url = extractFirstUrl(userMessage);
   const jobText = url ? await fetchJobPostingText(url) : null;
+
+  // If we are continuing via previous_response_id, do NOT re-send the full CV text.
+  // It should already be in the model context via the previous response chain.
+  const cvText =
+    !isContinuation && hasDocx && docx_base64 ? await extractDocxTextFromBase64(docx_base64) : null;
+  const boundedCvText = cvText ? cvText.slice(0, 12000) : null;
+  if (hasDocx) {
+    console.log('📄 Extracted DOCX text:', boundedCvText ? `${boundedCvText.length} chars (bounded)` : 'none');
+  }
+
+  // If feature flag enabled, ask backend to build a compact ContextPackV1
+  let contextPack: any = null;
+  const USE_CONTEXT_PACK = process.env.CV_USE_CONTEXT_PACK === '1';
+  if (USE_CONTEXT_PACK && hasDocx && boundedCvText) {
+    try {
+      console.log('🧩 CV_USE_CONTEXT_PACK enabled — requesting context pack from backend');
+      // Send minimal cv_data with extracted text as `profile` as a starting point.
+      const packResp = await callAzureFunction('/generate-context-pack', {
+        cv_data: { profile: boundedCvText },
+        job_posting_text: jobText,
+      });
+      contextPack = packResp;
+      console.log('🧩 Context pack received; keys:', Object.keys(contextPack || {}));
+    } catch (e) {
+      console.warn('⚠️ Failed to build context pack; falling back to injected CV text', e?.message || e);
+      contextPack = null;
+    }
+  }
 
   const userContent = [
     userMessage,
     hasDocx
       ? "[CV DOCX is already uploaded in this chat. Do NOT ask the user to re-send it or paste base64. If you need file bytes, call tools; backend will inject docx_base64 for you.]"
       : null,
-    jobText
+    skipPhoto ? '[User requested: omit photo in the final CV. Do not call extract_photo.]' : null,
+    // Prefer context pack when available; otherwise include bounded CV text as before.
+    contextPack
+      ? `\n\n[CONTEXT_PACK_JSON]\n${JSON.stringify(contextPack)}`
+      : boundedCvText
+      ? `\n\n[CV text extracted from uploaded DOCX (may be partial):]\n${boundedCvText}`
+      : null,
+    // If we are continuing and the user repeats the same URL, this can duplicate content.
+    // Keep it only when a URL is present in the current user message.
+    url && jobText
       ? `\n\n[Job posting text extracted from ${url} (may be partial):]\n${jobText}`
       : null,
+    `\n\n[Output language: ${language}.]`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -127,6 +310,13 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
     });
   }
 
+  // Ensure each request is self-contained (Responses API is stateless across HTTP requests).
+  inputList.push({
+    role: 'system',
+    content:
+      'Do not ask the user clarifying questions. In this single run, extract structured CV data from the provided CV text, call validate_cv, then call generate_cv_action to produce the PDF. If something is missing, leave it empty and proceed.',
+  });
+
   inputList.push({
     role: 'user',
     content: userContent,
@@ -135,7 +325,7 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
   console.log('📤 Calling OpenAI Responses API...');
   const apiStartTime = Date.now();
 
-  const buildRequest = (input: any[]) => {
+  const buildRequest = (input: any[], opts?: { usePrevious?: boolean }) => {
     // IMPORTANT:
     // - If using a stored prompt, let the prompt define model/params unless OPENAI_MODEL overrides.
     // - This avoids mismatches like a prompt that sets `reasoning.effort` while code forces `gpt-4o`.
@@ -144,11 +334,16 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
       input,
       tools: CV_TOOLS_RESPONSES,
       store: true,
+      truncation: opts?.usePrevious ? 'auto' : 'disabled',
       metadata: {
         app: 'cv-generator-ui',
         prompt_id: promptId || 'none',
       },
     };
+
+    if (opts?.usePrevious && previousResponseId) {
+      req.previous_response_id = previousResponseId;
+    }
 
     if (modelOverride) {
       req.model = modelOverride;
@@ -159,13 +354,24 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
     return req;
   };
 
-  let response = await openai.responses.create(buildRequest(inputList));
+  if (DEBUG_TOKENS) {
+    console.log('📏 Input items:', inputList.length, 'rough chars:', roughInputChars(inputList));
+  }
+  let response = await openai.responses.create(
+    buildRequest(inputList, { usePrevious: !!previousResponseId })
+  );
+
+  const firstUsage = getResponseUsageSummary(response);
+  if (firstUsage) {
+    console.log('🧮 OpenAI usage (initial):', firstUsage);
+  }
 
   console.log('✅ OpenAI response received in', Date.now() - apiStartTime, 'ms');
 
   let pdfBase64 = '';
   let iteration = 0;
   const maxIterations = 10;
+  let photoToolCalls = 0;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -182,6 +388,7 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
       return {
         response: text || 'Processing completed',
         pdf_base64: pdfBase64,
+        last_response_id: response?.id,
       };
     }
 
@@ -200,13 +407,46 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
 
       // Inject DOCX base64 if the model omitted it.
       if (toolName === 'extract_photo') {
+        photoToolCalls += 1;
+        if (skipPhoto) {
+          const modelToolOutput = JSON.stringify({ ok: false, skipped: true, reason: 'user requested omit photo' });
+          inputList.push({
+            type: 'function_call_output',
+            call_id: toolCall.call_id,
+            output: modelToolOutput,
+          });
+          continue;
+        }
+
+        // Prevent repeated photo extraction loops.
+        if (photoToolCalls > 1) {
+          const modelToolOutput = JSON.stringify({ ok: false, skipped: true, reason: 'photo already attempted' });
+          inputList.push({
+            type: 'function_call_output',
+            call_id: toolCall.call_id,
+            output: modelToolOutput,
+          });
+          continue;
+        }
         toolArgs.docx_base64 = toolArgs.docx_base64 || docx_base64;
       }
       if (toolName === 'generate_cv_action') {
         toolArgs.source_docx_base64 = toolArgs.source_docx_base64 || docx_base64;
+        toolArgs.language = toolArgs.language || language;
       }
 
       console.log(`  → Calling tool: ${toolName}`);
+      console.log(`  📋 Tool args keys:`, Object.keys(toolArgs));
+      if (toolName === 'generate_cv_action') {
+        console.log(`  📋 generate_cv_action args preview:`, {
+          has_full_name: !!toolArgs.full_name,
+          has_email: !!toolArgs.email,
+          has_work_experience: Array.isArray(toolArgs.work_experience),
+          work_exp_count: Array.isArray(toolArgs.work_experience) ? toolArgs.work_experience.length : 0,
+          has_education: Array.isArray(toolArgs.education),
+          language: toolArgs.language,
+        });
+      }
       const toolStartTime = Date.now();
       const toolOutput = await processToolCall(toolName, toolArgs);
       console.log(`  ✓ ${toolName} completed in ${Date.now() - toolStartTime}ms`);
@@ -222,32 +462,49 @@ async function chatWithCV(userMessage: string, docx_base64?: string) {
         // ignore
       }
 
+      const modelToolOutput = sanitizeToolOutputForModel(toolName, toolOutput);
+      if (DEBUG_TOKENS) {
+        console.log(
+          `  📦 Tool output sizes: raw=${toolOutput.length} chars, model=${modelToolOutput.length} chars`
+        );
+      }
+
       inputList.push({
         type: 'function_call_output',
         call_id: toolCall.call_id,
-        output: toolOutput,
+        output: modelToolOutput,
       });
     }
 
+    if (DEBUG_TOKENS) {
+      console.log('📏 Input items:', inputList.length, 'rough chars:', roughInputChars(inputList));
+    }
     response = await openai.responses.create(buildRequest(inputList));
+
+    const usage = getResponseUsageSummary(response);
+    if (usage) {
+      console.log(`🧮 OpenAI usage (iter ${iteration}):`, usage);
+    }
   }
 
   const finalText = (response as any).output_text || '';
   return {
     response: finalText || 'Processing completed',
     pdf_base64: pdfBase64,
+    last_response_id: response?.id,
   };
 }
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   try {
-    const { message, docx_base64 } = await request.json();
+    const { message, docx_base64, previous_response_id } = await request.json();
 
     console.log('\n=== Backend Process CV Request ===');
     console.log('Timestamp:', new Date().toISOString());
     console.log('Message:', message);
     console.log('Has docx_base64:', !!docx_base64);
+    console.log('previous_response_id:', previous_response_id || 'none');
     if (docx_base64) {
       console.log('Base64 length:', docx_base64.length);
       console.log('Base64 first 50 chars:', docx_base64.substring(0, 50));
@@ -259,7 +516,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('⏳ Calling chatWithCV...');
-    const result = await chatWithCV(message, docx_base64);
+    const result = await chatWithCV(message, docx_base64, previous_response_id);
     
     const duration = Date.now() - startTime;
     console.log('\n=== Backend Response ===');
@@ -275,6 +532,7 @@ export async function POST(request: NextRequest) {
       success: true,
       response: result.response,
       pdf_base64: result.pdf_base64,
+      last_response_id: result.last_response_id,
     });
   } catch (error) {
     const duration = Date.now() - startTime;
