@@ -353,9 +353,11 @@ def validate_cv_endpoint(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(
         json.dumps({
             "is_valid": validation_result.is_valid,
-            "errors": validation_result.errors,
+            "errors": [asdict(err) for err in validation_result.errors],
             "warnings": validation_result.warnings,
-            "estimated_pages": validation_result.estimated_pages
+            "estimated_pages": validation_result.estimated_pages,
+            "estimated_height_mm": validation_result.estimated_height_mm,
+            "details": validation_result.details,
         }),
         mimetype="application/json",
         status_code=200

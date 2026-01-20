@@ -76,7 +76,7 @@ paths:
                   errors:
                     type: array
                     items:
-                      type: string
+                      $ref: '#/components/schemas/ValidationError'
                     description: List of validation errors (blocking)
                   warnings:
                     type: array
@@ -86,6 +86,12 @@ paths:
                   estimated_pages:
                     type: number
                     description: Estimated page count (should be 2)
+                  estimated_height_mm:
+                    type: number
+                    description: Estimated total content height in mm
+                  details:
+                    type: object
+                    description: Implementation details used to compute estimates
 
   /generate-cv-action:
     post:
@@ -186,12 +192,15 @@ components:
         - full_name
         - email
         - address_lines
-        - profile
       properties:
         full_name:
           type: string
           example: John Doe
           maxLength: 100
+          description: Full name (header)
+        name:
+          type: string
+          description: Alias for full_name (accepted for compatibility)
         email:
           type: string
           format: email
@@ -220,6 +229,12 @@ components:
           items:
             $ref: '#/components/schemas/WorkExperience'
           maxItems: 5
+          description: Main work experience (page 1)
+        experience:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkExperience'
+          description: Alias for work_experience (accepted for compatibility)
         further_experience:
           type: array
           items:
@@ -283,26 +298,34 @@ components:
     WorkExperience:
       type: object
       required:
-        - title
-        - company
-        - dates
+        - date_range
+        - employer
       properties:
-        title:
+        date_range:
           type: string
-          example: Senior Backend Engineer
-          maxLength: 100
-        company:
+          example: 2021-03 – Present
+          maxLength: 25
+          description: 'Format examples: 2021-03 – 2025-04, 01/2021 – 04/2025, 2021-03 – Present'
+        employer:
           type: string
           example: TechCorp AG
-          maxLength: 100
+          maxLength: 60
         location:
           type: string
           example: 'Zurich, Switzerland'
+          maxLength: 50
+        title:
+          type: string
+          example: Senior Backend Engineer
           maxLength: 80
         dates:
           type: string
-          example: 03/2020 - Present
-          pattern: '^\d{2}/\d{4}\s*-\s*(Present|\d{2}/\d{4}|since)$'
+          deprecated: true
+          description: Deprecated (use date_range)
+        company:
+          type: string
+          deprecated: true
+          description: Deprecated (use employer)
         bullets:
           type: array
           items:
@@ -318,44 +341,75 @@ components:
     FurtherExperience:
       type: object
       required:
+        - date_range
         - title
-        - company
-        - dates
       properties:
+        date_range:
+          type: string
+          maxLength: 25
+          example: since 2023-01
         title:
           type: string
-          maxLength: 80
-        company:
+          maxLength: 90
+          example: Volunteer Mentor
+        organization:
           type: string
-          maxLength: 80
-        dates:
-          type: string
+          maxLength: 70
+          example: Open Source Community
+        bullets:
+          type: array
+          items:
+            type: string
+            maxLength: 80
+          maxItems: 3
+        details:
+          type: array
+          items:
+            type: string
+          description: Optional extra detail lines
         location:
           type: string
           maxLength: 60
+        dates:
+          type: string
+          deprecated: true
+          description: Deprecated (use date_range)
+        company:
+          type: string
+          deprecated: true
+          description: Deprecated (use organization)
 
     Education:
       type: object
       required:
-        - degree
+        - date_range
         - institution
-        - dates
       properties:
-        degree:
+        date_range:
           type: string
-          example: M.Sc. Computer Science
-          maxLength: 120
+          example: 2015 - 2017
+          maxLength: 20
         institution:
           type: string
           example: ETH Zurich
-          maxLength: 120
-        location:
+          maxLength: 70
+        title:
           type: string
-          example: 'Zurich, Switzerland'
-          maxLength: 80
+          example: M.Sc. Computer Science
+          maxLength: 90
+        details:
+          type: array
+          items:
+            type: string
+          description: Optional detail lines
+        degree:
+          type: string
+          deprecated: true
+          description: Deprecated (use title)
         dates:
           type: string
-          example: 2015 - 2017
+          deprecated: true
+          description: Deprecated (use date_range)
 
     Error:
       type: object
@@ -370,6 +424,22 @@ components:
               items:
                 type: string
           description: Detailed error information
+
+    ValidationError:
+      type: object
+      properties:
+        field:
+          type: string
+        current_value:
+          description: Current value (or length/count)
+        limit:
+          description: Limit value
+        excess:
+          description: Amount exceeding the limit
+        message:
+          type: string
+        suggestion:
+          type: string
 
   securitySchemes:
     FunctionKeyAuth:

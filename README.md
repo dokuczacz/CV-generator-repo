@@ -1,111 +1,238 @@
-# CV-generator
+# CV Generator
 
-Minimal, self-contained CV renderer for the 2-page template (HTML/CSS → PDF via Playwright).
+Professional CV generator with chat interface and OpenAI prompt integration. Transforms CVs into ATS-compliant, 2-page PDFs following Swiss/European standards.
 
-## Quick Start
+---
 
+## Architecture
+
+```
+┌─────────────────┐
+│   Next.js UI    │ ← User uploads CV, sends messages
+│  (localhost:3000)│
+└────────┬────────┘
+         │ POST /api/process-cv
+         ▼
+┌─────────────────┐
+│  OpenAI Prompt  │ ← Configured in dashboard with tools
+│  + Tool Calling │
+└────────┬────────┘
+         │ Tool calls (extract_photo, validate_cv, generate_cv_action)
+         ▼
+┌─────────────────┐
+│  Backend (Node) │ ← Routes tool calls to Azure Functions
+│  Tool Handler   │
+└────────┬────────┘
+         │ HTTP requests
+         ▼
+┌─────────────────┐
+│ Azure Functions │ ← Python backend (CV processing)
+│  (cv-generator) │
+└─────────────────┘
+```
+
+**Flow:**
+1. User uploads CV → UI converts to base64
+2. UI sends to `/api/process-cv` with message
+3. Backend calls OpenAI with `store: true` (uses prompt from dashboard)
+4. OpenAI decides which tools to call (extract_photo → validate_cv → generate_cv_action)
+5. Backend executes tool calls via Azure Functions
+6. Returns results to OpenAI, continues conversation
+7. Final PDF returned to user
+
+---
+
+## Project Structure
+
+```
+cv-generator-repo/
+├── ui/                          # Next.js frontend
+│   ├── app/
+│   │   ├── page.tsx            # Chat interface with file upload
+│   │   └── api/process-cv/     # API route (tool orchestration)
+│   ├── lib/
+│   │   ├── prompts.ts          # CV_SYSTEM_PROMPT
+│   │   └── tools.ts            # CV_TOOLS definitions (reference only)
+│   └── package.json
+│
+├── src/                         # Azure Functions (Python)
+│   ├── extract-photo/          # Extract photo from DOCX
+│   ├── validate-cv/            # Validate CV structure
+│   └── generate-cv-action/     # Generate 2-page PDF
+│
+├── templates/                   # CV template
+│   ├── CV_template_2pages_2025.spec.md
+│   └── html/                   # HTML/CSS for rendering
+│
+├── TOOLS_CONFIG.md             # Tools JSON for OpenAI dashboard
+├── SYSTEM_PROMPT.md            # System prompt for dashboard
+├── PROMPT_INSTRUCTIONS.md      # Knowledge file (upload to dashboard)
+└── README.md                   # This file
+```
+
+---
+
+## Setup
+
+### 1. Install Dependencies
+
+**Frontend (Next.js):**
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-python -m playwright install chromium
-npm install
-
-# Generate a quick local preview (uses samples/minimal_cv.json)
-python src/render.py
-
-# Start API server
-python api.py
-
-# Run deterministic template/DoD checks (Playwright)
-npm test
-```
-
-## Structure
-- `src/render.py` — Core rendering functions (HTML & PDF generation)
-- `templates/CV_template_2pages_2025.spec.md` — Layout specification (reference)
-- `templates/html/cv_template_2pages_2025.html` — Jinja2 HTML template
-- `templates/html/cv_template_2pages_2025.css` — Stylesheet
-- `api.py` — Flask API endpoint for GPT integration
-- `tests/` — Playwright visual regression tests
-- `samples/` — Reference outputs and test data
-- `wzory/CV_template_2pages_2025.docx` — Original DOCX template (reference)
-- `wzory/Lebenslauf_Mariusz_Horodecki_CH.docx` — Sample data source (reference)
-
-## Install
-```
-pip install -r requirements.txt
-python -m playwright install chromium
+cd ui
 npm install
 ```
 
-## Quick Test
-```
-python src/render.py
-```
-Generates `preview.html` and `preview.pdf` in the project root.
-
-## API Server (for GPT Integration)
-```
-python api.py
-```
-Runs Flask server on http://localhost:5000
-
-### Endpoints
-- `POST /generate-cv` — Generate PDF from JSON
-- `POST /generate-cv-action` — Generate PDF as JSON (`pdf_base64`), optional photo extraction from DOCX
-- `POST /preview-html` — Preview HTML from JSON
-- `GET /health` — Health check
-
-See [TESTING.md](TESTING.md) for detailed API usage and GPT integration.
-
-## Playwright Testing
-```
-npm test              # Run all tests
-npm run test:ui       # Interactive UI mode
-npm run show-report   # View test report
+**Backend (Azure Functions):**
+```bash
+pip install -r requirements.txt
 ```
 
-Generate test artifacts:
-```
-python tests/generate_test_artifacts.py
+### 2. Configure Environment
+
+Create `ui/.env.local`:
+```env
+OPENAI_API_KEY=sk-proj-...
+OPENAI_PROMPT_ID=pmpt_696f593c42148195ab41b3a3aaeaa55d029c2c08c553971f
+NEXT_PUBLIC_AZURE_FUNCTIONS_URL=https://cv-generator-6695.azurewebsites.net/api
+NEXT_PUBLIC_AZURE_FUNCTIONS_KEY=cPAXdShMyzLGDhiwjeo9weDy2OZQfLrGpn-nmphSNh_WAzFuCloICA==
 ```
 
-See [FINAL_PROCESS.md](FINAL_PROCESS.md) for the exact “how we got here” playbook and pitfalls to avoid when mirroring a new DOCX template.
+### 3. Configure OpenAI Prompt
 
-## API (Python)
-```python
-from src.render import render_html, render_pdf
-html = render_html(cv_dict)
-pdf_bytes = render_pdf(cv_dict)
+**a) Go to OpenAI Platform:**
+```
+https://platform.openai.com/assistants
 ```
 
-## CV JSON fields (suggested)
-```
-full_name: str
-address_lines: list[str]
-phone: str
-email: str
-birth_date: str
-nationality: str
-profile: str
-work_experience: [
-  { date_range, employer, location, title, bullets: [..] }
-]
-education: [
-  { date_range, institution, title, details: [..] }
-]
-languages: list[str]
-it_ai_skills: list[str]
-trainings: list[str]
-interests: str
-data_privacy: str
-references: str
+**b) Create/Edit Prompt:**
+- Paste content from `SYSTEM_PROMPT.md` into "System Prompt" field
+- Upload `PROMPT_INSTRUCTIONS.md` as knowledge file
+
+**c) Add Tools:**
+Open `TOOLS_CONFIG.md` and add 3 tools:
+1. Copy JSON for `extract_photo`
+2. Copy JSON for `validate_cv`
+3. Copy JSON for `generate_cv_action`
+
+Paste each into dashboard "Add Tool" → "Function"
+
+**d) Model Settings:**
+- Model: gpt-4 or higher
+- Temperature: 0.7 (optional, can be in dashboard)
+
+---
+
+## Development
+
+### Start Frontend
+```bash
+cd ui
+npm run dev
 ```
 
-## Definition of Done (DoD)
-- Custom GPT może uzupełnić wzorcowe CV, zwracając JSON z polami jak wyżej (teksty + listy).
-- Backend potrafi przyjąć JSON, wyrenderować HTML (szablon `cv_template_2pages_2025.html`) i PDF (Playwright/Chromium), bez edycji layoutu przez GPT.
-- PDF zapisuje się poprawnie i otwiera w czytnikach (prawidłowe linki mailto/URL).
-- Wygenerowany plik ma taki sam styl i układ jak wzór 2-stronicowy (CV_template_2pages_2025).
-- Źródłowy wzór DOCX (`templates/CV_template_2pages_2025.docx`) i przykładowe dane (`samples/Lebenslauf_Mariusz_Horodecki_CH.docx`) są w repo.
-- Render samodzielny: `python src/render.py` tworzy `preview.pdf` na danych przykładowych.
+Open: http://localhost:3000
+
+### Test Backend (Azure Functions)
+```bash
+curl -X POST https://cv-generator-6695.azurewebsites.net/api/validate-cv \
+  -H "x-functions-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"cv_data": {...}}'
+```
+
+---
+
+## Usage
+
+1. Open http://localhost:3000
+2. Upload CV file (DOCX or PDF) in sidebar
+3. Type message: "Generate CV in English" or "Dopasuj CV pod ofertę: [URL]"
+4. AI will:
+   - Extract photo (if DOCX)
+   - Analyze CV content
+   - Validate structure
+   - Generate 2-page PDF
+5. Download PDF from chat
+
+---
+
+## Tools
+
+### extract_photo
+**Purpose:** Extract photo from DOCX CV  
+**Input:** `{ docx_base64: string }`  
+**Output:** `{ photo_data_uri: string }`
+
+### validate_cv
+**Purpose:** Validate CV data before rendering  
+**Input:** CV data object (full_name, email, phone, etc.)  
+**Output:** `{ is_valid: boolean, errors: [], warnings: [] }`
+
+### generate_cv_action
+**Purpose:** Generate final 2-page PDF  
+**Input:** CV data + language (en/de/pl) + optional photo  
+**Output:** `{ success: true, pdf_base64: string }`
+
+---
+
+## Tech Stack
+
+- **Frontend:** Next.js 14, React 18, TypeScript, Tailwind CSS
+- **Backend:** Node.js (tool orchestration)
+- **Azure Functions:** Python 3.11, WeasyPrint (PDF rendering)
+- **AI:** OpenAI GPT-4+ with tool calling
+- **Deployment:** Vercel (frontend), Azure (backend)
+
+---
+
+## Configuration Files
+
+- `TOOLS_CONFIG.md` - Complete JSON for 3 tools (copy-paste to dashboard)
+- `SYSTEM_PROMPT.md` - System prompt text for dashboard
+- `PROMPT_INSTRUCTIONS.md` - Detailed workflow guide (upload as knowledge)
+- `ui/lib/prompts.ts` - CV_SYSTEM_PROMPT (can be used locally or in dashboard)
+- `ui/lib/tools.ts` - Tool definitions (reference, not used in code)
+
+---
+
+## Key Features
+
+✅ **Chat Interface** - Conversational CV generation  
+✅ **File Upload** - Drag & drop DOCX/PDF  
+✅ **Tool Calling** - AI orchestrates workflow  
+✅ **Photo Extraction** - Automatic from DOCX  
+✅ **Validation** - Pre-render checks  
+✅ **Multi-language** - EN/DE/PL support  
+✅ **ATS-Compliant** - Parseable by recruitment systems  
+✅ **2-Page Limit** - Professional Swiss template  
+
+---
+
+## Troubleshooting
+
+### Tools not showing in OpenAI
+- Refresh dashboard page
+- Re-import JSON from TOOLS_CONFIG.md
+- Verify JSON syntax (no trailing commas)
+
+### PDF not generating
+- Check Azure Functions logs
+- Verify API key in .env.local
+- Test validate-cv endpoint first
+
+### Photo not extracted
+- Ensure DOCX file has embedded image
+- Check base64 conversion in logs
+- Falls back to placeholder if extraction fails
+
+---
+
+## Archive
+
+Old documentation (Custom GPT, migration plans, old tests) moved to `archive/` folder.
+
+---
+
+## License
+
+Private project - Mariusz Sondej 2026

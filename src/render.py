@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Any, Dict
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -62,9 +65,30 @@ def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
     except Exception:
         from style_extractor import extract_styles_dict  # type: ignore
     docx_path = Path(__file__).resolve().parents[1] / "wzory" / "CV_template_2pages_2025.docx"
-    if not docx_path.exists():
-        raise RenderError(f"DOCX template not found at {docx_path}")
-    styles = extract_styles_dict(docx_path)
+    if docx_path.exists():
+        styles = extract_styles_dict(docx_path)
+    else:
+        # Keep tests/dev working even if the DOCX is not available in the repo.
+        # Values mirror the defaults in templates/html/cv_template_2pages_2025.css.
+        styles = {
+            "page_width_mm": 210.0,
+            "page_height_mm": 297.0,
+            "margin_top_mm": 20.0,
+            "margin_right_mm": 22.4,
+            "margin_bottom_mm": 20.0,
+            "margin_left_mm": 25.0,
+            "header_distance_mm": None,
+            "footer_distance_mm": None,
+            "font_family": "Arial",
+            "body_font_size_pt": 11.0,
+            "title_font_size_pt": 11.0,
+            "name_font_size_pt": 16.0,
+            "title_color_hex": "#0000ff",
+            "body_color_hex": "#000000",
+            "section_gap_mm": 6.0,
+            "bullet_hanging_mm": 5.0,
+            "page_break_after_section": "Work experience",
+        }
 
     context = dict(cv)
     if inline_css:
@@ -77,12 +101,59 @@ def _render_pdf_weasyprint(html: str) -> bytes:
     """Render PDF using WeasyPrint (pure Python, no browser needed)"""
     try:
         from weasyprint import HTML
-    except ImportError as exc:
+        return HTML(string=html).write_pdf()
+    except Exception as exc:
+        # WeasyPrint on Windows often requires external native deps (GTK/Pango).
+        # IMPORTANT: Do NOT silently switch renderers in production. Playwright fallback is opt-in.
+        allow_playwright = (
+            os.getenv("CV_PDF_RENDERER", "").strip().lower() == "playwright"
+            or os.getenv("CV_ALLOW_PLAYWRIGHT_FALLBACK", "").strip() in {"1", "true", "yes"}
+        )
+        if os.name == "nt" and allow_playwright:
+            return _render_pdf_playwright(html)
         raise RenderError(
-            "WeasyPrint not installed. Install with `pip install weasyprint`."
+            "WeasyPrint failed to render PDF. Install WeasyPrint native dependencies, or set CV_PDF_RENDERER=playwright for local Windows testing."
         ) from exc
-    
-    return HTML(string=html).write_pdf()
+
+
+def _render_pdf_playwright(html: str) -> bytes:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "print_pdf_playwright.mjs"
+    if not script_path.exists():
+        raise RenderError(f"Missing Playwright PDF helper script at {script_path}")
+
+    with tempfile.TemporaryDirectory(prefix="cvgen-") as tmp:
+        tmp_dir = Path(tmp)
+        html_path = tmp_dir / "input.html"
+        pdf_path = tmp_dir / "output.pdf"
+        html_path.write_text(html, encoding="utf-8")
+
+        try:
+            subprocess.run(
+                [
+                    "node",
+                    str(script_path),
+                    str(html_path),
+                    str(pdf_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RenderError(
+                "Node.js not found on PATH. Install Node.js to enable Playwright PDF fallback on Windows."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            raise RenderError(
+                "Playwright PDF rendering failed. Ensure Playwright browsers are installed (try `npx playwright install chromium`)."
+                + (f"\n\nDetails:\n{stderr}" if stderr else "")
+            ) from exc
+
+        if not pdf_path.exists():
+            raise RenderError("Playwright PDF rendering did not produce an output PDF")
+
+        return pdf_path.read_bytes()
 
 
 def render_pdf(cv: Dict[str, Any], *, enforce_two_pages: bool = True) -> bytes:

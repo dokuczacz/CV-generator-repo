@@ -5,6 +5,7 @@ Uses CV data for Aline Keller (Phase 1: exact replica of original DOCX)
 """
 
 import sys
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,9 @@ def main():
     output_dir.mkdir(exist_ok=True)
     
     print("Generating test artifacts for Aline Keller CV...")
+
+    # Windows-friendly PDF rendering for local tests only.
+    os.environ.setdefault("CV_PDF_RENDERER", "playwright")
     
     # Generate HTML
     html_content = render_html(CV_DATA, inline_css=True)

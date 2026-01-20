@@ -120,7 +120,7 @@ test.describe('CV Template Visual Regression', () => {
     await page.goto(`file://${TEST_HTML}`);
     await page.waitForLoadState('networkidle');
     
-    const pageElement = page.locator('.page');
+    const pageElement = page.locator('.page').first();
     
     // Check padding: 20mm 22.4mm 20mm 25mm
     const padding = await pageElement.evaluate(el => {

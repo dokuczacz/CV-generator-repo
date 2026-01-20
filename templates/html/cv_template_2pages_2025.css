@@ -37,7 +37,8 @@ body {
 }
 
 /* Force a page break between the two explicit pages */
-.page + .page {
+.page-break {
+  height: 0;
   break-before: page;
   page-break-before: always;
 }

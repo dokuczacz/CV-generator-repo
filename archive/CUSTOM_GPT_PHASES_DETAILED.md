@@ -70,10 +70,10 @@ print(f"✓ Photo extracted" if photo_base64 else "✗ No photo found")
   "profile": "2-3 sentence professional summary highlighting key strengths and years of experience",
   "work_experience": [
     {
-      "title": "Senior Developer",
-      "company": "Company Name",
+      "date_range": "2021-03 – Present",
+      "employer": "Company Name",
       "location": "City, Country",
-      "dates": "MM/YYYY - MM/YYYY",
+      "title": "Senior Developer",
       "bullets": [
         "Reduced API latency by 40% through database optimization",
         "Led team of 5 engineers on microservices migration",
@@ -83,10 +83,10 @@ print(f"✓ Photo extracted" if photo_base64 else "✗ No photo found")
   ],
   "education": [
     {
-      "degree": "Bachelor in Computer Science",
+      "date_range": "2012 - 2016",
       "institution": "University Name",
-      "location": "City, Country",
-      "dates": "2012 - 2016"
+      "title": "Bachelor in Computer Science",
+      "details": ["Thesis: ... (optional)"]
     }
   ],
   "languages": [
@@ -100,7 +100,7 @@ print(f"✓ Photo extracted" if photo_base64 else "✗ No photo found")
 ```
 
 **Optional fields**:
-- `further_experience`: Additional roles (if > 5 main roles)
+- `further_experience`: Page-2 section, list of objects like `{date_range, title, organization?, bullets?, details?}`
 - `certifications`: Professional certifications
 - `publications`: Academic papers
 

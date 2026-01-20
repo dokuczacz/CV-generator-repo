@@ -17,8 +17,8 @@ openapi_cv_actions.yaml
 ├─ x-functions-key security scheme
 └─ Ready to import to Custom GPT Actions
 
-custom_gpt_instructions.md
-├─ 455 lines of system instructions
+CUSTOM_GPT_INSTRUCTIONS_COMPACT.md
+├─ System instructions (compact)
 ├─ 6-phase deterministic pipeline
 ├─ Backend API reference
 └─ Ready to paste to Custom GPT Instructions
@@ -64,7 +64,7 @@ Technical Reference:
 
 ### Step 1: Prepare Files (1 minute)
 - ✅ Have `openapi_cv_actions.yaml` ready
-- ✅ Have `custom_gpt_instructions.md` ready
+- ✅ Have `CUSTOM_GPT_INSTRUCTIONS_COMPACT.md` ready
 - ✅ Have function key: `cPAXdShMyzLGDhiwjeo9weDy2OZQfLrGpn-nmphSNh_WAzFuCloICA==`
 
 ### Step 2: Create Custom GPT (2 minutes)
@@ -76,7 +76,7 @@ Technical Reference:
 ### Step 3: Add Instructions (2 minutes)
 1. Go to: Configure tab
 2. Find: Instructions field
-3. Paste: Entire content of `custom_gpt_instructions.md`
+3. Paste: Entire content of `CUSTOM_GPT_INSTRUCTIONS_COMPACT.md`
 
 ### Step 4: Import Actions (2 minutes)
 1. Scroll to: Actions section

@@ -266,7 +266,7 @@ Extract photo if provided → DOCX parsing
     ↓
 Normalize data → Handle GPT variations
     ↓
-Render PDF → Chromium (2 pages, fixed layout)
+Render PDF → WeasyPrint (2 pages, fixed layout)
     ↓
 Encode as base64 → JSON-serializable
     ↓

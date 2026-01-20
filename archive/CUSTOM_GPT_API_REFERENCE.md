@@ -323,28 +323,27 @@ if response.status_code == 200:
 
 ## CV Data Schema
 
-**Required fields**:
+**Recommended fields** (backend will validate strict limits for 2 pages):
 ```json
 {
   "full_name": "string (1-100 chars)",
   "email": "string (valid email)",
   "address_lines": ["City, Country"],
-  "profile": "string (100-400 chars)",
   "work_experience": [
     {
-      "title": "string",
-      "company": "string",
+      "date_range": "YYYY-MM – Present",
+      "employer": "string",
       "location": "City, Country",
-      "dates": "MM/YYYY - MM/YYYY",
+      "title": "string",
       "bullets": ["string", "string", "string"]
     }
   ],
   "education": [
     {
-      "degree": "string",
+      "date_range": "YYYY - YYYY",
       "institution": "string",
-      "location": "City, Country",
-      "dates": "YYYY"
+      "title": "string",
+      "details": ["string"]
     }
   ],
   "languages": [
@@ -360,7 +359,16 @@ if response.status_code == 200:
 ```json
 {
   "phone": "+41 76 123 4567",
-  "further_experience": [...],
+  "photo_url": "data:image/png;base64,...",
+  "further_experience": [
+    {
+      "date_range": "since 2023-01",
+      "title": "Volunteer Mentor",
+      "organization": "Open Source Community",
+      "bullets": ["..."],
+      "details": ["..."]
+    }
+  ],
   "certifications": ["string"],
   "publications": ["string"]
 }
@@ -434,7 +442,7 @@ Currently no rate limiting. Subject to change.
 
 ## Authentication
 
-Currently public (no authentication required). Future versions will require `x-functions-key` header.
+Use `x-functions-key` header (Azure Functions API key) when calling the production endpoint.
 
 ---
 

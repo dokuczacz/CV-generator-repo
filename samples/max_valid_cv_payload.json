@@ -1,0 +1,128 @@
+{
+  "cv_data": {
+    "full_name": "Jan Kowalski",
+    "name": "Jan Kowalski",
+    "email": "jan.kowalski@example.com",
+    "phone": "+48 123 456 789",
+    "address_lines": [
+      "Warsaw, Poland",
+      "EU Citizen"
+    ],
+    "work_experience": [
+      {
+        "date_range": "2021-03 – Present",
+        "employer": "Tech Solutions",
+        "location": "Warsaw",
+        "title": "Senior Software Engineer",
+        "bullets": [
+          "Led Python services on Azure (APIs, auth, monitoring)",
+          "Improved CI/CD, reduced deployment time by ~60%",
+          "Mentored 5 juniors; reviews, onboarding, best practices"
+        ]
+      },
+      {
+        "date_range": "2018-06 – 2021-02",
+        "employer": "Digital Innovations",
+        "location": "Warsaw",
+        "title": "Full Stack Developer",
+        "bullets": [
+          "Built React + Node.js features for B2B web platform",
+          "Optimized Postgres queries, cut slow pages ~40%",
+          "Designed REST APIs and integrated payments/search"
+        ]
+      },
+      {
+        "date_range": "2016-09 – 2018-05",
+        "employer": "StartupHub",
+        "location": "Warsaw",
+        "title": "Junior Developer",
+        "bullets": [
+          "Implemented REST endpoints and responsive UI",
+          "Wrote tests and fixed production bugs",
+          "Worked in Agile sprints with code reviews"
+        ]
+      }
+    ],
+    "experience": [
+      {
+        "date_range": "2021-03 – Present",
+        "employer": "Tech Solutions",
+        "location": "Warsaw",
+        "title": "Senior Software Engineer",
+        "bullets": [
+          "Led Python services on Azure (APIs, auth, monitoring)",
+          "Improved CI/CD, reduced deployment time by ~60%",
+          "Mentored 5 juniors; reviews, onboarding, best practices"
+        ]
+      },
+      {
+        "date_range": "2018-06 – 2021-02",
+        "employer": "Digital Innovations",
+        "location": "Warsaw",
+        "title": "Full Stack Developer",
+        "bullets": [
+          "Built React + Node.js features for B2B web platform",
+          "Optimized Postgres queries, cut slow pages ~40%",
+          "Designed REST APIs and integrated payments/search"
+        ]
+      },
+      {
+        "date_range": "2016-09 – 2018-05",
+        "employer": "StartupHub",
+        "location": "Warsaw",
+        "title": "Junior Developer",
+        "bullets": [
+          "Implemented REST endpoints and responsive UI",
+          "Wrote tests and fixed production bugs",
+          "Worked in Agile sprints with code reviews"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "date_range": "2014–2016",
+        "institution": "Warsaw University of Technology",
+        "title": "MSc Computer Science",
+        "details": [
+          "Specialization: Software Engineering"
+        ]
+      },
+      {
+        "date_range": "2010–2014",
+        "institution": "Warsaw University of Technology",
+        "title": "BSc Computer Science",
+        "details": [
+          "Capstone: Distributed systems project"
+        ]
+      }
+    ],
+    "further_experience": [
+      {
+        "date_range": "2023–Present",
+        "title": "Volunteer Mentor",
+        "organization": "Local Dev Community",
+        "bullets": [
+          "Mentor newcomers: CVs, interviews, career planning",
+          "Run monthly workshops on Git, testing, clean code"
+        ]
+      }
+    ],
+    "languages": [
+      "Polish (Native)",
+      "English (C1)",
+      "German (B1)"
+    ],
+    "it_ai_skills": [
+      "Python",
+      "JavaScript",
+      "React",
+      "Node.js",
+      "Azure",
+      "Docker",
+      "PostgreSQL",
+      "CI/CD"
+    ],
+    "interests": "Cloud engineering, developer tooling, open source",
+    "references": "Available upon request."
+  }
+}
