@@ -38,8 +38,8 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 ```json
 {
   "name": "validate_cv",
-  "description": "Validates the extracted CV data structure and content against strict 2-page constraints. Call this BEFORE generate_cv_action to ensure the data will produce a valid PDF.",
-  "strict": true,
+  "description": "Validates the extracted CV data structure and content against strict 2-page constraints. Call this BEFORE generate_cv_action to ensure the data will produce a valid PDF. The cv_data parameter MUST contain the complete CV JSON object you extracted from the user's CV.",
+  "strict": false,
   "parameters": {
     "type": "object",
     "properties": {
@@ -162,8 +162,8 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 ```json
 {
   "name": "generate_cv_action",
-  "description": "Generates a professional PDF CV from the extracted and validated CV data. IMPORTANT: You MUST include the complete cv_data object (with all fields: full_name, email, phone, work_experience, education, etc.) that you showed to the user in Stage 2. Do NOT call this function with an empty cv_data or only language/source_docx_base64.",
-  "strict": true,
+  "description": "Generates a professional PDF CV from the extracted and validated CV data. CRITICAL REQUIREMENT: The cv_data parameter MUST contain the complete CV JSON object (with full_name, email, phone, profile, work_experience, education, languages, etc.) that you presented to the user in Stage 2. Do NOT call this function with only source_docx_base64 and language parameters - you MUST include the cv_data field with all CV content.",
+  "strict": false,
   "parameters": {
     "type": "object",
     "properties": {
