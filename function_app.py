@@ -71,8 +71,12 @@ def generate_cv(req: func.HttpRequest) -> func.HttpResponse:
     
     cv_data = req_body.get("cv_data")
     if not cv_data:
+        # Graceful fallback: guide the model to include cv_data in next call
         return func.HttpResponse(
-            json.dumps({"error": "Missing cv_data in request"}),
+            json.dumps({
+                "error": "cv_data is required",
+                "guidance": "The cv_data parameter is missing or empty. You MUST include the complete CV JSON object (with full_name, email, phone, work_experience, education, etc.) that you presented to the user."
+            }),
             mimetype="application/json",
             status_code=400
         )
@@ -146,8 +150,20 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
     
     cv_data = req_body.get("cv_data")
     if not cv_data:
+        # Graceful fallback: guide the model to include cv_data in next call
         return func.HttpResponse(
-            json.dumps({"error": "Missing cv_data in request"}),
+            json.dumps({
+                "error": "cv_data is required",
+                "guidance": "The cv_data parameter is missing or empty. You MUST include the complete CV JSON object (with full_name, email, phone, work_experience, education, etc.) that you presented to the user. Do not call this tool with only source_docx_base64 and language.",
+                "required_fields": ["full_name", "email", "phone", "work_experience", "education"],
+                "example_structure": {
+                    "full_name": "John Doe",
+                    "email": "john@example.com",
+                    "phone": "+1234567890",
+                    "work_experience": [{"date_range": "2020-2024", "employer": "Acme Corp", "title": "Engineer", "bullets": ["Achievement 1"]}],
+                    "education": [{"date_range": "2016-2020", "institution": "University", "title": "Degree", "details": []}]
+                }
+            }),
             mimetype="application/json",
             status_code=400
         )
