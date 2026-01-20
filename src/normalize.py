@@ -22,6 +22,58 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
         elif "employment" in normalized:
             normalized["work_experience"] = normalized.get("employment")
 
+    # Transform work_experience from GPT schema to template schema
+    work_exp = normalized.get("work_experience", [])
+    if work_exp and isinstance(work_exp, list):
+        transformed_work = []
+        for job in work_exp:
+            if not isinstance(job, dict):
+                continue
+            
+            # Build date_range from start_date/end_date
+            start = job.get("start_date", "")
+            end = job.get("end_date", "")
+            date_range = f"{start} – {end}" if start or end else ""
+            
+            # Transform to template schema
+            transformed = {
+                "date_range": date_range,
+                "employer": job.get("company", ""),
+                "location": job.get("location", ""),
+                "title": job.get("position", ""),
+                "bullets": [job.get("description", "")] if job.get("description") else []
+            }
+            transformed_work.append(transformed)
+        normalized["work_experience"] = transformed_work
+
+    # Transform education from GPT schema to template schema
+    education = normalized.get("education", [])
+    if education and isinstance(education, list):
+        transformed_edu = []
+        for edu in education:
+            if not isinstance(edu, dict):
+                continue
+            
+            # Build date_range from start_date/end_date
+            start = edu.get("start_date", "")
+            end = edu.get("end_date", "")
+            date_range = f"{start} – {end}" if start or end else ""
+            
+            # Build title from degree + field
+            degree = edu.get("degree", "")
+            field = edu.get("field", "")
+            title = f"{degree} {field}".strip() if degree or field else ""
+            
+            # Transform to template schema
+            transformed = {
+                "date_range": date_range,
+                "institution": edu.get("school", ""),
+                "title": title,
+                "details": []
+            }
+            transformed_edu.append(transformed)
+        normalized["education"] = transformed_edu
+
     # Ensure further_experience exists (can be empty)
     if "further_experience" not in normalized:
         normalized["further_experience"] = []

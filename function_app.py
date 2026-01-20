@@ -151,6 +151,14 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400
         )
     
+    # Log incoming data structure for debugging
+    logging.info(f"CV data keys received: {list(cv_data.keys()) if isinstance(cv_data, dict) else 'not a dict'}")
+    if isinstance(cv_data, dict):
+        logging.info(f"Has full_name: {bool(cv_data.get('full_name'))}")
+        logging.info(f"Has email: {bool(cv_data.get('email'))}")
+        logging.info(f"Work experience count: {len(cv_data.get('work_experience', []))}")
+        logging.info(f"Education count: {len(cv_data.get('education', []))}")
+    
     # Normalize CV data
     cv_data = normalize_cv_data(cv_data)
     
