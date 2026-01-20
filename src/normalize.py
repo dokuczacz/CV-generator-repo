@@ -22,57 +22,79 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
         elif "employment" in normalized:
             normalized["work_experience"] = normalized.get("employment")
 
-    # Transform work_experience from GPT schema to template schema
+    # Transform work_experience from GPT schema to template schema.
+    # IMPORTANT: Do not overwrite already-template-shaped entries.
     work_exp = normalized.get("work_experience", [])
     if work_exp and isinstance(work_exp, list):
-        transformed_work = []
+        needs_transform = False
         for job in work_exp:
             if not isinstance(job, dict):
                 continue
-            
-            # Build date_range from start_date/end_date
-            start = job.get("start_date", "")
-            end = job.get("end_date", "")
-            date_range = f"{start} – {end}" if start or end else ""
-            
-            # Transform to template schema
-            transformed = {
-                "date_range": date_range,
-                "employer": job.get("company", ""),
-                "location": job.get("location", ""),
-                "title": job.get("position", ""),
-                "bullets": [job.get("description", "")] if job.get("description") else []
-            }
-            transformed_work.append(transformed)
-        normalized["work_experience"] = transformed_work
+            # Heuristic: GPT schema uses company/position/start_date/end_date; template uses employer/title/date_range.
+            if any(k in job for k in ("company", "position", "start_date", "end_date", "description")):
+                needs_transform = True
+                break
 
-    # Transform education from GPT schema to template schema
+        if needs_transform:
+            transformed_work = []
+            for job in work_exp:
+                if not isinstance(job, dict):
+                    continue
+
+                start = job.get("start_date", "")
+                end = job.get("end_date", "")
+                date_range = f"{start} – {end}" if start or end else ""
+
+                bullets = []
+                if job.get("bullets") and isinstance(job.get("bullets"), list):
+                    bullets = job.get("bullets")
+                elif job.get("description"):
+                    bullets = [job.get("description")]
+
+                transformed = {
+                    "date_range": date_range,
+                    "employer": job.get("company", ""),
+                    "location": job.get("location", ""),
+                    "title": job.get("position", ""),
+                    "bullets": bullets,
+                }
+                transformed_work.append(transformed)
+            normalized["work_experience"] = transformed_work
+
+    # Transform education from GPT schema to template schema.
+    # IMPORTANT: Do not overwrite already-template-shaped entries.
     education = normalized.get("education", [])
     if education and isinstance(education, list):
-        transformed_edu = []
+        needs_transform = False
         for edu in education:
             if not isinstance(edu, dict):
                 continue
-            
-            # Build date_range from start_date/end_date
-            start = edu.get("start_date", "")
-            end = edu.get("end_date", "")
-            date_range = f"{start} – {end}" if start or end else ""
-            
-            # Build title from degree + field
-            degree = edu.get("degree", "")
-            field = edu.get("field", "")
-            title = f"{degree} {field}".strip() if degree or field else ""
-            
-            # Transform to template schema
-            transformed = {
-                "date_range": date_range,
-                "institution": edu.get("school", ""),
-                "title": title,
-                "details": []
-            }
-            transformed_edu.append(transformed)
-        normalized["education"] = transformed_edu
+            if any(k in edu for k in ("school", "degree", "field", "start_date", "end_date")):
+                needs_transform = True
+                break
+
+        if needs_transform:
+            transformed_edu = []
+            for edu in education:
+                if not isinstance(edu, dict):
+                    continue
+
+                start = edu.get("start_date", "")
+                end = edu.get("end_date", "")
+                date_range = f"{start} – {end}" if start or end else ""
+
+                degree = edu.get("degree", "")
+                field = edu.get("field", "")
+                title = f"{degree} {field}".strip() if degree or field else ""
+
+                transformed = {
+                    "date_range": date_range,
+                    "institution": edu.get("school", ""),
+                    "title": title,
+                    "details": [],
+                }
+                transformed_edu.append(transformed)
+            normalized["education"] = transformed_edu
 
     # Ensure further_experience exists (can be empty)
     if "further_experience" not in normalized:

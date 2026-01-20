@@ -68,6 +68,15 @@ wzory/.~lock.*
 .env.local
 .env.*.local
 
+# Azure Functions local settings (never commit)
+local.settings.json
+
+# Local transient artifacts
+tmp/
+context_pack.json
+validate.json
+gen.json
+
 # Logs
 *.log
 logs/

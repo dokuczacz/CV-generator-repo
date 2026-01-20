@@ -256,13 +256,35 @@ async function chatWithCV(
     console.log('📄 Extracted DOCX text:', boundedCvText ? `${boundedCvText.length} chars (bounded)` : 'none');
   }
 
+  // If feature flag enabled, ask backend to build a compact ContextPackV1
+  let contextPack: any = null;
+  const USE_CONTEXT_PACK = process.env.CV_USE_CONTEXT_PACK === '1';
+  if (USE_CONTEXT_PACK && hasDocx && boundedCvText) {
+    try {
+      console.log('🧩 CV_USE_CONTEXT_PACK enabled — requesting context pack from backend');
+      // Send minimal cv_data with extracted text as `profile` as a starting point.
+      const packResp = await callAzureFunction('/generate-context-pack', {
+        cv_data: { profile: boundedCvText },
+        job_posting_text: jobText,
+      });
+      contextPack = packResp;
+      console.log('🧩 Context pack received; keys:', Object.keys(contextPack || {}));
+    } catch (e) {
+      console.warn('⚠️ Failed to build context pack; falling back to injected CV text', e?.message || e);
+      contextPack = null;
+    }
+  }
+
   const userContent = [
     userMessage,
     hasDocx
       ? "[CV DOCX is already uploaded in this chat. Do NOT ask the user to re-send it or paste base64. If you need file bytes, call tools; backend will inject docx_base64 for you.]"
       : null,
     skipPhoto ? '[User requested: omit photo in the final CV. Do not call extract_photo.]' : null,
-    boundedCvText
+    // Prefer context pack when available; otherwise include bounded CV text as before.
+    contextPack
+      ? `\n\n[CONTEXT_PACK_JSON]\n${JSON.stringify(contextPack)}`
+      : boundedCvText
       ? `\n\n[CV text extracted from uploaded DOCX (may be partial):]\n${boundedCvText}`
       : null,
     // If we are continuing and the user repeats the same URL, this can duplicate content.

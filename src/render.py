@@ -58,14 +58,15 @@ def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
         css_path = TEMPLATES_DIR / CSS_NAME
         css = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
 
-    # Extract styles from the DOCX template (fail fast if unavailable)
-    # Support both `python src/render.py` and imports like `from src.render import ...`.
-    try:
-        from src.style_extractor import extract_styles_dict  # type: ignore
-    except Exception:
-        from style_extractor import extract_styles_dict  # type: ignore
     docx_path = Path(__file__).resolve().parents[1] / "wzory" / "CV_template_2pages_2025.docx"
     if docx_path.exists():
+        # Extract styles from the DOCX template.
+        # Import lazily so environments without `lxml` can still render using defaults.
+        # Support both `python src/render.py` and imports like `from src.render import ...`.
+        try:
+            from src.style_extractor import extract_styles_dict  # type: ignore
+        except Exception:
+            from style_extractor import extract_styles_dict  # type: ignore
         styles = extract_styles_dict(docx_path)
     else:
         # Keep tests/dev working even if the DOCX is not available in the repo.

@@ -19,6 +19,7 @@ from src.render import render_pdf, render_html
 from src.validator import validate_cv
 from src.docx_photo import extract_first_photo_data_uri_from_docx_bytes
 from src.normalize import normalize_cv_data
+from src.context_pack import build_context_pack
 
 
 def _serialize_validation_result(validation_result):
@@ -370,3 +371,54 @@ def validate_cv_endpoint(req: func.HttpRequest) -> func.HttpResponse:
         mimetype="application/json",
         status_code=200
     )
+
+
+@app.route(route="generate-context-pack", methods=["POST"])
+def generate_context_pack(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Build ContextPackV1 from provided CV JSON and optional job posting text.
+    Returns JSON with the context pack.
+    """
+    logging.info('Generate Context Pack requested')
+
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400,
+        )
+
+    cv_data = req_body.get("cv_data")
+    if not cv_data:
+        return func.HttpResponse(
+            json.dumps({"error": "Missing cv_data in request"}),
+            mimetype="application/json",
+            status_code=400,
+        )
+
+    job_posting_text = req_body.get("job_posting_text")
+    user_preferences = req_body.get("user_preferences") or {}
+    max_pack_chars = req_body.get("max_pack_chars") or 12000
+
+    try:
+        pack = build_context_pack(
+            cv_data=cv_data,
+            job_posting_text=job_posting_text,
+            user_preferences=user_preferences,
+            max_pack_chars=max_pack_chars,
+        )
+
+        return func.HttpResponse(
+            json.dumps(pack, ensure_ascii=False),
+            mimetype="application/json",
+            status_code=200,
+        )
+    except Exception as e:
+        logging.error(f"Context pack generation failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Context pack generation failed", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500,
+        )
