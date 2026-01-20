@@ -162,6 +162,7 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
     
     # Normalize CV data
     cv_data = normalize_cv_data(cv_data)
+    logging.info(f"After normalization - work_experience: {len(cv_data.get('work_experience', []))}, education: {len(cv_data.get('education', []))}")
     
     # Extract photo if provided
     source_docx_b64 = req_body.get("source_docx_base64")
@@ -189,7 +190,9 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
     # Generate PDF
     try:
         debug_allow_pages = bool(req_body.get("debug_allow_pages"))
+        logging.info(f"About to render PDF with cv_data: work_exp={len(cv_data.get('work_experience', []))}, edu={len(cv_data.get('education', []))}, name={bool(cv_data.get('full_name'))}")
         pdf_bytes = render_pdf(cv_data, enforce_two_pages=not debug_allow_pages)
+        logging.info(f"PDF rendered successfully: {len(pdf_bytes)} bytes")
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         
         return func.HttpResponse(
@@ -208,6 +211,7 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception as e:
         logging.error(f"PDF generation failed: {e}")
+        logging.error(f"CV data at failure: {json.dumps({k: (len(v) if isinstance(v, (list, dict)) else v) for k,v in cv_data.items()})}")
         return func.HttpResponse(
             json.dumps({
                 "error": "PDF generation failed",

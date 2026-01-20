@@ -168,6 +168,22 @@ def render_pdf(cv: Dict[str, Any], *, enforce_two_pages: bool = True) -> bytes:
         if pages != 2:
             raise RenderError(f"DoD violation: pages != 2 (got {pages}).")
     
+    # Sanity check: PDF should have meaningful content
+    # Minimum expected size: ~40KB for empty template, ~100KB+ for filled template
+    pdf_size = len(pdf)
+    if pdf_size < 30000:  # Less than 30KB suggests template not populated
+        # This is likely a photo-only PDF with minimal content
+        work_exp_count = len(cv.get('work_experience', []))
+        education_count = len(cv.get('education', []))
+        full_name = cv.get('full_name', '').strip()
+        
+        if not full_name or (work_exp_count == 0 and education_count == 0):
+            raise RenderError(
+                f"Template not populated with content. CV keys: full_name={bool(full_name)}, "
+                f"work_experience={work_exp_count}, education={education_count}, "
+                f"PDF size={pdf_size} bytes (expected >30KB for filled template)."
+            )
+    
     return pdf
 
 
