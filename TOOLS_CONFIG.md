@@ -38,62 +38,118 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 ```json
 {
   "name": "validate_cv",
-  "description": "Validates extracted CV data structure and content",
-  "strict": false,
+  "description": "Validates the extracted CV data structure and content against strict 2-page constraints. Call this BEFORE generate_cv_action to ensure the data will produce a valid PDF.",
+  "strict": true,
   "parameters": {
     "type": "object",
     "properties": {
-      "full_name": {
-        "type": "string",
-        "description": "Full name"
-      },
-      "email": {
-        "type": "string",
-        "description": "Email address"
-      },
-      "phone": {
-        "type": "string",
-        "description": "Phone number"
-      },
-      "address_lines": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Address lines"
-      },
-      "profile": {
-        "type": "string",
-        "description": "Professional profile/summary"
-      },
-      "work_experience": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "company": { "type": "string" },
-            "position": { "type": "string" },
-            "start_date": { "type": "string" },
-            "end_date": { "type": "string" },
-            "description": { "type": "string" }
-          }
+      "cv_data": {
+        "type": "object",
+        "description": "REQUIRED: The complete canonical CV JSON object you extracted from the user's CV. Must include all required fields with actual data.",
+        "properties": {
+          "full_name": { "type": "string" },
+          "email": { "type": "string" },
+          "phone": { "type": "string" },
+          "address_lines": { "type": "array", "items": { "type": "string" } },
+          "profile": { "type": "string" },
+          "nationality": { "type": "string" },
+          "work_experience": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_range": { "type": "string" },
+                "employer": { "type": "string" },
+                "location": { "type": "string" },
+                "title": { "type": "string" },
+                "bullets": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["date_range", "employer", "title", "bullets"],
+              "additionalProperties": false
+            }
+          },
+          "education": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_range": { "type": "string" },
+                "institution": { "type": "string" },
+                "title": { "type": "string" },
+                "details": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["date_range", "institution", "title", "details"],
+              "additionalProperties": false
+            }
+          },
+          "further_experience": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_range": { "type": "string" },
+                "organization": { "type": "string" },
+                "title": { "type": "string" },
+                "bullets": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["date_range", "organization", "title", "bullets"],
+              "additionalProperties": false
+            }
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "language": { "type": "string" },
+                    "level": { "type": "string" }
+                  },
+                  "required": ["language", "level"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "it_ai_skills": { "type": "array", "items": { "type": "string" } },
+          "certifications": { "type": "array", "items": { "type": "string" } },
+          "trainings": { "type": "array", "items": { "type": "string" } },
+          "publications": { "type": "array", "items": { "type": "string" } },
+          "interests": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          },
+          "references": { "type": "array", "items": { "type": "string" } },
+          "data_privacy": { "type": "string" },
+          "photo_url": { "type": "string" },
+          "language": { "type": "string", "enum": ["pl", "en", "de"] }
         },
-        "description": "Work experience"
-      },
-      "education": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "school": { "type": "string" },
-            "degree": { "type": "string" },
-            "field": { "type": "string" },
-            "start_date": { "type": "string" },
-            "end_date": { "type": "string" }
-          }
-        },
-        "description": "Education"
+        "required": [
+          "full_name",
+          "email",
+          "phone",
+          "address_lines",
+          "profile",
+          "work_experience",
+          "education",
+          "languages",
+          "it_ai_skills",
+          "certifications",
+          "interests",
+          "publications",
+          "further_experience",
+          "references",
+          "photo_url",
+          "language"
+        ],
+        "additionalProperties": false
       }
     },
-    "required": ["full_name", "email", "phone", "address_lines", "profile"],
+    "required": ["cv_data"],
     "additionalProperties": false
   }
 }
@@ -106,71 +162,121 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 ```json
 {
   "name": "generate_cv_action",
-  "description": "Generates a professional PDF CV from extracted and validated data",
-  "strict": false,
+  "description": "Generates a professional PDF CV from the extracted and validated CV data. IMPORTANT: You MUST include the complete cv_data object (with all fields: full_name, email, phone, work_experience, education, etc.) that you showed to the user in Stage 2. Do NOT call this function with an empty cv_data or only language/source_docx_base64.",
+  "strict": true,
   "parameters": {
     "type": "object",
     "properties": {
-      "full_name": {
-        "type": "string",
-        "description": "Full name"
-      },
-      "email": {
-        "type": "string",
-        "description": "Email address"
-      },
-      "phone": {
-        "type": "string",
-        "description": "Phone number"
-      },
-      "address_lines": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Address lines"
-      },
-      "profile": {
-        "type": "string",
-        "description": "Professional profile/summary"
-      },
-      "work_experience": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "company": { "type": "string" },
-            "position": { "type": "string" },
-            "start_date": { "type": "string" },
-            "end_date": { "type": "string" },
-            "description": { "type": "string" }
-          }
+      "cv_data": {
+        "type": "object",
+        "description": "REQUIRED: The complete, confirmed canonical CV JSON object (same object you presented to the user in Stage 2). Must include all fields with actual data.",
+        "properties": {
+          "full_name": { "type": "string", "description": "Full name of the candidate" },
+          "email": { "type": "string", "description": "Email address" },
+          "phone": { "type": "string", "description": "Phone number" },
+          "address_lines": { "type": "array", "items": { "type": "string" }, "description": "Address lines" },
+          "profile": { "type": "string", "description": "Professional summary/profile (100-400 chars)" },
+          "nationality": { "type": "string", "description": "Nationality" },
+          "work_experience": {
+            "type": "array",
+            "description": "Work experience entries",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_range": { "type": "string" },
+                "employer": { "type": "string" },
+                "location": { "type": "string" },
+                "title": { "type": "string" },
+                "bullets": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["date_range", "employer", "title", "bullets"],
+              "additionalProperties": false
+            }
+          },
+          "education": {
+            "type": "array",
+            "description": "Education entries",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_range": { "type": "string" },
+                "institution": { "type": "string" },
+                "title": { "type": "string" },
+                "details": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["date_range", "institution", "title"],
+              "additionalProperties": false
+            }
+          },
+          "further_experience": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_range": { "type": "string" },
+                "organization": { "type": "string" },
+                "title": { "type": "string" },
+                "bullets": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["date_range", "organization", "title"],
+              "additionalProperties": false
+            }
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "language": { "type": "string" },
+                    "level": { "type": "string" }
+                  },
+                  "required": ["language", "level"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "it_ai_skills": { "type": "array", "items": { "type": "string" } },
+          "certifications": { "type": "array", "items": { "type": "string" } },
+          "trainings": { "type": "array", "items": { "type": "string" } },
+          "publications": { "type": "array", "items": { "type": "string" } },
+          "interests": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          },
+          "references": { "type": "array", "items": { "type": "string" } },
+          "data_privacy": { "type": "string" },
+          "photo_url": { "type": "string" },
+          "language": { "type": "string", "enum": ["pl", "en", "de"] }
         },
-        "description": "Work experience"
-      },
-      "education": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "school": { "type": "string" },
-            "degree": { "type": "string" },
-            "field": { "type": "string" },
-            "start_date": { "type": "string" },
-            "end_date": { "type": "string" }
-          }
-        },
-        "description": "Education"
-      },
-      "language": {
-        "type": "string",
-        "enum": ["pl", "en", "de"],
-        "description": "Output language for CV"
+        "required": [
+          "full_name",
+          "email",
+          "phone",
+          "address_lines",
+          "profile",
+          "work_experience",
+          "education",
+          "languages",
+          "language"
+        ],
+        "additionalProperties": true
       },
       "source_docx_base64": {
         "type": "string",
-        "description": "Optional: Base64 encoded DOCX file for photo extraction"
+        "description": "Optional: Base64 encoded DOCX file for photo extraction (server will fill photo_url if possible)"
+      },
+      "debug_allow_pages": {
+        "type": "boolean",
+        "description": "Optional: Set true to allow PDFs that are not exactly 2 pages (debug only)"
       }
     },
-    "required": ["full_name", "email", "phone", "address_lines", "profile", "language"],
+    "required": ["cv_data"],
     "additionalProperties": false
   }
 }
@@ -226,9 +332,9 @@ Be thorough and maintain accuracy. Process step by step using the tools.
 Backend receives tool calls from OpenAI and routes them:
 
 ```
-extract_photo → POST /api/extract-photo
-validate_cv → POST /api/validate-cv  
-generate_cv_action → POST /api/generate-cv-action
+extract_photo → POST /api/extract-photo (expects `{ docx_base64 }`)
+validate_cv → POST /api/validate-cv (expects `{ cv_data: { ... } }`)
+generate_cv_action → POST /api/generate-cv-action (expects `{ cv_data: { ... }, source_docx_base64?, debug_allow_pages? }`)
 ```
 
 All requests include `x-functions-key` header with the Azure Functions key.

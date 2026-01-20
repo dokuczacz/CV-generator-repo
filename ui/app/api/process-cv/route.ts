@@ -214,14 +214,33 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
         return JSON.stringify(photoResult);
 
       case 'validate_cv':
-        const validateResult = await callAzureFunction('/validate-cv', toolInput);
+        // Accept both legacy shapes (toolInput is CV object) and the canonical wrapper shape.
+        const validatePayload = toolInput?.cv_data ? toolInput : { cv_data: toolInput };
+        const validateResult = await callAzureFunction('/validate-cv', validatePayload);
         return JSON.stringify(validateResult);
 
       case 'generate_cv_action':
+        // Accept both legacy shapes (toolInput is CV object) and the canonical wrapper shape.
+        const cvData = toolInput?.cv_data ? toolInput.cv_data : toolInput;
+        
+        // 🔍 DIAGNOSTIC: Log what model actually sent
+        console.log('🔍 generate_cv_action called');
+        console.log('🔍 toolInput keys:', Object.keys(toolInput || {}));
+        console.log('🔍 has cv_data wrapper:', !!toolInput?.cv_data);
+        console.log('🔍 cvData keys:', Object.keys(cvData || {}));
+        console.log('🔍 cvData.personal:', cvData?.personal ? 'present' : 'MISSING');
+        console.log('🔍 cvData.experience:', Array.isArray(cvData?.experience) ? `${cvData.experience.length} items` : 'MISSING/NOT_ARRAY');
+        console.log('🔍 cvData.work_experience:', Array.isArray(cvData?.work_experience) ? `${cvData.work_experience.length} items` : 'MISSING/NOT_ARRAY');
+        console.log('🔍 cvData.education:', Array.isArray(cvData?.education) ? `${cvData.education.length} items` : 'MISSING/NOT_ARRAY');
+        console.log('🔍 cvData type:', typeof cvData);
+        if (typeof cvData === 'string') {
+          console.log('⚠️ WARNING: cvData is string, should be object! Length:', cvData.length);
+        }
+        
         const generateResult = await callAzureFunction('/generate-cv-action', {
-          cv_data: toolInput,
-          language: toolInput.language || 'pl',
-          source_docx_base64: toolInput.source_docx_base64,
+          cv_data: cvData,
+          source_docx_base64: toolInput?.source_docx_base64,
+          debug_allow_pages: toolInput?.debug_allow_pages,
         });
         return JSON.stringify(generateResult);
 
@@ -270,7 +289,8 @@ async function chatWithCV(
       contextPack = packResp;
       console.log('🧩 Context pack received; keys:', Object.keys(contextPack || {}));
     } catch (e) {
-      console.warn('⚠️ Failed to build context pack; falling back to injected CV text', e?.message || e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('⚠️ Failed to build context pack; falling back to injected CV text', msg);
       contextPack = null;
     }
   }
