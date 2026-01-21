@@ -1,5 +1,7 @@
 # CV Generator - Tools Configuration for OpenAI Dashboard
 
+**UPDATED:** Session-based workflow (Phases 1-3 implemented)
+
 Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 
 **Instrukcja:** 
@@ -10,12 +12,173 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 
 ---
 
-## Tool 1: extract_photo
+## **NEW SESSION-BASED WORKFLOW** (Recommended)
+
+### Tool 1: extract_and_store_cv
+
+```json
+{
+  "name": "extract_and_store_cv",
+  "description": "Extracts CV data from uploaded DOCX and stores it in a session. This is the FIRST tool to call when user uploads a CV. Returns a session_id that you use for all subsequent operations. The CV data persists in the session, so you don't need to maintain it in conversation context.",
+  "strict": false,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "docx_base64": {
+        "type": "string",
+        "description": "Base64 encoded DOCX file content"
+      },
+      "language": {
+        "type": "string",
+        "enum": ["en", "de", "pl"],
+        "description": "CV language (default: en)"
+      },
+      "extract_photo": {
+        "type": "boolean",
+        "description": "Whether to extract photo from DOCX (default: true)"
+      }
+    },
+    "required": ["docx_base64"],
+    "additionalProperties": false
+  }
+}
+```
+
+### Tool 2: get_cv_session
+
+```json
+{
+  "name": "get_cv_session",
+  "description": "Retrieves CV data from session. Use this to check what CV data is currently stored, or to show user a summary of extracted data.",
+  "strict": false,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Session identifier returned by extract_and_store_cv"
+      }
+    },
+    "required": ["session_id"],
+    "additionalProperties": false
+  }
+}
+```
+
+### Tool 3: update_cv_field
+
+```json
+{
+  "name": "update_cv_field",
+  "description": "Updates a specific field in the CV session. Use this when user wants to edit CV data (e.g., fix a name, add work experience, change language level). Supports nested paths like 'work_experience[0].employer'.",
+  "strict": false,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Session identifier"
+      },
+      "field_path": {
+        "type": "string",
+        "description": "Dot-notation path to field (e.g., 'full_name', 'work_experience[0].employer', 'languages[2].proficiency')"
+      },
+      "value": {
+        "description": "New value for the field (can be string, number, array, object)"
+      }
+    },
+    "required": ["session_id", "field_path", "value"],
+    "additionalProperties": false
+  }
+}
+```
+
+### Tool 4: generate_cv_from_session
+
+```json
+{
+  "name": "generate_cv_from_session",
+  "description": "Generates PDF from CV data stored in session. This replaces the old generate_cv_action tool. Call this after user confirms the CV data is correct.",
+  "strict": false,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Session identifier"
+      },
+      "language": {
+        "type": "string",
+        "enum": ["en", "de", "pl"],
+        "description": "Optional: Override language from session metadata"
+      }
+    },
+    "required": ["session_id"],
+    "additionalProperties": false
+  }
+}
+```
+
+### Tool 5: process_cv_orchestrated (Phase 3 - Single-Call Workflow)
+
+```json
+{
+  "name": "process_cv_orchestrated",
+  "description": "Orchestrated CV processing - handles extraction, edits, validation, and PDF generation in a single call. Use this for streamlined workflow when you have all the information ready.",
+  "strict": false,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Optional: Use existing session instead of creating new one"
+      },
+      "docx_base64": {
+        "type": "string",
+        "description": "Required if no session_id: Base64 encoded DOCX file"
+      },
+      "language": {
+        "type": "string",
+        "enum": ["en", "de", "pl"],
+        "description": "CV language (default: en)"
+      },
+      "edits": {
+        "type": "array",
+        "description": "Optional: Array of field edits to apply before generating PDF",
+        "items": {
+          "type": "object",
+          "properties": {
+            "field_path": {
+              "type": "string",
+              "description": "Field path (e.g., 'full_name', 'work_experience[0].title')"
+            },
+            "value": {
+              "description": "New value for the field"
+            }
+          },
+          "required": ["field_path", "value"]
+        }
+      },
+      "extract_photo": {
+        "type": "boolean",
+        "description": "Whether to extract photo (default: true)"
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+---
+
+## **LEGACY WORKFLOW** (Still supported, but session-based is preferred)
+
+### Tool 1: extract_photo
 
 ```json
 {
   "name": "extract_photo",
-  "description": "Extracts photo from a DOCX CV file",
+  "description": "Extracts the first embedded photo from a DOCX CV file. You MUST copy the returned photo_data_uri into cv_data.photo_url (data URI) before calling validate_cv or generate_cv_action.",
   "strict": false,
   "parameters": {
     "type": "object",
@@ -33,12 +196,12 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 
 ---
 
-## Tool 2: validate_cv
+### Legacy Tool 2: validate_cv
 
 ```json
 {
   "name": "validate_cv",
-  "description": "Validates the extracted CV data structure and content against strict 2-page constraints. Call this BEFORE generate_cv_action to ensure the data will produce a valid PDF. The cv_data parameter MUST contain the complete CV JSON object you extracted from the user's CV.",
+  "description": "[LEGACY] Validates CV data structure. Use generate_cv_from_session instead for new workflows.",
   "strict": false,
   "parameters": {
     "type": "object",
@@ -157,12 +320,12 @@ Dodaj te tools do prompta w OpenAI: https://platform.openai.com/assistants
 
 ---
 
-## Tool 3: generate_cv_action
+### Legacy Tool 3: generate_cv_action
 
 ```json
 {
   "name": "generate_cv_action",
-  "description": "Generates a professional PDF CV from the extracted and validated CV data. CRITICAL REQUIREMENT: The cv_data parameter MUST contain the complete CV JSON object (with full_name, email, phone, profile, work_experience, education, languages, etc.) that you presented to the user in Stage 2. Do NOT call this function with only source_docx_base64 and language parameters - you MUST include the cv_data field with all CV content.",
+  "description": "[LEGACY] Generates PDF from CV data. CRITICAL: cv_data must use canonical schema (full_name, email, phone, work_experience, education). DO NOT send wrong keys like personal_info or employment_history. Use generate_cv_from_session for new workflows.",
   "strict": false,
   "parameters": {
     "type": "object",
@@ -329,13 +492,50 @@ Be thorough and maintain accuracy. Process step by step using the tools.
 
 ## Backend Implementation
 
-Backend receives tool calls from OpenAI and routes them:
-
+**NEW Session-Based Endpoints:**
 ```
-extract_photo → POST /api/extract-photo (expects `{ docx_base64 }`)
-validate_cv → POST /api/validate-cv (expects `{ cv_data: { ... } }`)
-generate_cv_action → POST /api/generate-cv-action (expects `{ cv_data: { ... }, source_docx_base64?, debug_allow_pages? }`)
+extract_and_store_cv → POST /api/extract-and-store-cv
+get_cv_session → GET/POST /api/get-cv-session
+update_cv_field → POST /api/update-cv-field
+generate_cv_from_session → POST /api/generate-cv-from-session
+process_cv_orchestrated → POST /api/process-cv-orchestrated
 ```
 
-All requests include `x-functions-key` header with the Azure Functions key.
-Backend returns results which OpenAI uses to continue the conversation.
+**Legacy Endpoints (still supported):**
+```
+extract_photo → POST /api/extract-photo
+validate_cv → POST /api/validate-cv
+generate_cv_action → POST /api/generate-cv-action
+```
+
+**Phase 1 Improvements:** Backend now validates schema and rejects wrong keys (personal_info, employment_history, etc.) with helpful error messages showing canonical schema.
+
+**Phase 2 Benefits:** CV data stored in Azure Table Storage; agent maintains only session_id instead of full CV JSON in conversation context.
+
+**Phase 3 Capabilities:** Single orchestrated endpoint handles full workflow (extract → edit → validate → generate) in one call.
+
+All requests include authentication headers. Backend returns results which OpenAI uses to continue the conversation.
+
+---
+
+## Recommended Workflow
+
+### New Session-Based Workflow (Preferred)
+
+1. **User uploads CV:**
+   - Call `extract_and_store_cv(docx_base64, language="en")`
+   - Get back `session_id` and summary
+   - Show user what was extracted
+
+2. **User makes edits:**
+   - Call `update_cv_field(session_id, field_path="full_name", value="John Doe")`
+   - Repeat for each field user wants to change
+
+3. **User confirms:**
+   - Call `generate_cv_from_session(session_id)`
+   - Return PDF to user
+
+**Alternative: One-Shot Workflow (Phase 3)**
+
+- Call `process_cv_orchestrated(docx_base64, edits=[...], language="en")`
+- Get back PDF immediately with session_id for future edits

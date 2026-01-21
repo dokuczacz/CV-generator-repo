@@ -20,6 +20,13 @@ from src.validator import validate_cv
 from src.docx_photo import extract_first_photo_data_uri_from_docx_bytes
 from src.normalize import normalize_cv_data
 from src.context_pack import build_context_pack
+from src.schema_validator import (
+    detect_schema_mismatch, 
+    validate_canonical_schema,
+    build_schema_error_response,
+    log_schema_debug_info
+)
+from src.session_store import CVSessionStore
 
 
 def _serialize_validation_result(validation_result):
@@ -168,19 +175,26 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400
         )
     
+    # === PHASE 1: SCHEMA VALIDATION ===
+    # Detect if agent sent wrong schema (personal_info, employment_history, etc.)
+    log_schema_debug_info(cv_data, context="generate-cv-action")
+    wrong_keys = detect_schema_mismatch(cv_data)
+    
+    if wrong_keys:
+        logging.error(f"Schema validation failed: wrong keys {wrong_keys}")
+        return func.HttpResponse(
+            json.dumps(build_schema_error_response(cv_data)),
+            mimetype="application/json",
+            status_code=400
+        )
+    
     # Unwrap double-wrapped cv_data (agent sometimes sends {"cv_data": {"cv_data": {...}}})
     if isinstance(cv_data, dict) and 'cv_data' in cv_data and not cv_data.get('full_name'):
         # If cv_data contains a nested cv_data key and lacks expected fields, unwrap it
         logging.info("Detected double-wrapped cv_data, unwrapping...")
         cv_data = cv_data['cv_data']
-    
-    # Log incoming data structure for debugging
-    logging.info(f"CV data keys received: {list(cv_data.keys()) if isinstance(cv_data, dict) else 'not a dict'}")
-    if isinstance(cv_data, dict):
-        logging.info(f"Has full_name: {bool(cv_data.get('full_name'))}")
-        logging.info(f"Has email: {bool(cv_data.get('email'))}")
-        logging.info(f"Work experience count: {len(cv_data.get('work_experience', []))}")
-        logging.info(f"Education count: {len(cv_data.get('education', []))}")
+        # Re-validate after unwrapping
+        log_schema_debug_info(cv_data, context="after unwrap")
     
     # Pre-render validation: check for minimum viable content
     viability_issues = []
@@ -472,4 +486,613 @@ def generate_context_pack(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": "Context pack generation failed", "details": str(e)}),
             mimetype="application/json",
             status_code=500,
+        )
+
+
+# ============================================================================
+# PHASE 2: SESSION-BASED ENDPOINTS
+# ============================================================================
+
+@app.route(route="extract-and-store-cv", methods=["POST"])
+def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Extract CV data from DOCX and store in session
+    
+    This endpoint:
+    1. Receives DOCX file (base64)
+    2. Extracts CV data (using GPT or parsing logic - placeholder for now)
+    3. Stores in Azure Table Storage
+    4. Returns session_id for subsequent operations
+    
+    Request:
+        {
+            "docx_base64": "base64-encoded DOCX",
+            "language": "en|de|pl",
+            "extract_photo": true|false
+        }
+    
+    Response:
+        {
+            "session_id": "uuid",
+            "cv_data_summary": {...},
+            "photo_extracted": true|false,
+            "expires_at": "ISO timestamp"
+        }
+    """
+    logging.info('Extract and store CV requested')
+    
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    docx_base64 = req_body.get("docx_base64")
+    if not docx_base64:
+        return func.HttpResponse(
+            json.dumps({"error": "docx_base64 is required"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    language = req_body.get("language", "en")
+    extract_photo_flag = req_body.get("extract_photo", True)
+    
+    try:
+        docx_bytes = base64.b64decode(docx_base64)
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid base64 encoding", "details": str(e)}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Extract photo if requested
+    photo_url = None
+    if extract_photo_flag:
+        try:
+            photo_url = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
+            logging.info(f"Photo extraction: {'success' if photo_url else 'no photo found'}")
+        except Exception as e:
+            logging.warning(f"Photo extraction failed: {e}")
+    
+    # TODO: Implement CV data extraction from DOCX
+    # For now, create minimal structure that agent must fill in
+    cv_data = {
+        "full_name": "",
+        "email": "",
+        "phone": "",
+        "photo_url": photo_url or "",
+        "work_experience": [],
+        "education": [],
+        "skills": [],
+        "languages": [],
+        "certifications": [],
+        "summary": "",
+        "language": language
+    }
+    
+    # Store in session
+    try:
+        store = CVSessionStore()
+        metadata = {
+            "language": language,
+            "source_file": "uploaded.docx",
+            "extraction_method": "placeholder"  # Will be "gpt" or "parser" when implemented
+        }
+        session_id = store.create_session(cv_data, metadata)
+    except Exception as e:
+        logging.error(f"Session creation failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to create session", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
+    
+    # Build summary for response (avoid sending full data back)
+    summary = {
+        "has_photo": bool(photo_url),
+        "fields_populated": [k for k, v in cv_data.items() if v],
+        "fields_empty": [k for k, v in cv_data.items() if not v]
+    }
+    
+    session = store.get_session(session_id)
+    
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "session_id": session_id,
+            "cv_data_summary": summary,
+            "photo_extracted": bool(photo_url),
+            "expires_at": session["expires_at"]
+        }),
+        mimetype="application/json",
+        status_code=200
+    )
+
+
+@app.route(route="get-cv-session", methods=["GET", "POST"])
+def get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Retrieve CV data from session
+    
+    Request (POST):
+        {"session_id": "uuid"}
+    
+    Or GET with query param:
+        ?session_id=uuid
+    
+    Response:
+        {
+            "cv_data": {...},
+            "metadata": {...},
+            "session_id": "uuid",
+            "expires_at": "ISO timestamp"
+        }
+    """
+    logging.info('Get CV session requested')
+    
+    if req.method == "GET":
+        session_id = req.params.get("session_id")
+    else:
+        try:
+            req_body = req.get_json()
+            session_id = req_body.get("session_id")
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({"error": "Invalid JSON"}),
+                mimetype="application/json",
+                status_code=400
+            )
+    
+    if not session_id:
+        return func.HttpResponse(
+            json.dumps({"error": "session_id is required"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    try:
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+    except Exception as e:
+        logging.error(f"Session retrieval failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to retrieve session", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
+    
+    if not session:
+        return func.HttpResponse(
+            json.dumps({"error": "Session not found or expired"}),
+            mimetype="application/json",
+            status_code=404
+        )
+    
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "session_id": session["session_id"],
+            "cv_data": session["cv_data"],
+            "metadata": session["metadata"],
+            "expires_at": session["expires_at"]
+        }),
+        mimetype="application/json",
+        status_code=200
+    )
+
+
+@app.route(route="update-cv-field", methods=["POST"])
+def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Update specific field in CV session
+    
+    Request:
+        {
+            "session_id": "uuid",
+            "field_path": "full_name" or "work_experience[0].employer",
+            "value": "new value"
+        }
+    
+    Response:
+        {
+            "success": true,
+            "session_id": "uuid",
+            "field_updated": "field_path"
+        }
+    """
+    logging.info('Update CV field requested')
+    
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    session_id = req_body.get("session_id")
+    field_path = req_body.get("field_path")
+    value = req_body.get("value")
+    
+    if not session_id or not field_path:
+        return func.HttpResponse(
+            json.dumps({"error": "session_id and field_path are required"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    try:
+        store = CVSessionStore()
+        updated = store.update_field(session_id, field_path, value)
+    except Exception as e:
+        logging.error(f"Field update failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to update field", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
+    
+    if not updated:
+        return func.HttpResponse(
+            json.dumps({"error": "Session not found"}),
+            mimetype="application/json",
+            status_code=404
+        )
+    
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "session_id": session_id,
+            "field_updated": field_path
+        }),
+        mimetype="application/json",
+        status_code=200
+    )
+
+
+@app.route(route="generate-cv-from-session", methods=["POST"])
+def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Generate PDF from session data
+    
+    Request:
+        {
+            "session_id": "uuid",
+            "language": "en|de|pl" (optional, uses session metadata if not provided)
+        }
+    
+    Response:
+        {
+            "success": true,
+            "pdf_base64": "...",
+            "validation": {...}
+        }
+    """
+    logging.info('Generate CV from session requested')
+    
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    session_id = req_body.get("session_id")
+    if not session_id:
+        return func.HttpResponse(
+            json.dumps({"error": "session_id is required"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    try:
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+    except Exception as e:
+        logging.error(f"Session retrieval failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to retrieve session", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
+    
+    if not session:
+        return func.HttpResponse(
+            json.dumps({"error": "Session not found or expired"}),
+            mimetype="application/json",
+            status_code=404
+        )
+    
+    cv_data = session["cv_data"]
+    language = req_body.get("language") or session["metadata"].get("language", "en")
+    
+    # Schema validation
+    log_schema_debug_info(cv_data, context="generate-from-session")
+    is_valid, errors = validate_canonical_schema(cv_data, strict=True)
+    
+    if not is_valid:
+        return func.HttpResponse(
+            json.dumps({
+                "error": "CV data validation failed",
+                "validation_errors": errors,
+                "guidance": "Use update-cv-field to fix missing or invalid fields"
+            }),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Normalize and validate
+    cv_data = normalize_cv_data(cv_data)
+    validation_result = validate_cv(cv_data)
+    
+    if not validation_result.is_valid:
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Validation failed",
+                "validation": _serialize_validation_result(validation_result)
+            }),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Generate PDF
+    try:
+        pdf_bytes = render_pdf(cv_data, enforce_two_pages=True)
+        logging.info(f"PDF generated from session {session_id}: {len(pdf_bytes)} bytes")
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "pdf_base64": pdf_base64,
+                "validation": _serialize_validation_result(validation_result)
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"PDF generation failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "PDF generation failed", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
+
+
+# ============================================================================
+# PHASE 3: ORCHESTRATION ENDPOINT
+# ============================================================================
+
+@app.route(route="process-cv-orchestrated", methods=["POST"])
+def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Orchestrated CV processing - single endpoint for full workflow
+    
+    This endpoint handles the complete CV processing pipeline:
+    1. Extract CV data from DOCX (or use existing session)
+    2. Apply user edits if provided
+    3. Validate CV data
+    4. Generate PDF
+    
+    Request:
+        {
+            "session_id": "uuid" (optional - reuse existing session),
+            "docx_base64": "base64" (required if no session_id),
+            "language": "en|de|pl" (optional, default: en),
+            "edits": [
+                {"field_path": "full_name", "value": "John Doe"},
+                {"field_path": "work_experience[0].employer", "value": "Acme"}
+            ] (optional),
+            "extract_photo": true|false (optional, default: true)
+        }
+    
+    Response:
+        {
+            "success": true,
+            "session_id": "uuid",
+            "pdf_base64": "...",
+            "validation": {...},
+            "cv_data_summary": {...}
+        }
+    """
+    logging.info('Orchestrated CV processing requested')
+    
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    session_id = req_body.get("session_id")
+    docx_base64 = req_body.get("docx_base64")
+    language = req_body.get("language", "en")
+    edits = req_body.get("edits", [])
+    extract_photo_flag = req_body.get("extract_photo", True)
+    
+    store = CVSessionStore()
+    
+    # Step 1: Get or create session
+    if session_id:
+        logging.info(f"Using existing session: {session_id}")
+        try:
+            session = store.get_session(session_id)
+            if not session:
+                return func.HttpResponse(
+                    json.dumps({"error": "Session not found or expired"}),
+                    mimetype="application/json",
+                    status_code=404
+                )
+            cv_data = session["cv_data"]
+        except Exception as e:
+            return func.HttpResponse(
+                json.dumps({"error": "Failed to retrieve session", "details": str(e)}),
+                mimetype="application/json",
+                status_code=500
+            )
+    elif docx_base64:
+        logging.info("Creating new session from DOCX")
+        try:
+            docx_bytes = base64.b64decode(docx_base64)
+        except Exception as e:
+            return func.HttpResponse(
+                json.dumps({"error": "Invalid base64 encoding", "details": str(e)}),
+                mimetype="application/json",
+                status_code=400
+            )
+        
+        # Extract photo
+        photo_url = None
+        if extract_photo_flag:
+            try:
+                photo_url = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
+            except Exception as e:
+                logging.warning(f"Photo extraction failed: {e}")
+        
+        # Create minimal CV data (agent will populate via edits)
+        cv_data = {
+            "full_name": "",
+            "email": "",
+            "phone": "",
+            "photo_url": photo_url or "",
+            "work_experience": [],
+            "education": [],
+            "skills": [],
+            "languages": [],
+            "certifications": [],
+            "summary": "",
+            "language": language
+        }
+        
+        try:
+            metadata = {"language": language, "source_file": "uploaded.docx"}
+            session_id = store.create_session(cv_data, metadata)
+            logging.info(f"Created session: {session_id}")
+        except Exception as e:
+            return func.HttpResponse(
+                json.dumps({"error": "Failed to create session", "details": str(e)}),
+                mimetype="application/json",
+                status_code=500
+            )
+    else:
+        return func.HttpResponse(
+            json.dumps({"error": "Either session_id or docx_base64 is required"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Step 2: Apply edits if provided
+    if edits:
+        logging.info(f"Applying {len(edits)} edits to session {session_id}")
+        for edit in edits:
+            field_path = edit.get("field_path")
+            value = edit.get("value")
+            if field_path:
+                try:
+                    store.update_field(session_id, field_path, value)
+                except Exception as e:
+                    logging.warning(f"Failed to apply edit to {field_path}: {e}")
+        
+        # Refresh cv_data after edits
+        session = store.get_session(session_id)
+        cv_data = session["cv_data"]
+    
+    # Step 3: Validate
+    log_schema_debug_info(cv_data, context="orchestrated")
+    is_valid, errors = validate_canonical_schema(cv_data, strict=True)
+    
+    if not is_valid:
+        return func.HttpResponse(
+            json.dumps({
+                "error": "CV data validation failed",
+                "validation_errors": errors,
+                "session_id": session_id,
+                "guidance": "Provide edits array to populate missing fields"
+            }),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    cv_data = normalize_cv_data(cv_data)
+    validation_result = validate_cv(cv_data)
+    
+    if not validation_result.is_valid:
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Validation failed",
+                "validation": _serialize_validation_result(validation_result),
+                "session_id": session_id
+            }),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Step 4: Generate PDF
+    try:
+        pdf_bytes = render_pdf(cv_data, enforce_two_pages=True)
+        logging.info(f"Orchestrated: Generated PDF ({len(pdf_bytes)} bytes) for session {session_id}")
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        
+        summary = {
+            "has_photo": bool(cv_data.get("photo_url")),
+            "work_experience_count": len(cv_data.get("work_experience", [])),
+            "education_count": len(cv_data.get("education", [])),
+            "languages": cv_data.get("languages", [])
+        }
+        
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "session_id": session_id,
+                "pdf_base64": pdf_base64,
+                "validation": _serialize_validation_result(validation_result),
+                "cv_data_summary": summary
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"Orchestrated: PDF generation failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "PDF generation failed", "details": str(e), "session_id": session_id}),
+            mimetype="application/json",
+            status_code=500
+        )
+
+
+@app.route(route="cleanup-expired-sessions", methods=["POST"])
+def cleanup_expired_sessions(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Cleanup expired sessions (scheduled task or manual trigger)
+    
+    Response:
+        {"deleted_count": 5}
+    """
+    logging.info('Cleanup expired sessions requested')
+    
+    try:
+        store = CVSessionStore()
+        deleted = store.cleanup_expired()
+        
+        return func.HttpResponse(
+            json.dumps({"deleted_count": deleted}),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"Cleanup failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Cleanup failed", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500
         )

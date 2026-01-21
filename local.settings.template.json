@@ -12,5 +12,6 @@
     "PLAYWRIGHT_BROWSERS_PATH": "/home/site/wwwroot/.playwright",
     "AZURE_SDK_LOG_LEVEL": "WARNING",
     "CV_DEFAULT_THEME": "zurich"
-  }
+  },
+  "Comment": "STORAGE_CONNECTION_STRING is used for both Azure Blob Storage AND Azure Table Storage (Phase 2 sessions)"
 }
