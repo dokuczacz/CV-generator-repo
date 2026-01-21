@@ -12,6 +12,9 @@
 2. **Schema** enforced `strict: false` with all properties in `required` array
 3. **Clear warnings** in generate_cv_action: "Do NOT call with only source_docx_base64 + language"
 
+**Important clarification (photo):**
+- Photo extraction is a separate tool (`extract_photo`). Its output (`photo_data_uri`) must be placed into `cv_data.photo_url` before calling `validate_cv` / `generate_cv_action`.
+
 ---
 
 ## Step-by-Step Manual Update
@@ -21,7 +24,39 @@
 2. Find your CV Generator assistant/prompt
 3. Click **Edit**
 
-### Step 2: Update Tool 1 — `validate_cv`
+### Step 2: Update Tool 0 — `extract_photo`
+
+In the **Functions** section, find or add **extract_photo** function:
+
+1. Click **Add tool** → **Function** (if not already present)
+2. **Name:** `extract_photo`
+3. **Description:** Replace with:
+   ```
+   Extracts the first embedded photo from a DOCX CV file.
+   Output photo_data_uri MUST be copied into cv_data.photo_url (data URI) for Stage 2 confirmation and Stage 3 PDF generation.
+   ```
+4. **Strict mode:** OFF (unchecked)
+5. **Parameters (JSON Schema):** Copy the entire JSON below:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "docx_base64": {
+      "type": "string",
+      "description": "Base64 encoded DOCX file content"
+    }
+  },
+  "required": ["docx_base64"],
+  "additionalProperties": false
+}
+```
+
+6. Click **Save**
+
+---
+
+### Step 3: Update Tool 1 — `validate_cv`
 
 In the **Functions** section, find or add **validate_cv** function:
 
@@ -155,7 +190,7 @@ In the **Functions** section, find or add **validate_cv** function:
 
 ---
 
-### Step 3: Update Tool 2 — `generate_cv_action`
+### Step 4: Update Tool 2 — `generate_cv_action`
 
 In the **Functions** section, find or add **generate_cv_action** function:
 
@@ -336,7 +371,7 @@ In the **Functions** section, find or add **generate_cv_action** function:
 
 ---
 
-### Step 4: Verify System Prompt
+### Step 5: Verify System Prompt
 
 1. Go to **System Prompt** section
 2. Confirm it includes the 3-stage workflow:
@@ -348,7 +383,7 @@ In the **Functions** section, find or add **generate_cv_action** function:
 
 ---
 
-### Step 5: Verify Knowledge/Instructions Files
+### Step 6: Verify Knowledge/Instructions Files
 
 1. In **Knowledge** or **Instructions** section, ensure:
    - [PROMPT_INSTRUCTIONS.md](PROMPT_INSTRUCTIONS.md) is uploaded
@@ -362,6 +397,8 @@ In the **Functions** section, find or add **generate_cv_action** function:
 1. **Test in Playground:**
    - Upload a CV file
    - Proceed through Stage 1 → Stage 2
+  - In Stage 1, confirm the model calls `extract_photo` (DOCX → photo_data_uri)
+  - Confirm Stage 2 JSON includes `photo_url` populated with the returned `photo_data_uri`
    - In Stage 3, verify the model's tool call includes:
      - `cv_data` object with all fields
      - NOT just `source_docx_base64 + language`

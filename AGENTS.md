@@ -162,6 +162,26 @@ Use when: "sprawdź azurite/azure" / "ile plików" / "pobierz sample" / "compare
 - ✅ PowerShell `python -c` (stable, explicit).
 - ✅ Include 1-line success signal.
 
+**Azure MCP Tools:**
+When using Azure MCP tools (AppLens, Monitor, etc.), always include:
+- `subscription`: `3bb75fb7-e75f-4e75-8ff0-473d72d82c79`
+- `tenant`: `dbb16708-62b5-4835-bc82-46b38d1a71d3` (if required)
+
+**Example MCP call:**
+```json
+{
+  "command": "monitor_resource_log_query",
+  "parameters": {
+    "subscription": "3bb75fb7-e75f-4e75-8ff0-473d72d82c79",
+    "resource-id": "/subscriptions/3bb75fb7-e75f-4e75-8ff0-473d72d82c79/resourceGroups/cv-generator-rg/providers/Microsoft.Web/sites/cv-generator-6695",
+    "table": "requests",
+    "query": "requests | where timestamp > ago(24h) | order by timestamp desc",
+    "hours": 24,
+    "limit": 10
+  }
+}
+```
+
 **Templates (PowerShell):**
 ```powershell
 # Check if blob exists

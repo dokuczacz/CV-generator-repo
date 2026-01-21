@@ -53,9 +53,8 @@ function roughInputChars(input: any[]): number {
 }
 
 function sanitizeToolOutputForModel(toolName: string, toolOutput: string): string {
-  // The model does not need base64 blobs (photo_data_uri/pdf_base64) and they can
-  // easily exceed the context window on the next iteration.
-  // Return a small, stable summary string for the model.
+  // The model does not need base64 blobs (photo/pdf) which can bloat context.
+  // Return a compact summary to keep the next call small.
 
   const maxLen = 4000;
   const clamp = (s: string) => (s.length <= maxLen ? s : `${s.slice(0, maxLen)}\n...[truncated ${s.length - maxLen} chars]`);
@@ -71,29 +70,30 @@ function sanitizeToolOutputForModel(toolName: string, toolOutput: string): strin
     return clamp(toolOutput);
   }
 
-  if (toolName === 'extract_photo') {
-    const hasPhoto = typeof parsed.photo_data_uri === 'string' && parsed.photo_data_uri.length > 0;
-    const err = typeof parsed.error === 'string' ? parsed.error : undefined;
+  if (toolName === 'extract_and_store_cv') {
+    const sessionId = typeof parsed.session_id === 'string' ? parsed.session_id : undefined;
+    const hasPhoto = parsed.photo_extracted === true;
+    const summary = parsed.cv_data_summary;
     return JSON.stringify({
-      ok: !err && hasPhoto,
-      has_photo: hasPhoto,
-      error: err,
-      // Never include photo_data_uri.
+      ok: parsed.success !== false,
+      session_id: sessionId,
+      fields_populated: summary?.fields_populated?.length ?? undefined,
+      fields_empty: summary?.fields_empty?.length ?? undefined,
+      photo_extracted: hasPhoto,
+      error: parsed.error,
     });
   }
 
-  if (toolName === 'generate_cv_action') {
+  if (toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') {
     const pdfLen = typeof parsed.pdf_base64 === 'string' ? parsed.pdf_base64.length : 0;
-    const err = typeof parsed.error === 'string' ? parsed.error : undefined;
-    const success = parsed.success === true || pdfLen > 0;
     return JSON.stringify({
-      ok: success && !err,
-      success,
+      ok: parsed.success !== false && pdfLen > 0,
+      success: parsed.success,
       pdf_generated: pdfLen > 0,
-      pdf_base64_length: pdfLen,
+      pdf_base64_length: pdfLen || undefined,
       validation: parsed.validation,
-      error: err,
-      // Never include pdf_base64.
+      errors: parsed.validation_errors || parsed.error,
+      session_id: parsed.session_id,
     });
   }
 
@@ -207,42 +207,49 @@ async function callAzureFunction(endpoint: string, body: any) {
 async function processToolCall(toolName: string, toolInput: any): Promise<string> {
   try {
     switch (toolName) {
-      case 'extract_photo':
-        const photoResult = await callAzureFunction('/extract-photo', {
+      case 'extract_and_store_cv': {
+        const result = await callAzureFunction('/extract-and-store-cv', {
           docx_base64: toolInput.docx_base64,
+          language: toolInput.language,
+          extract_photo: toolInput.extract_photo,
         });
-        return JSON.stringify(photoResult);
+        return JSON.stringify(result);
+      }
 
-      case 'validate_cv':
-        // Accept both legacy shapes (toolInput is CV object) and the canonical wrapper shape.
-        const validatePayload = toolInput?.cv_data ? toolInput : { cv_data: toolInput };
-        const validateResult = await callAzureFunction('/validate-cv', validatePayload);
-        return JSON.stringify(validateResult);
-
-      case 'generate_cv_action':
-        // Accept both legacy shapes (toolInput is CV object) and the canonical wrapper shape.
-        const cvData = toolInput?.cv_data ? toolInput.cv_data : toolInput;
-        
-        // 🔍 DIAGNOSTIC: Log what model actually sent
-        console.log('🔍 generate_cv_action called');
-        console.log('🔍 toolInput keys:', Object.keys(toolInput || {}));
-        console.log('🔍 has cv_data wrapper:', !!toolInput?.cv_data);
-        console.log('🔍 cvData keys:', Object.keys(cvData || {}));
-        console.log('🔍 cvData.personal:', cvData?.personal ? 'present' : 'MISSING');
-        console.log('🔍 cvData.experience:', Array.isArray(cvData?.experience) ? `${cvData.experience.length} items` : 'MISSING/NOT_ARRAY');
-        console.log('🔍 cvData.work_experience:', Array.isArray(cvData?.work_experience) ? `${cvData.work_experience.length} items` : 'MISSING/NOT_ARRAY');
-        console.log('🔍 cvData.education:', Array.isArray(cvData?.education) ? `${cvData.education.length} items` : 'MISSING/NOT_ARRAY');
-        console.log('🔍 cvData type:', typeof cvData);
-        if (typeof cvData === 'string') {
-          console.log('⚠️ WARNING: cvData is string, should be object! Length:', cvData.length);
-        }
-        
-        const generateResult = await callAzureFunction('/generate-cv-action', {
-          cv_data: cvData,
-          source_docx_base64: toolInput?.source_docx_base64,
-          debug_allow_pages: toolInput?.debug_allow_pages,
+      case 'get_cv_session': {
+        const result = await callAzureFunction('/get-cv-session', {
+          session_id: toolInput.session_id,
         });
-        return JSON.stringify(generateResult);
+        return JSON.stringify(result);
+      }
+
+      case 'update_cv_field': {
+        const result = await callAzureFunction('/update-cv-field', {
+          session_id: toolInput.session_id,
+          field_path: toolInput.field_path,
+          value: toolInput.value,
+        });
+        return JSON.stringify(result);
+      }
+
+      case 'generate_cv_from_session': {
+        const result = await callAzureFunction('/generate-cv-from-session', {
+          session_id: toolInput.session_id,
+          language: toolInput.language,
+        });
+        return JSON.stringify(result);
+      }
+
+      case 'process_cv_orchestrated': {
+        const result = await callAzureFunction('/process-cv-orchestrated', {
+          session_id: toolInput.session_id,
+          docx_base64: toolInput.docx_base64,
+          language: toolInput.language,
+          edits: toolInput.edits,
+          extract_photo: toolInput.extract_photo,
+        });
+        return JSON.stringify(result);
+      }
 
       default:
         return JSON.stringify({ error: `Unknown tool: ${toolName}` });
@@ -300,7 +307,7 @@ async function chatWithCV(
     hasDocx
       ? "[CV DOCX is already uploaded in this chat. Do NOT ask the user to re-send it or paste base64. If you need file bytes, call tools; backend will inject docx_base64 for you.]"
       : null,
-    skipPhoto ? '[User requested: omit photo in the final CV. Do not call extract_photo.]' : null,
+    skipPhoto ? '[User requested: omit photo in the final CV. Do not extract photo.]' : null,
     // Prefer context pack when available; otherwise include bounded CV text as before.
     contextPack
       ? `\n\n[CONTEXT_PACK_JSON]\n${JSON.stringify(contextPack)}`
@@ -326,7 +333,7 @@ async function chatWithCV(
     inputList.push({
       role: 'system',
       content:
-        'The user already uploaded a CV document. Never ask them to paste base64 or re-upload. If you need the file bytes, call the tools and the backend will provide docx_base64 to the tool inputs.',
+        'The user already uploaded a CV document. Never ask them to paste base64 or re-upload. If you need the file bytes, call the session tools (extract_and_store_cv or process_cv_orchestrated) and the backend will inject docx_base64 for you.',
     });
   }
 
@@ -334,7 +341,7 @@ async function chatWithCV(
   inputList.push({
     role: 'system',
     content:
-      'Do not ask the user clarifying questions. In this single run, extract structured CV data from the provided CV text, call validate_cv, then call generate_cv_action to produce the PDF. If something is missing, leave it empty and proceed.',
+      'Use session-based workflow only: extract_and_store_cv → get_cv_session → update_cv_field → generate_cv_from_session (or process_cv_orchestrated when all data is present). Do NOT call legacy tools. Always reuse session_id, ask for missing required fields (full_name, email, phone, work_experience, education), then generate.',
   });
 
   inputList.push({
@@ -391,7 +398,7 @@ async function chatWithCV(
   let pdfBase64 = '';
   let iteration = 0;
   const maxIterations = 10;
-  let photoToolCalls = 0;
+  let extractToolCalls = 0;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -426,45 +433,35 @@ async function chatWithCV(
       }
 
       // Inject DOCX base64 if the model omitted it.
-      if (toolName === 'extract_photo') {
-        photoToolCalls += 1;
-        if (skipPhoto) {
-          const modelToolOutput = JSON.stringify({ ok: false, skipped: true, reason: 'user requested omit photo' });
-          inputList.push({
-            type: 'function_call_output',
-            call_id: toolCall.call_id,
-            output: modelToolOutput,
-          });
-          continue;
-        }
-
-        // Prevent repeated photo extraction loops.
-        if (photoToolCalls > 1) {
-          const modelToolOutput = JSON.stringify({ ok: false, skipped: true, reason: 'photo already attempted' });
-          inputList.push({
-            type: 'function_call_output',
-            call_id: toolCall.call_id,
-            output: modelToolOutput,
-          });
-          continue;
-        }
+      if (toolName === 'extract_and_store_cv') {
+        extractToolCalls += 1;
         toolArgs.docx_base64 = toolArgs.docx_base64 || docx_base64;
+        toolArgs.language = toolArgs.language || language;
+        if (skipPhoto) {
+          toolArgs.extract_photo = false;
+        }
       }
-      if (toolName === 'generate_cv_action') {
-        toolArgs.source_docx_base64 = toolArgs.source_docx_base64 || docx_base64;
+
+      if (toolName === 'process_cv_orchestrated') {
+        toolArgs.docx_base64 = toolArgs.docx_base64 || docx_base64;
+        toolArgs.language = toolArgs.language || language;
+        if (skipPhoto) {
+          toolArgs.extract_photo = false;
+        }
+      }
+
+      if (toolName === 'generate_cv_from_session') {
         toolArgs.language = toolArgs.language || language;
       }
 
       console.log(`  → Calling tool: ${toolName}`);
       console.log(`  📋 Tool args keys:`, Object.keys(toolArgs));
-      if (toolName === 'generate_cv_action') {
-        console.log(`  📋 generate_cv_action args preview:`, {
-          has_full_name: !!toolArgs.full_name,
-          has_email: !!toolArgs.email,
-          has_work_experience: Array.isArray(toolArgs.work_experience),
-          work_exp_count: Array.isArray(toolArgs.work_experience) ? toolArgs.work_experience.length : 0,
-          has_education: Array.isArray(toolArgs.education),
+      if (toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') {
+        console.log(`  📋 ${toolName} args preview:`, {
+          session_id: toolArgs.session_id,
           language: toolArgs.language,
+          has_edits: Array.isArray(toolArgs.edits) ? toolArgs.edits.length : 0,
+          has_docx: typeof toolArgs.docx_base64 === 'string',
         });
       }
       const toolStartTime = Date.now();
@@ -474,7 +471,7 @@ async function chatWithCV(
       // Capture PDF if present.
       try {
         const parsed = JSON.parse(toolOutput);
-        if (toolName === 'generate_cv_action' && parsed?.pdf_base64) {
+        if ((toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') && parsed?.pdf_base64) {
           pdfBase64 = parsed.pdf_base64;
           console.log('  📄 PDF generated, length:', pdfBase64.length);
         }

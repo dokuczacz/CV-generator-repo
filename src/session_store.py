@@ -21,9 +21,9 @@ class CVSessionStore:
     
     def __init__(self, connection_string: Optional[str] = None):
         """Initialize session store with Azure Table Storage"""
-        conn_str = connection_string or os.environ.get("STORAGE_CONNECTION_STRING")
+        conn_str = connection_string or os.environ.get("STORAGE_CONNECTION_STRING") or os.environ.get("AzureWebJobsStorage")
         if not conn_str:
-            raise ValueError("STORAGE_CONNECTION_STRING not configured")
+            raise ValueError("STORAGE_CONNECTION_STRING or AzureWebJobsStorage not configured")
         
         self.service_client = TableServiceClient.from_connection_string(conn_str)
         self._ensure_table_exists()
