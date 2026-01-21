@@ -168,6 +168,11 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400
         )
     
+    # Unwrap double-wrapped cv_data (agent sometimes sends {"cv_data": {"cv_data": {...}}})
+    if isinstance(cv_data, dict) and len(cv_data) == 1 and 'cv_data' in cv_data:
+        logging.info("Detected double-wrapped cv_data, unwrapping...")
+        cv_data = cv_data['cv_data']
+    
     # Log incoming data structure for debugging
     logging.info(f"CV data keys received: {list(cv_data.keys()) if isinstance(cv_data, dict) else 'not a dict'}")
     if isinstance(cv_data, dict):
