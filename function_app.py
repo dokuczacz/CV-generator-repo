@@ -169,7 +169,8 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
         )
     
     # Unwrap double-wrapped cv_data (agent sometimes sends {"cv_data": {"cv_data": {...}}})
-    if isinstance(cv_data, dict) and len(cv_data) == 1 and 'cv_data' in cv_data:
+    if isinstance(cv_data, dict) and 'cv_data' in cv_data and not cv_data.get('full_name'):
+        # If cv_data contains a nested cv_data key and lacks expected fields, unwrap it
         logging.info("Detected double-wrapped cv_data, unwrapping...")
         cv_data = cv_data['cv_data']
     
