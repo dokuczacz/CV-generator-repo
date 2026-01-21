@@ -552,20 +552,24 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
     
     # Extract photo if requested
     photo_url = None
+    photo_extracted = False
     if extract_photo_flag:
         try:
             photo_url = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
+            photo_extracted = bool(photo_url)
             logging.info(f"Photo extraction: {'success' if photo_url else 'no photo found'}")
         except Exception as e:
             logging.warning(f"Photo extraction failed: {e}")
     
     # TODO: Implement CV data extraction from DOCX
     # For now, create minimal structure that agent must fill in
+    # NOTE: Don't store photo_url directly (can exceed 64KB Azure Table Storage limit)
+    # Instead, store photo_url only if small, otherwise just flag it was extracted
     cv_data = {
         "full_name": "",
         "email": "",
         "phone": "",
-        "photo_url": photo_url or "",
+        "photo_url": (photo_url if photo_url and len(photo_url) < 10000 else "") or "",
         "work_experience": [],
         "education": [],
         "skills": [],
@@ -594,7 +598,7 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
     
     # Build summary for response (avoid sending full data back)
     summary = {
-        "has_photo": bool(photo_url),
+        "has_photo": photo_extracted,
         "fields_populated": [k for k, v in cv_data.items() if v],
         "fields_empty": [k for k, v in cv_data.items() if not v]
     }
@@ -606,7 +610,7 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             "success": True,
             "session_id": session_id,
             "cv_data_summary": summary,
-            "photo_extracted": bool(photo_url),
+            "photo_extracted": photo_extracted,
             "expires_at": session["expires_at"]
         }),
         mimetype="application/json",
