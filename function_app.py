@@ -182,6 +182,31 @@ def generate_cv_action(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Work experience count: {len(cv_data.get('work_experience', []))}")
         logging.info(f"Education count: {len(cv_data.get('education', []))}")
     
+    # Pre-render validation: check for minimum viable content
+    viability_issues = []
+    if not cv_data.get('full_name'):
+        viability_issues.append("full_name is required")
+    if not cv_data.get('email'):
+        viability_issues.append("email is required")
+    if not cv_data.get('phone'):
+        viability_issues.append("phone is required")
+    if not cv_data.get('work_experience') or not isinstance(cv_data.get('work_experience'), list) or len(cv_data.get('work_experience', [])) == 0:
+        viability_issues.append("At least one work_experience entry is required")
+    if not cv_data.get('education') or not isinstance(cv_data.get('education'), list) or len(cv_data.get('education', [])) == 0:
+        viability_issues.append("At least one education entry is required")
+    
+    if viability_issues:
+        logging.warning(f"CV pre-validation failed: {viability_issues}")
+        return func.HttpResponse(
+            json.dumps({
+                "error": "CV data incomplete",
+                "issues": viability_issues,
+                "guidance": "CV must include: full name, email, phone, at least one work experience entry, and at least one education entry."
+            }),
+            mimetype="application/json",
+            status_code=400
+        )
+    
     # Normalize CV data
     cv_data = normalize_cv_data(cv_data)
     logging.info(f"After normalization - work_experience: {len(cv_data.get('work_experience', []))}, education: {len(cv_data.get('education', []))}")
