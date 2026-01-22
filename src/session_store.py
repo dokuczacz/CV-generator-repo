@@ -137,25 +137,29 @@ class CVSessionStore:
     def update_field(self, session_id: str, field_path: str, value: Any) -> bool:
         """
         Update specific field in CV data (supports nested paths)
-        
+
         Args:
             session_id: Session identifier
             field_path: Dot-notation path (e.g., "full_name", "work_experience[0].employer")
             value: New value for the field
-        
+
         Returns:
             True if updated, False if session not found
         """
         session = self.get_session(session_id)
         if not session:
             return False
-        
+
         cv_data = session["cv_data"]
-        
+
+        # Log what we're updating for debugging
+        value_preview = str(value)[:100] if value else "(empty)"
+        logging.info(f"update_field: path={field_path}, value_type={type(value).__name__}, value_preview={value_preview}")
+
         # Parse field path and update
         parts = field_path.replace("[", ".").replace("]", "").split(".")
         current = cv_data
-        
+
         for i, part in enumerate(parts[:-1]):
             if part.isdigit():
                 current = current[int(part)]
@@ -163,14 +167,19 @@ class CVSessionStore:
                 if part not in current:
                     current[part] = {}
                 current = current[part]
-        
+
         # Set final value
         last_key = parts[-1]
         if last_key.isdigit():
             current[int(last_key)] = value
         else:
             current[last_key] = value
-        
+
+        # Log the updated cv_data signature (to verify actual changes)
+        work_exp_count = len(cv_data.get("work_experience", []))
+        profile_len = len(str(cv_data.get("profile", "")))
+        logging.info(f"update_field: after update - work_exp_count={work_exp_count}, profile_len={profile_len}")
+
         return self.update_session(session_id, cv_data, session.get("metadata"))
     
     def delete_session(self, session_id: str) -> bool:

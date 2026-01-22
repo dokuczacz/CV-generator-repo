@@ -492,14 +492,30 @@ def get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
             status_code=404
         )
     
+    # Include version info and content signature for model to verify data freshness
+    cv_data = session["cv_data"]
+    version_info = {
+        "success": True,
+        "session_id": session["session_id"],
+        "cv_data": cv_data,
+        "metadata": session["metadata"],
+        "expires_at": session["expires_at"],
+        # Include metadata about CV content freshness for debugging
+        "_metadata": {
+            "version": session.get("version"),
+            "created_at": session.get("created_at"),
+            "updated_at": session.get("updated_at"),
+            "content_signature": {
+                "work_exp_count": len(cv_data.get("work_experience", [])),
+                "education_count": len(cv_data.get("education", [])),
+                "profile_length": len(str(cv_data.get("profile", ""))),
+                "skills_count": len(cv_data.get("it_ai_skills", []))
+            }
+        }
+    }
+
     return func.HttpResponse(
-        json.dumps({
-            "success": True,
-            "session_id": session["session_id"],
-            "cv_data": session["cv_data"],
-            "metadata": session["metadata"],
-            "expires_at": session["expires_at"]
-        }),
+        json.dumps(version_info),
         mimetype="application/json",
         status_code=200
     )
@@ -538,14 +554,22 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
     session_id = req_body.get("session_id")
     field_path = req_body.get("field_path")
     value = req_body.get("value")
-    
+
     if not session_id or not field_path:
         return func.HttpResponse(
             json.dumps({"error": "session_id and field_path are required"}),
             mimetype="application/json",
             status_code=400
         )
-    
+
+    # Log the update request with value preview for debugging
+    value_preview = str(value)[:150] if value is not None else "(None)"
+    if isinstance(value, list):
+        value_preview = f"[{len(value)} items]"
+    elif isinstance(value, dict):
+        value_preview = f"{{dict with {len(value)} keys}}"
+    logging.info(f"[update-cv-field] Updating {field_path} with value_type={type(value).__name__}, preview={value_preview}")
+
     try:
         store = CVSessionStore()
         updated = store.update_field(session_id, field_path, value)
@@ -563,7 +587,26 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=404
         )
-    
+
+    # Get updated session to report back version and timestamp
+    try:
+        store = CVSessionStore()
+        updated_session = store.get_session(session_id)
+        if updated_session:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "session_id": session_id,
+                    "field_updated": field_path,
+                    "updated_version": updated_session.get("version"),
+                    "updated_at": updated_session.get("updated_at")
+                }),
+                mimetype="application/json",
+                status_code=200
+            )
+    except Exception:
+        pass  # Fall through to default response
+
     return func.HttpResponse(
         json.dumps({
             "success": True,
@@ -632,6 +675,12 @@ def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
     
     cv_data = session["cv_data"]
     language = req_body.get("language") or session["metadata"].get("language", "en")
+
+    # Log CV data version and content for debugging staleness issues
+    session_version = session.get("version", "unknown")
+    work_exp_count = len(cv_data.get("work_experience", []))
+    profile_preview = (str(cv_data.get("profile", ""))[:100]).replace("\n", " ")
+    logging.info(f"[generate-from-session] Using session version={session_version}, work_exp_count={work_exp_count}, profile_preview={profile_preview}")
 
     # If photo stored in Blob, inject it into cv_data as data URI at render time.
     # (We keep Table Storage session lean; the HTML template expects photo_url.)
