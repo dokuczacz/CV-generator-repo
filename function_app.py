@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.render import render_pdf, render_html
 from src.validator import validate_cv
-from src.docx_photo import extract_first_photo_data_uri_from_docx_bytes
+from src.docx_photo import extract_first_photo_data_uri_from_docx_bytes, extract_first_photo_from_docx_bytes
+from src.blob_store import CVBlobStore, BlobPointer
+from src.docx_prefill import prefill_cv_from_docx_bytes
 from src.normalize import normalize_cv_data
 from src.context_pack import build_context_pack
 from src.schema_validator import (
@@ -540,6 +542,8 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
     
     language = req_body.get("language", "en")
     extract_photo_flag = req_body.get("extract_photo", True)
+    job_posting_url = (req_body.get("job_posting_url") or "").strip() or None
+    job_posting_text = (req_body.get("job_posting_text") or "").strip() or None
     
     try:
         docx_bytes = base64.b64decode(docx_base64)
@@ -550,32 +554,41 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400
         )
     
-    # Extract photo if requested
-    photo_url = None
+    # Extract photo if requested (store in Blob; do not store base64 in Table Storage)
+    extracted_photo = None
     photo_extracted = False
+    photo_storage = "none"
+    photo_omitted_reason = None
     if extract_photo_flag:
         try:
-            photo_url = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
-            photo_extracted = bool(photo_url)
-            logging.info(f"Photo extraction: {'success' if photo_url else 'no photo found'}")
+            extracted_photo = extract_first_photo_from_docx_bytes(docx_bytes)
+            photo_extracted = bool(extracted_photo)
+            logging.info(f"Photo extraction: {'success' if extracted_photo else 'no photo found'}")
         except Exception as e:
+            photo_omitted_reason = f"photo_extraction_failed: {e}"
             logging.warning(f"Photo extraction failed: {e}")
     
-    # TODO: Implement CV data extraction from DOCX
-    # For now, create minimal structure that agent must fill in
-    # NOTE: Don't store photo_url directly (can exceed 64KB Azure Table Storage limit)
-    # Instead, store photo_url only if small, otherwise just flag it was extracted
+    # Best-effort extraction of basic CV fields from DOCX (no OpenAI call)
+    prefill = prefill_cv_from_docx_bytes(docx_bytes)
+
+    # Minimal structure; agent can fill/adjust the rest (but avoid empty required arrays when possible)
     cv_data = {
-        "full_name": "",
-        "email": "",
-        "phone": "",
-        "photo_url": (photo_url if photo_url and len(photo_url) < 10000 else "") or "",
-        "work_experience": [],
-        "education": [],
-        "skills": [],
-        "languages": [],
+        "full_name": prefill.get("full_name", "") or "",
+        "email": prefill.get("email", "") or "",
+        "phone": prefill.get("phone", "") or "",
+        "address_lines": prefill.get("address_lines", []) or [],
+        "photo_url": "",
+        "birth_date": "",
+        "nationality": "",
+        "profile": prefill.get("profile", "") or "",
+        "work_experience": prefill.get("work_experience", []) or [],
+        "education": prefill.get("education", []) or [],
+        "it_ai_skills": prefill.get("it_ai_skills", []) or [],
+        "languages": prefill.get("languages", []) or [],
         "certifications": [],
-        "summary": "",
+        "interests": prefill.get("interests", "") or "",
+        "further_experience": prefill.get("further_experience", []) or [],
+        "references": "",
         "language": language
     }
     
@@ -585,8 +598,13 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
         metadata = {
             "language": language,
             "source_file": "uploaded.docx",
-            "extraction_method": "placeholder"  # Will be "gpt" or "parser" when implemented
+            "extraction_method": "docx_prefill_v1"
         }
+        if job_posting_url:
+            metadata["job_posting_url"] = job_posting_url
+        if job_posting_text:
+            # Keep bounded to avoid Table Storage bloat; UI already bounds to 20k as well.
+            metadata["job_posting_text"] = job_posting_text[:20000]
         session_id = store.create_session(cv_data, metadata)
     except Exception as e:
         logging.error(f"Session creation failed: {e}")
@@ -596,6 +614,24 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500
         )
     
+    # Store extracted photo in Blob (if any) and record a pointer in session metadata
+    if extracted_photo and session_id:
+        try:
+            blob_store = CVBlobStore()
+            ext = "jpg" if extracted_photo.mime == "image/jpeg" else "png" if extracted_photo.mime == "image/png" else "bin"
+            blob_name = f"sessions/{session_id}/photo.{ext}"
+            ptr = blob_store.upload_bytes(blob_name=blob_name, data=extracted_photo.data, content_type=extracted_photo.mime)
+            metadata = dict(metadata)
+            metadata["photo_blob"] = {"container": ptr.container, "blob_name": ptr.blob_name, "content_type": ptr.content_type}
+            store.update_session(session_id, cv_data, metadata)
+            photo_storage = "blob"
+        except Exception as e:
+            photo_storage = "none"
+            photo_omitted_reason = f"photo_blob_store_failed: {e}"
+            logging.warning(f"Photo blob storage failed: {e}")
+    elif extract_photo_flag and not photo_extracted:
+        photo_omitted_reason = photo_omitted_reason or "no_photo_found_in_docx"
+
     # Build summary for response (avoid sending full data back)
     summary = {
         "has_photo": photo_extracted,
@@ -611,6 +647,8 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             "session_id": session_id,
             "cv_data_summary": summary,
             "photo_extracted": photo_extracted,
+            "photo_storage": photo_storage,
+            "photo_omitted_reason": photo_omitted_reason,
             "expires_at": session["expires_at"]
         }),
         mimetype="application/json",
@@ -817,6 +855,25 @@ def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
     
     cv_data = session["cv_data"]
     language = req_body.get("language") or session["metadata"].get("language", "en")
+
+    # If photo stored in Blob, inject it into cv_data as data URI at render time.
+    # (We keep Table Storage session lean; the HTML template expects photo_url.)
+    try:
+        metadata = session.get("metadata") or {}
+        photo_blob = metadata.get("photo_blob") if isinstance(metadata, dict) else None
+        if photo_blob and not cv_data.get("photo_url"):
+            ptr = BlobPointer(
+                container=photo_blob.get("container", ""),
+                blob_name=photo_blob.get("blob_name", ""),
+                content_type=photo_blob.get("content_type", "application/octet-stream"),
+            )
+            if ptr.container and ptr.blob_name:
+                data = CVBlobStore(container=ptr.container).download_bytes(ptr)
+                b64 = base64.b64encode(data).decode("ascii")
+                cv_data = dict(cv_data)
+                cv_data["photo_url"] = f"data:{ptr.content_type};base64,{b64}"
+    except Exception as e:
+        logging.warning(f"Failed to inject photo from blob for session {session_id}: {e}")
     
     # Schema validation
     log_schema_debug_info(cv_data, context="generate-from-session")
@@ -851,15 +908,11 @@ def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
     try:
         pdf_bytes = render_pdf(cv_data, enforce_two_pages=True)
         logging.info(f"PDF generated from session {session_id}: {len(pdf_bytes)} bytes")
-        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         
+        # Return raw binary PDF, not base64-encoded JSON
         return func.HttpResponse(
-            json.dumps({
-                "success": True,
-                "pdf_base64": pdf_base64,
-                "validation": _serialize_validation_result(validation_result)
-            }),
-            mimetype="application/json",
+            body=pdf_bytes,
+            mimetype="application/pdf",
             status_code=200
         )
     except Exception as e:
@@ -923,6 +976,8 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
     language = req_body.get("language", "en")
     edits = req_body.get("edits", [])
     extract_photo_flag = req_body.get("extract_photo", True)
+    job_posting_url = (req_body.get("job_posting_url") or "").strip() or None
+    job_posting_text = (req_body.get("job_posting_text") or "").strip() or None
     
     store = CVSessionStore()
     
@@ -938,6 +993,13 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
                     status_code=404
                 )
             cv_data = session["cv_data"]
+            metadata = session.get("metadata") or {}
+            if job_posting_url:
+                metadata["job_posting_url"] = job_posting_url
+            if job_posting_text:
+                metadata["job_posting_text"] = job_posting_text[:20000]
+            if job_posting_url or job_posting_text:
+                store.update_session(session_id, cv_data, metadata)
         except Exception as e:
             return func.HttpResponse(
                 json.dumps({"error": "Failed to retrieve session", "details": str(e)}),
@@ -955,31 +1017,49 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400
             )
         
-        # Extract photo
-        photo_url = None
+        # Extract photo (store in Blob after session is created)
+        extracted_photo = None
+        photo_extracted = False
+        photo_storage = "none"
+        photo_omitted_reason = None
         if extract_photo_flag:
             try:
-                photo_url = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
+                extracted_photo = extract_first_photo_from_docx_bytes(docx_bytes)
+                photo_extracted = bool(extracted_photo)
             except Exception as e:
+                photo_omitted_reason = f"photo_extraction_failed: {e}"
                 logging.warning(f"Photo extraction failed: {e}")
         
+        # Best-effort extraction of basic CV fields (no OpenAI call)
+        prefill = prefill_cv_from_docx_bytes(docx_bytes)
+
         # Create minimal CV data (agent will populate via edits)
         cv_data = {
-            "full_name": "",
-            "email": "",
-            "phone": "",
-            "photo_url": photo_url or "",
-            "work_experience": [],
-            "education": [],
-            "skills": [],
-            "languages": [],
+            "full_name": prefill.get("full_name", "") or "",
+            "email": prefill.get("email", "") or "",
+            "phone": prefill.get("phone", "") or "",
+            "address_lines": prefill.get("address_lines", []) or [],
+            "photo_url": "",
+            "birth_date": "",
+            "nationality": "",
+            "profile": prefill.get("profile", "") or "",
+            "work_experience": prefill.get("work_experience", []) or [],
+            "education": prefill.get("education", []) or [],
+            "it_ai_skills": prefill.get("it_ai_skills", []) or [],
+            "languages": prefill.get("languages", []) or [],
             "certifications": [],
-            "summary": "",
+            "interests": prefill.get("interests", "") or "",
+            "further_experience": prefill.get("further_experience", []) or [],
+            "references": "",
             "language": language
         }
         
         try:
             metadata = {"language": language, "source_file": "uploaded.docx"}
+            if job_posting_url:
+                metadata["job_posting_url"] = job_posting_url
+            if job_posting_text:
+                metadata["job_posting_text"] = job_posting_text[:20000]
             session_id = store.create_session(cv_data, metadata)
             logging.info(f"Created session: {session_id}")
         except Exception as e:
@@ -988,6 +1068,24 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json",
                 status_code=500
             )
+
+        # Store photo in Blob and persist pointer in metadata
+        if extracted_photo and session_id:
+            try:
+                blob_store = CVBlobStore()
+                ext = "jpg" if extracted_photo.mime == "image/jpeg" else "png" if extracted_photo.mime == "image/png" else "bin"
+                blob_name = f"sessions/{session_id}/photo.{ext}"
+                ptr = blob_store.upload_bytes(blob_name=blob_name, data=extracted_photo.data, content_type=extracted_photo.mime)
+                metadata = dict(metadata)
+                metadata["photo_blob"] = {"container": ptr.container, "blob_name": ptr.blob_name, "content_type": ptr.content_type}
+                store.update_session(session_id, cv_data, metadata)
+                photo_storage = "blob"
+            except Exception as e:
+                photo_storage = "none"
+                photo_omitted_reason = f"photo_blob_store_failed: {e}"
+                logging.warning(f"Photo blob storage failed: {e}")
+        elif extract_photo_flag and not photo_extracted:
+            photo_omitted_reason = photo_omitted_reason or "no_photo_found_in_docx"
     else:
         return func.HttpResponse(
             json.dumps({"error": "Either session_id or docx_base64 is required"}),

@@ -14,7 +14,7 @@
     body{ font-size: {{ _styles.body_font_size_pt }}pt; }
     .name{ font-size: {{ _styles.name_font_size_pt }}pt; }
     .section-title{ font-size: {{ _styles.title_font_size_pt }}pt; }
-    .page{ padding: {{ _styles.margin_top_mm }}mm {{ _styles.margin_right_mm|round(1) }}mm {{ _styles.margin_bottom_mm }}mm {{ _styles.margin_left_mm }}mm; }
+    @page{ margin: {{ _styles.margin_top_mm }}mm {{ _styles.margin_right_mm|round(1) }}mm {{ _styles.margin_bottom_mm }}mm {{ _styles.margin_left_mm }}mm; }
     .section{ margin-top: {{ _styles.section_gap_mm }}mm; }
     .bullets{ margin-left: 42.5mm; padding-left: {{ _styles.bullet_hanging_mm }}mm; }
   </style>
@@ -37,11 +37,7 @@
           </div>
         </div>
       </div>
-      <div class="photo-box">
-        {% if photo_url %}
-          <img src="{{ photo_url }}" alt="Professional application photo" />
-        {% endif %}
-      </div>
+      <div class="photo-box{% if not photo_url %} photo-box--empty{% endif %}">{% if photo_url %}<img src="{{ photo_url }}" alt="Professional application photo" />{% endif %}</div>
     </header>
 
     <main class="content">
@@ -82,13 +78,6 @@
       {% endfor %}
     </section>
 
-    </main>
-  </div>
-
-  <div class="page-break"></div>
-
-  <div class="page">
-    <main class="content">
 
     <section class="section">
       <div class="section-title">Further experience / commitment</div>
@@ -96,7 +85,7 @@
       <div class="entry">
         <div class="entry-head">
           <span class="entry-date">{{ exp.date_range }}</span>
-          <span class="entry-title">{{ exp.title }}{% if exp.organization %}, {{ exp.organization }}{% endif %}</span>
+          <span class="further-exp-title">{{ exp.title }}{% if exp.organization %}, {{ exp.organization }}{% endif %}</span>
         </div>
         {% if exp.bullets %}
           <ul class="bullets">

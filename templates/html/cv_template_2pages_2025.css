@@ -1,3 +1,44 @@
+/* ============================================================================
+   CV TEMPLATE 2025 - LAYOUT RULES & PRINCIPLES
+   ============================================================================
+
+   CRITICAL: This template enforces a strict 2-page PDF constraint.
+
+   PAGINATION APPROACH:
+   - Natural flow layout (content flows continuously without explicit page breaks)
+   - @page margins control padding on EVERY physical page (20mm top/bottom, ~25mm left, ~22mm right)
+   - WeasyPrint automatically handles page breaks based on content overflow
+   - No min-height, no explicit .page-break elements, no hardcoded "page" containers
+
+   WHY THIS WORKS:
+   - Prevents large whitespace gaps when sections don't fit on page 1
+   - Allows natural breaking within sections (e.g., Work experience can split across pages)
+   - Keeps content dense and uses available space efficiently
+   - Eliminates the 3-page overflow problem from aggressive break-inside:avoid rules
+
+   WHAT NOT TO DO:
+   ❌ DO NOT add .page class with min-height (e.g., min-height: 277mm)
+   ❌ DO NOT add explicit <div class="page-break"> elements
+   ❌ DO NOT use break-inside:avoid or page-break-inside:avoid on .section
+   ❌ DO NOT try to "simulate pages" with padding on .page container
+
+   WHAT TO DO:
+   ✅ Use @page margin for consistent page padding
+   ✅ Use break-after:avoid on headings to keep them with following content
+   ✅ Keep .page as a width/bounding container only (for screen preview)
+   ✅ Let content flow naturally - trust WeasyPrint's pagination algorithm
+   ✅ Test with realistic CV data (not minimal samples)
+
+   WEASYPRINT CSS SUPPORT:
+   - ✅ @page rules, margin, size
+   - ✅ break-before, break-after, break-inside (use sparingly!)
+   - ✅ page-break-* (legacy syntax, still supported)
+   - ❌ CSS Grid (limited), Flexbox (partial - prefer simple layouts)
+   - ❌ Modern features (backdrop-filter, container queries, etc.)
+
+   See: templates/html/CV_template_2pages_2025.spec.md for detailed specification
+   ============================================================================ */
+
 :root {
   --bg: #ffffff;
   --accent: #0000ff;
@@ -9,7 +50,9 @@
 
 @page {
   size: A4;
-  margin: 0;
+  /* Use Word-equivalent page margins so every physical page gets consistent padding,
+     even when the content naturally flows across pages. */
+  margin: 20mm 22.4mm 20mm 25mm;
 }
 
 * { box-sizing: border-box; }
@@ -28,20 +71,18 @@ body {
 }
 
 .page {
+  /* The @page margin controls padding per physical page.
+     Keep .page only as a width/bounding container for screen preview. */
   width: 210mm;
-  min-height: 297mm;
   margin: 0 auto;
-  /* Word margins: top 20mm, right ~22.4mm, bottom 20mm, left 25mm */
-  padding: 20mm 22.4mm 20mm 25mm;
   background: white;
 }
 
-/* Force a page break between the two explicit pages */
-.page-break {
-  height: 0;
-  break-before: page;
-  page-break-before: always;
-}
+/* REMOVED: .page-break class (legacy)
+ * The new layout uses natural flow pagination via @page margins.
+ * Content flows continuously and WeasyPrint handles page breaks automatically.
+ * Do NOT reintroduce explicit page break elements or min-height pagination hacks.
+ */
 
 .page {
   position: relative;
@@ -49,16 +90,17 @@ body {
 
 .header {
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr 45mm;
-  gap: 8mm;
-  align-items: start;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  /* Flexbox preferred over Grid for better WeasyPrint compatibility */
 }
 
 .header-left {
   display: flex;
   flex-direction: column;
-  gap: 2mm;
+  flex: 1;
+  margin-right: 6mm;  /* gap replacement for better WeasyPrint compatibility */
 }
 
 .name {
@@ -67,21 +109,35 @@ body {
   font-style: normal;
   color: var(--accent);
   font-family: var(--font-main);
-  margin: 0 0 3mm 0;
+  margin: 0 0 2mm 0;
 }
 
 .contact {
   display: flex;
   flex-direction: column;
-  gap: 4mm;
   font-size: 11pt;
   color: var(--muted);
+}
+
+.contact > * {
+  margin-bottom: 2mm;  /* gap replacement */
+}
+
+.contact > *:last-child {
+  margin-bottom: 0;
 }
 
 .contact-block {
   display: flex;
   flex-direction: column;
-  gap: 1mm;
+}
+
+.contact-block > * {
+  margin-bottom: 1mm;  /* gap replacement */
+}
+
+.contact-block > *:last-child {
+  margin-bottom: 0;
 }
 
 a {
@@ -92,6 +148,7 @@ a {
 .photo-box {
   width: 45mm;
   height: 55mm;
+  flex-shrink: 0;  /* Prevent photo from shrinking in flex layout */
   background: white;
   display: flex;
   align-items: center;
@@ -100,6 +157,11 @@ a {
   /* Subtle frame: thin border + soft shadow for depth */
   border: 0.5pt solid var(--border);
   box-shadow: 0 1pt 3pt rgba(0, 0, 0, 0.08);
+}
+
+.photo-box--empty {
+  /* When there's no photo, don't waste vertical space that can force a 3rd page. */
+  height: 35mm;
 }
 
 .photo-box img {
@@ -114,9 +176,14 @@ a {
 }
 
 .section {
-  margin-top: 6mm;
-  break-inside: avoid;
-  page-break-inside: avoid;
+  margin-top: 5mm;
+  /* IMPORTANT:
+     Do NOT prevent breaking inside whole sections.
+     If a large section (e.g., Work experience) doesn't fit in the remaining space on page 1,
+     break-inside:avoid will push the entire section to the next physical page, causing:
+       - large whitespace on page 1
+       - content spilling to a 3rd page even though we have an explicit 2-page template
+  */
 }
 
 .section-title {
@@ -124,11 +191,14 @@ a {
   font-weight: 700;
   font-variant: small-caps;
   letter-spacing: 0.3px;
-  margin: 0 0 3mm 0;
+  margin: 0 0 2mm 0;
   color: var(--accent);
   display: flex;
   align-items: center;
   gap: 6mm;
+  /* Keep section title with the first following block when possible */
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 .section-title::after {
@@ -139,20 +209,37 @@ a {
 
 .entry {
   margin-bottom: 2mm;
-  /* Prevent orphaned entry headers at page end */
-  page-break-inside: avoid;
+  /* Allow entries to split across pages if needed; avoid rules here can create
+     large whitespace and push content to a 3rd page. Keep the header with the
+     next line instead (see .entry-head). */
 }
 
 .entry-head {
-  display: grid;
-  grid-template-columns: 42.5mm 1fr;
-  column-gap: 3mm;
+  display: flex;
   align-items: baseline;
   font-weight: 400;
+  /* Prefer keeping the entry header with at least the next line/bullets */
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.entry-head > .entry-date {
+  width: 42.5mm;
+  margin-right: 3mm;  /* column-gap replacement */
+  flex-shrink: 0;
+}
+
+.entry-head > .entry-title {
+  flex: 1;
 }
 
 .entry-title {
   font-weight: 700;
+  font-size: inherit;
+}
+
+.further-exp-title {
+  font-weight: 400;
   font-size: inherit;
 }
 
@@ -175,8 +262,8 @@ a {
 }
 
 .bullets li {
-  margin-bottom: 0.5mm;
-  line-height: 1.2;
+  margin-bottom: 0.3mm;
+  line-height: 1.15;
 }
 
 .simple-list {
@@ -187,8 +274,8 @@ a {
 }
 
 .simple-list li {
-  margin-bottom: 1mm;
-  line-height: 1.3;
+  margin-bottom: 0.7mm;
+  line-height: 1.25;
 }
 
 .footer {
@@ -203,17 +290,32 @@ a {
   color: var(--muted);
 }
 
-.small { font-size: inherit; }
+.small { font-size: inherit; line-height: 1.25; }
 
 .two-col-list {
   display: flex;
   flex-direction: column;
-  gap: 1mm;
+}
+
+.two-col-list > * {
+  margin-bottom: 0.6mm;  /* gap replacement */
+}
+
+.two-col-list > *:last-child {
+  margin-bottom: 0;
 }
 
 .two-col-row {
-  display: grid;
-  grid-template-columns: 42.5mm 1fr;
-  column-gap: 3mm;
+  display: flex;
+}
+
+.two-col-row > div:first-child {
+  width: 42.5mm;
+  margin-right: 3mm;  /* column-gap replacement */
+  flex-shrink: 0;
+}
+
+.two-col-row > div:last-child {
+  flex: 1;
 }
 
