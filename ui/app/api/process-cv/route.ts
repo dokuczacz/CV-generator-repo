@@ -307,7 +307,15 @@ async function callAzureFunction(endpoint: string, body: any) {
       `Azure Function error: ${response.status} ${response.statusText}${snippet ? ` - ${snippet}` : ''}`
     );
   }
-
+  // Handle PDF responses (application/pdf) by converting to base64
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/pdf')) {
+    const buf = await response.arrayBuffer();
+    // Buffer is available in the Node.js runtime for Next.js API routes
+    const pdfBase64 = Buffer.from(buf).toString('base64');
+    return { pdf_base64: pdfBase64 };
+  }
+  // Default: JSON response
   return response.json();
 }
 
@@ -859,6 +867,8 @@ async function chatWithCV(
     }
     return stage;
   };
+  // Log prompt ID to verify .env.local is loaded
+  console.log('[DEBUG] OpenAI request config:', { promptId, modelOverride, stage, has_prompt: !!promptId });
 
   const buildRequest = (input: any[]) =>
     buildResponsesRequest({
@@ -908,21 +918,37 @@ async function chatWithCV(
       if (userRequestedGenerate && !pdfBase64 && typeof currentSessionId === 'string' && currentSessionId.trim()) {
         try {
           console.log('🛟 Fallback: user requested PDF; attempting server-side generate_cv_from_session');
+          // Preview session state before final generation to ensure edits are persisted
+          try {
+            const previewRaw = await processToolCall('get_cv_session', { session_id: currentSessionId });
+            try {
+              const preview = JSON.parse(previewRaw);
+              const hasCv = !!preview?.cv;
+              const lastUpdated = preview?.updated_at || preview?.last_updated || preview?.timestamp || null;
+              const weCount = Array.isArray(preview?.cv?.work_experience) ? preview.cv.work_experience.length : undefined;
+              console.log('🗃️ Session preview before fallback generate:', { hasCv, lastUpdated, weCount });
+            } catch {}
+          } catch {}
           const toolArgs: any = { session_id: currentSessionId, language };
           const toolOutput = await processToolCall('generate_cv_from_session', toolArgs);
 
           let effectiveToolOutput = toolOutput;
           try {
             const parsed = JSON.parse(toolOutput);
+            const errorStr = typeof parsed?.error === 'string' ? parsed.error : '';
             const details = typeof parsed?.details === 'string' ? parsed.details : '';
-            if (parsed?.error && details.includes('DoD violation')) {
-              console.log('  🛠️ Fallback auto-fix DoD overflow: applying clamps and retrying generation once');
+            // Check for validation errors (bullet/text too long) or DoD violations
+            const hasValidationError = errorStr.includes('Validation failed') || details.includes('DoD violation');
+            if (parsed?.error && hasValidationError) {
+              console.log('  🛠️ Fallback auto-fix validation error: applying clamps and retrying generation once');
               await autoFixForTwoPages(currentSessionId, language);
               effectiveToolOutput = await processToolCall('generate_cv_from_session', toolArgs);
               const parsed2 = JSON.parse(effectiveToolOutput);
+              const errorStr2 = typeof parsed2?.error === 'string' ? parsed2.error : '';
               const details2 = typeof parsed2?.details === 'string' ? parsed2.details : '';
-              if (parsed2?.error && details2.includes('DoD violation')) {
-                console.log('  🛠️ Fallback auto-squeeze DoD overflow: applying aggressive clamps and retrying once');
+              const hasValidationError2 = errorStr2.includes('Validation failed') || details2.includes('DoD violation');
+              if (parsed2?.error && hasValidationError2) {
+                console.log('  🛠️ Fallback auto-squeeze: applying aggressive clamps and retrying once');
                 await autoSqueezeForTwoPages(currentSessionId, language);
                 effectiveToolOutput = await processToolCall('generate_cv_from_session', toolArgs);
               }
@@ -939,6 +965,11 @@ async function chatWithCV(
             console.log('  📄 Fallback PDF generated, length:', pdfBase64.length);
           } else {
             console.warn('⚠️ Fallback generation did not return a PDF');
+            console.warn('   Backend response keys:', Object.keys(parsed || {}).join(', '));
+            console.warn('   pdf_base64 type:', typeof parsed?.pdf_base64);
+            console.warn('   pdf_base64 length:', parsed?.pdf_base64?.length ?? 'N/A');
+            if (parsed?.error) console.warn('   error:', parsed.error);
+            if (parsed?.details) console.warn('   details:', parsed.details);
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
