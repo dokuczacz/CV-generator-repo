@@ -753,6 +753,16 @@ async function chatWithCV(
     }
   }
 
+  // Determine initial stage for phase-aware context
+  const userRequestedGenerate = wantsGenerate(userMessage);
+  let stage: CVStage = hasSession
+    ? userRequestedGenerate
+      ? 'generate_pdf'
+      : 'review_session'
+    : hasDocx
+    ? 'extract'
+    : 'bootstrap';
+
   const userContent = buildUserContent({
     userMessage,
     hasDocx,
@@ -765,6 +775,7 @@ async function chatWithCV(
     jobPostingUrl: url,
     jobPostingText: jobText,
     language,
+    stage,
   });
 
   const promptId = process.env.OPENAI_PROMPT_ID;
@@ -799,14 +810,7 @@ async function chatWithCV(
   console.log('📤 Calling OpenAI Responses API...');
   const apiStartTime = Date.now();
 
-  const userRequestedGenerate = wantsGenerate(userMessage);
-  let stage: CVStage = hasSession
-    ? userRequestedGenerate
-      ? 'generate_pdf'
-      : 'review_session'
-    : hasDocx
-    ? 'extract'
-    : 'bootstrap';
+  // Stage already initialized above for buildUserContent
   let stageSeq = 0;
   const stageUpdates: Array<{ from: CVStage; to: CVStage; via: string }> = [];
 
