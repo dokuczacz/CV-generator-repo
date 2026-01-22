@@ -961,8 +961,21 @@ async function chatWithCV(
       };
     }
 
-    // Per docs, feed model output items back as part of the next input turn.
-    inputList.push(...response.output);
+    // Per Responses API docs:
+    // When store=false (ZDR compliance), response items are NOT persisted.
+    // We must add tool_call items (request structures) but NOT function_call_output items
+    // (which are transient when store=false and cannot be referenced later).
+    //
+    // Add tool calls to inputList so we can reference them when sending back outputs.
+    if (response.output && Array.isArray(response.output)) {
+      for (const item of response.output) {
+        if (item?.type === 'function_call') {
+          // This is a tool call request; it MUST be in the conversation so outputs can reference it
+          inputList.push(item);
+        }
+        // Skip function_call_output items (they're not persisted with store=false)
+      }
+    }
 
     for (const toolCall of toolCalls) {
       const toolName: string = toolCall.name;
