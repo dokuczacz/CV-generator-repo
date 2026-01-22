@@ -6,7 +6,8 @@
       "Bash(Select-Object -First 100)",
       "Bash(python:*)",
       "Bash(ls:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
