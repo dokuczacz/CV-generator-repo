@@ -7,6 +7,7 @@ import {
   buildBaseInputList,
   buildResponsesRequest,
   buildUserContent,
+  determineCurrentPhase,
   roughInputChars,
   sanitizeToolOutputForModel,
 } from '@/lib/capsule';
@@ -720,22 +721,50 @@ async function chatWithCV(
     console.log('📄 Extracted DOCX text:', boundedCvText ? `${boundedCvText.length} chars (bounded)` : 'none');
   }
 
-  // If feature flag enabled, ask backend to build a compact ContextPackV1
+  // Determine initial stage for phase-aware context
+  const userRequestedGenerate = wantsGenerate(userMessage);
+  let stage: CVStage = hasSession
+    ? userRequestedGenerate
+      ? 'generate_pdf'
+      : 'review_session'
+    : hasDocx
+    ? 'extract'
+    : 'bootstrap';
+
+  // If session is present, fetch phase-specific ContextPackV2
+  // Otherwise, use legacy V1 context pack (or skip for bootstrap/extract)
   let contextPack: any = null;
-  const USE_CONTEXT_PACK = process.env.CV_USE_CONTEXT_PACK === '1';
-  if (USE_CONTEXT_PACK && !hasSession && hasDocx && boundedCvText) {
+  if (hasSession && sessionId) {
     try {
-      console.log('🧩 CV_USE_CONTEXT_PACK enabled — requesting context pack from backend');
-      // Send minimal cv_data with extracted text as `profile` as a starting point.
+      // Determine phase from stage for V2 context pack
+      const phase = determineCurrentPhase(stage);
+      console.log(`📦 Fetching ContextPackV2 (phase=${phase}) for session ${sessionId.slice(0, 8)}...`);
+      const packResp = await callAzureFunction('/generate-context-pack-v2', {
+        phase,
+        session_id: sessionId,
+        job_posting_text: jobText || undefined,
+        max_pack_chars: 12000,
+      });
+      contextPack = packResp;
+      console.log(`📦 ContextPackV2 received (phase=${phase}); schema: ${packResp?.schema_version || 'unknown'}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`⚠️ Failed to fetch ContextPackV2 for session; falling back to session snapshot`, msg);
+      contextPack = null;
+    }
+  } else if (!hasSession && process.env.CV_USE_CONTEXT_PACK === '1' && hasDocx && boundedCvText) {
+    // Legacy: V1 context pack for bootstrap/extract phases (no session yet)
+    try {
+      console.log('🧩 CV_USE_CONTEXT_PACK enabled — requesting ContextPackV1 from backend');
       const packResp = await callAzureFunction('/generate-context-pack', {
         cv_data: { profile: boundedCvText },
         job_posting_text: jobText,
       });
       contextPack = packResp;
-      console.log('🧩 Context pack received; keys:', Object.keys(contextPack || {}));
+      console.log('🧩 ContextPackV1 received; keys:', Object.keys(contextPack || {}));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn('⚠️ Failed to build context pack; falling back to injected CV text', msg);
+      console.warn('⚠️ Failed to build ContextPackV1; falling back to injected CV text', msg);
       contextPack = null;
     }
   }
@@ -752,16 +781,6 @@ async function chatWithCV(
       sessionSnapshot = null;
     }
   }
-
-  // Determine initial stage for phase-aware context
-  const userRequestedGenerate = wantsGenerate(userMessage);
-  let stage: CVStage = hasSession
-    ? userRequestedGenerate
-      ? 'generate_pdf'
-      : 'review_session'
-    : hasDocx
-    ? 'extract'
-    : 'bootstrap';
 
   const userContent = buildUserContent({
     userMessage,
