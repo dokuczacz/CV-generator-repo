@@ -15,8 +15,14 @@ class SchemaValidationError(Exception):
 # Canonical schema keys (what we expect)
 CANONICAL_KEYS = {
     "full_name", "email", "phone", "photo_url",
-    "work_experience", "education", "skills",
-    "languages", "certifications", "summary", "language"
+    "work_experience", "education",
+    # Template-aligned fields
+    "address_lines", "birth_date", "nationality",
+    "profile", "it_ai_skills", "interests",
+    "further_experience", "references", "data_privacy",
+    # Legacy/compat fields still accepted/normalized
+    "skills", "certifications", "summary",
+    "languages", "language"
 }
 
 # Wrong keys that agents sometimes send
@@ -116,19 +122,30 @@ def build_schema_error_response(cv_data: Dict[str, Any]) -> Dict[str, Any]:
             "full_name": "string (required)",
             "email": "string (required)",
             "phone": "string (required)",
-            "photo_url": "string (optional, data URI)",
+            "address_lines": "array (optional, max 2 lines)",
+            "photo_url": "string (optional, data URI; backend may store as blob pointer)",
+            "birth_date": "string (optional)",
+            "nationality": "string (optional)",
+            "profile": "string (optional)",
             "work_experience": "array (required, min 1 entry)",
             "education": "array (required, min 1 entry)",
-            "skills": "array (optional)",
+            "it_ai_skills": "array (optional)",
+            "skills": "array (optional, legacy; prefer it_ai_skills)",
             "languages": "array (optional)",
             "certifications": "array (optional)",
-            "summary": "string (optional)",
+            "summary": "string (optional, legacy; prefer profile)",
+            "interests": "string (optional)",
+            "further_experience": "array (optional)",
+            "references": "string (optional)",
+            "data_privacy": "string (optional)",
             "language": "string (optional, e.g., 'en', 'de', 'pl')"
         },
         "example": {
             "full_name": "John Doe",
             "email": "john@example.com",
             "phone": "+1234567890",
+            "address_lines": ["Example Street 1", "8000 Zurich"],
+            "profile": "Short professional summary (2-4 lines).",
             "work_experience": [
                 {
                     "date_range": "2020-2024",
@@ -145,8 +162,10 @@ def build_schema_error_response(cv_data: Dict[str, Any]) -> Dict[str, Any]:
                     "details": ["GPA: 3.9/4.0"]
                 }
             ],
-            "skills": ["Python", "React", "AWS"],
+            "it_ai_skills": ["Python", "React", "AWS"],
             "languages": ["English", "Spanish"],
+            "interests": "Reading; hiking; volunteering.",
+            "references": "Available upon request.",
             "language": "en"
         },
         "your_data_keys": list(cv_data.keys()) if isinstance(cv_data, dict) else "not a dict",

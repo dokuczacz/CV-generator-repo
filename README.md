@@ -132,6 +132,12 @@ npm run dev
 
 Open: http://localhost:3000
 
+### Local E2E smoke (session workflow)
+With Azurite + Functions running locally on `http://127.0.0.1:7071`, run:
+```bash
+python scripts/smoke_local_session.py
+```
+
 ### Test Backend (Azure Functions)
 ```bash
 curl -X POST https://cv-generator-6695.azurewebsites.net/api/validate-cv \
@@ -224,6 +230,65 @@ curl -X POST https://cv-generator-6695.azurewebsites.net/api/validate-cv \
 - Ensure DOCX file has embedded image
 - Check base64 conversion in logs
 - Falls back to placeholder if extraction fails
+
+---
+
+## AI Agent Setup
+
+This project supports multiple AI coding agents with tailored configurations:
+
+### Claude Code (Recommended for Complex Tasks)
+**Auto-context file:** [.claude/CLAUDE.md](.claude/CLAUDE.md) loads automatically on every conversation
+
+**Quick start:**
+1. Open project in VSCode with Claude Code extension
+2. Start chatting - context loads automatically
+3. Use custom slash commands:
+   - `/validate-cv` - Validate CV JSON against schema
+   - `/visual-regression` - Run visual tests
+   - `/multi-claude-review` - Parallel code review
+
+**Unique features:**
+- Extended thinking modes (`think`, `think hard`, `ultrathink`)
+- Multi-Claude parallel workflows (code + review simultaneously)
+- Visual iteration with Playwright screenshots
+- Agent Skills with progressive disclosure
+- Headless CI/CD integration
+
+**MCP Servers configured:**
+- Filesystem (progressive disclosure)
+- Playwright (visual regression)
+- GitHub (PR management)
+- Azure Blob Storage (session storage)
+- OpenAI Developer Docs
+
+**See:** [.claude/README.md](.claude/README.md) for complete setup
+
+### GitHub Copilot (Recommended for Quick Edits)
+**Instructions file:** [.github/copilot-instructions.md](.github/copilot-instructions.md)
+
+**Features:**
+- Context mentions (`#codebase`, `#file`, `#terminalSelection`)
+- Agent modes (Agent/Plan/Ask/Edit)
+- Azure MCP integration (default subscription/tenant configured)
+- Validation checklist before PR
+
+### Codex (Advanced Users)
+**Configuration:** [AGENTS.md](AGENTS.md)
+
+**Features:**
+- Modular skills system (omniflow-* skills)
+- Progressive disclosure (3-level loading)
+- Unknown Sea Protocol (safety-first)
+- Tier-based skill composition (CORE vs ON_DEMAND)
+
+**Installed skills:**
+- `omniflow-execplan` - Task execution planning
+- `omniflow-stall-escalation` - Blocker detection
+- `omniflow-azure-blob-ops` - Azure/Azurite operations
+- `omniflow-github-operator` - Git hygiene workflows
+
+**See:** [AGENTS.md](AGENTS.md) for full skill documentation
 
 ---
 

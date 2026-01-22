@@ -3,6 +3,16 @@ import path from 'path';
 import process from 'process';
 import { pathToFileURL } from 'url';
 
+// Local dev on Windows can accidentally inherit a Linux-only PLAYWRIGHT_BROWSERS_PATH
+// from Azure settings templates (e.g. "/home/site/wwwroot/.playwright"), which breaks
+// browser resolution. Prefer Playwright defaults on Windows in that case.
+if (process.platform === 'win32') {
+  const p = process.env.PLAYWRIGHT_BROWSERS_PATH || '';
+  if (p.startsWith('/')) {
+    delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+  }
+}
+
 const [,, htmlPathArg, pdfPathArg] = process.argv;
 
 if (!htmlPathArg || !pdfPathArg) {

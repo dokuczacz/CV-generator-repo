@@ -491,6 +491,109 @@ def generate_context_pack(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+@app.route(route="generate-context-pack-v2", methods=["POST"])
+def generate_context_pack_v2(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Build ContextPackV2 (phase-specific) from session data.
+    Returns JSON with phase-appropriate context.
+
+    Request:
+        {
+            "phase": "preparation|confirmation|execution",
+            "session_id": "uuid",
+            "job_posting_text": "..." (optional, for Phase 1),
+            "max_pack_chars": 12000 (optional)
+        }
+
+    Response:
+        {
+            "schema_version": "cvgen.context_pack.v2",
+            "phase": "preparation",
+            "preparation": {...},  // Phase-specific context
+            "session_id": "uuid",
+            "cv_fingerprint": "sha256:..."
+        }
+    """
+    logging.info('Generate Context Pack V2 requested')
+
+    try:
+        req_body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON"}),
+            mimetype="application/json",
+            status_code=400,
+        )
+
+    phase = req_body.get("phase")
+    if phase not in ["preparation", "confirmation", "execution"]:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid phase. Must be 'preparation', 'confirmation', or 'execution'"}),
+            mimetype="application/json",
+            status_code=400,
+        )
+
+    session_id = req_body.get("session_id")
+    if not session_id:
+        return func.HttpResponse(
+            json.dumps({"error": "Missing session_id in request"}),
+            mimetype="application/json",
+            status_code=400,
+        )
+
+    job_posting_text = req_body.get("job_posting_text")
+    max_pack_chars = req_body.get("max_pack_chars") or 12000
+
+    try:
+        # Load session
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+        if not session:
+            return func.HttpResponse(
+                json.dumps({"error": "Session not found or expired"}),
+                mimetype="application/json",
+                status_code=404
+            )
+
+        cv_data = session.get("cv_data")
+        metadata = session.get("metadata") or {}
+
+        # Add session_id to metadata for context pack
+        metadata["session_id"] = session_id
+
+        # Build phase-specific context pack
+        from src.context_pack import build_context_pack_v2
+
+        pack = build_context_pack_v2(
+            phase=phase,
+            cv_data=cv_data,
+            job_posting_text=job_posting_text,
+            session_metadata=metadata,
+            max_pack_chars=max_pack_chars,
+        )
+
+        # Log pack size
+        pack_str = json.dumps(pack, ensure_ascii=False)
+        token_estimate = len(pack_str) // 4  # Rough: 1 token ≈ 4 chars
+        logging.info(f"Context pack V2 built for phase {phase}: {token_estimate} tokens (~{len(pack_str)} bytes)")
+
+        if token_estimate > 3000:
+            logging.warning(f"Context pack exceeds 3K tokens ({token_estimate})")
+
+        return func.HttpResponse(
+            json.dumps(pack, ensure_ascii=False),
+            mimetype="application/json; charset=utf-8",
+            status_code=200,
+        )
+    except Exception as e:
+        logging.error(f"Context pack V2 generation failed: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Context pack V2 generation failed", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500,
+        )
+
+
 # ============================================================================
 # PHASE 2: SESSION-BASED ENDPOINTS
 # ============================================================================

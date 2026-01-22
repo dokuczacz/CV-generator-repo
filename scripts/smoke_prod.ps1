@@ -4,6 +4,9 @@ param(
   [string]$OutPdfPath
 )
 
+# Note:
+# - Local session E2E smoke (Functions running on http://127.0.0.1:7071) is in: scripts/smoke_local_session.py
+
 $ErrorActionPreference = 'Stop'
 
 try {

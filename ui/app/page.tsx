@@ -10,7 +10,10 @@ interface Message {
   pdfBase64?: string;
 }
 
-const LAST_RESPONSE_ID_KEY = 'cvgen:last_response_id';
+const SESSION_ID_KEY = 'cvgen:session_id';
+const JOB_URL_KEY = 'cvgen:job_posting_url';
+const JOB_TEXT_KEY = 'cvgen:job_posting_text';
+const DEBUG_STAGE = process.env.NEXT_PUBLIC_CV_DEBUG_STAGE === '1';
 
 export default function CVGenerator() {
   const [messages, setMessages] = useState<Message[]>([
@@ -22,7 +25,9 @@ export default function CVGenerator() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [cvFile, setCvFile] = useState<File | null>(null);
-  const [lastResponseId, setLastResponseId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [jobPostingUrl, setJobPostingUrl] = useState<string | null>(null);
+  const [jobPostingText, setJobPostingText] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -35,8 +40,12 @@ export default function CVGenerator() {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(LAST_RESPONSE_ID_KEY);
-      if (stored) setLastResponseId(stored);
+      const stored = window.localStorage.getItem(SESSION_ID_KEY);
+      if (stored) setSessionId(stored);
+      const jobUrl = window.localStorage.getItem(JOB_URL_KEY);
+      if (jobUrl) setJobPostingUrl(jobUrl);
+      const jobText = window.localStorage.getItem(JOB_TEXT_KEY);
+      if (jobText) setJobPostingText(jobText);
     } catch {
       // ignore
     }
@@ -53,10 +62,14 @@ export default function CVGenerator() {
       ) {
         setCvFile(file);
 
-        // New file = new conversation chain.
-        setLastResponseId(null);
+        // New file = new session.
+        setSessionId(null);
+        setJobPostingUrl(null);
+        setJobPostingText(null);
         try {
-          window.localStorage.removeItem(LAST_RESPONSE_ID_KEY);
+          window.localStorage.removeItem(SESSION_ID_KEY);
+          window.localStorage.removeItem(JOB_URL_KEY);
+          window.localStorage.removeItem(JOB_TEXT_KEY);
         } catch {
           // ignore
         }
@@ -92,7 +105,8 @@ export default function CVGenerator() {
     try {
       let docx_base64: string | undefined;
 
-      if (cvFile) {
+      // Only send the file once (to create a session). Later turns use session_id (stateless API).
+      if (cvFile && !sessionId) {
         docx_base64 = await new Promise<string | undefined>((resolve) => {
           const reader = new FileReader();
           reader.onload = (e) => {
@@ -128,7 +142,9 @@ export default function CVGenerator() {
       const payload = {
         message: userMessage,
         docx_base64,
-        previous_response_id: lastResponseId,
+        session_id: sessionId,
+        job_posting_url: jobPostingUrl,
+        job_posting_text: jobPostingText,
       };
       
       console.log('=== Frontend Request ===');
@@ -152,12 +168,38 @@ export default function CVGenerator() {
       }
 
       const result = await response.json();
-      console.log('Result:', { success: result.success, hasResponse: !!result.response, hasPDF: !!result.pdf_base64 });
+      console.log('Result:', {
+        success: result.success,
+        hasResponse: !!result.response,
+        hasPDF: !!result.pdf_base64,
+        session_id: result.session_id,
+        stage: result.stage,
+        stage_seq: result.stage_seq,
+      });
+      if (Array.isArray(result.stage_updates) && result.stage_updates.length) {
+        console.log('Stage updates:', result.stage_updates);
+      }
 
-      if (result?.last_response_id) {
-        setLastResponseId(result.last_response_id);
+      if (result?.session_id) {
+        setSessionId(result.session_id);
         try {
-          window.localStorage.setItem(LAST_RESPONSE_ID_KEY, result.last_response_id);
+          window.localStorage.setItem(SESSION_ID_KEY, result.session_id);
+        } catch {
+          // ignore
+        }
+      }
+      if (typeof result?.job_posting_url === 'string' && result.job_posting_url.trim()) {
+        setJobPostingUrl(result.job_posting_url);
+        try {
+          window.localStorage.setItem(JOB_URL_KEY, result.job_posting_url);
+        } catch {
+          // ignore
+        }
+      }
+      if (typeof result?.job_posting_text === 'string' && result.job_posting_text.trim()) {
+        setJobPostingText(result.job_posting_text);
+        try {
+          window.localStorage.setItem(JOB_TEXT_KEY, result.job_posting_text);
         } catch {
           // ignore
         }
@@ -166,7 +208,10 @@ export default function CVGenerator() {
       if (result.success) {
         const assistantMsg: Message = {
           role: 'assistant',
-          content: result.response || 'Processing completed',
+          content:
+            DEBUG_STAGE && result.stage
+              ? `[stage=${result.stage}]\n\n${result.response || 'Processing completed'}`
+              : result.response || 'Processing completed',
         };
 
         if (result.pdf_base64) {

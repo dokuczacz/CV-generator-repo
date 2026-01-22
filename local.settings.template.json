@@ -3,15 +3,17 @@
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "FUNCTIONS_EXTENSION_VERSION": "~4",
-    "AzureWebJobsStorage": "***STORAGE_CONNECTION_STRING***",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "STORAGE_ACCOUNT_URL": "https://YOUR_STORAGE_ACCOUNT.blob.core.windows.net",
-    "STORAGE_CONNECTION_STRING": "***STORAGE_CONNECTION_STRING***",
+    "STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
     "STORAGE_CONTAINER_THEMES": "cv-themes",
     "STORAGE_CONTAINER_TEMPLATES": "cv-templates",
     "STORAGE_CONTAINER_FONTS": "cv-fonts",
-    "PLAYWRIGHT_BROWSERS_PATH": "/home/site/wwwroot/.playwright",
+    "STORAGE_CONTAINER_PHOTOS": "cv-photos",
+    "STORAGE_BLOB_API_VERSION": "2023-11-03",
     "AZURE_SDK_LOG_LEVEL": "WARNING",
-    "CV_DEFAULT_THEME": "zurich"
+    "CV_DEFAULT_THEME": "zurich",
+    "CV_PDF_RENDERER": "playwright"
   },
-  "Comment": "STORAGE_CONNECTION_STRING is used for both Azure Blob Storage AND Azure Table Storage (Phase 2 sessions)"
+  "Comment": "Local dev defaults: UseDevelopmentStorage=true requires Azurite running. STORAGE_CONNECTION_STRING is used for both Azure Blob Storage AND Azure Table Storage (Phase 2 sessions)."
 }

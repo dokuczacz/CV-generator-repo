@@ -110,9 +110,22 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
         # Join list items into a readable single line.
         normalized["interests"] = "; ".join([str(x).strip() for x in interests if str(x).strip()])
 
+    # Skills: template expects `it_ai_skills` (list[str]).
+    # Many payloads use `skills` instead; map it conservatively.
+    if "it_ai_skills" not in normalized and "skills" in normalized:
+        skills = normalized.get("skills")
+        if isinstance(skills, list):
+            normalized["it_ai_skills"] = [str(x).strip() for x in skills if str(x).strip()]
+
     # Support alternate privacy field name.
     if "data_privacy" not in normalized and "data_privacy_consent" in normalized:
         normalized["data_privacy"] = normalized.get("data_privacy_consent")
+
+    # Summary/profile: template uses `profile` (string). Some payloads use `summary`.
+    if "profile" not in normalized and "summary" in normalized:
+        summary_text = normalized.get("summary")
+        if isinstance(summary_text, str) and summary_text.strip():
+            normalized["profile"] = summary_text
 
     # Support professional summary list by mapping to legacy `profile` (even if template doesn't render it).
     summary = normalized.get("professional_summary")
