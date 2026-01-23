@@ -17,6 +17,41 @@ def _sha256_hex(s: str) -> str:
 DEFAULT_MAX_PACK_CHARS = 12000
 
 
+TEMPLATE_SPEC_V1 = {
+    "template_name": "cv_template_2pages_2025",
+    "notes": [
+        "The current fixed PDF template does NOT render a dedicated Profile/Summary section.",
+        "Optimize content for the rendered sections and hard limits.",
+    ],
+    "rendered_sections_order": [
+        "Education",
+        "Work experience",
+        "Further experience / commitment",
+        "Language Skills",
+        "IT & AI Skills",
+        "Interests",
+        "References",
+    ],
+    "rendered_fields": [
+        "full_name",
+        "address_lines",
+        "phone",
+        "email",
+        "birth_date",
+        "nationality",
+        "education",
+        "work_experience",
+        "further_experience",
+        "languages",
+        "it_ai_skills",
+        "interests",
+        "references",
+        "photo_url",
+        "language",
+    ],
+}
+
+
 def build_context_pack(
     cv_data: Dict[str, Any],
     user_message: Optional[str] = None,
@@ -169,6 +204,30 @@ def build_context_pack_v2(
 
     session_id = session_metadata.get('session_id') if session_metadata else None
     language = normalized.get('language', 'en')
+    event_log = session_metadata.get("event_log") if isinstance(session_metadata, dict) else None
+    if not isinstance(event_log, list):
+        event_log = []
+
+    def _compact_event(e: Any) -> Dict[str, Any]:
+        if not isinstance(e, dict):
+            return {}
+        out: Dict[str, Any] = {
+            "ts": e.get("ts"),
+            "type": e.get("type"),
+        }
+        if "field_path" in e:
+            out["field_path"] = e.get("field_path")
+        if "preview" in e:
+            p = e.get("preview")
+            if isinstance(p, str) and len(p) > 160:
+                p = p[:160] + "…"
+            out["preview"] = p
+        if "language" in e:
+            out["language"] = e.get("language")
+        cc = e.get("client_context")
+        if isinstance(cc, dict):
+            out["client_context"] = {"stage": cc.get("stage"), "stage_seq": cc.get("stage_seq")}
+        return out
 
     pack: Dict[str, Any] = {
         'schema_version': 'cvgen.context_pack.v2',
@@ -176,6 +235,12 @@ def build_context_pack_v2(
         'language': language,
         'session_id': session_id,
         'cv_fingerprint': fingerprint,
+        'template': TEMPLATE_SPEC_V1,
+        'session_freshness': {
+            "version": session_metadata.get("version") if isinstance(session_metadata, dict) else None,
+            "updated_at": session_metadata.get("updated_at") if isinstance(session_metadata, dict) else None,
+        },
+        'recent_events': [_compact_event(e) for e in event_log[-15:]],
     }
 
     if phase == 'preparation':
@@ -190,6 +255,10 @@ def build_context_pack_v2(
         pack['execution'] = _build_execution_context(
             normalized, session_metadata
         )
+
+    # Add completeness + next_missing_section
+    completeness = _compute_completeness(normalized)
+    pack['completeness'] = completeness
 
     # Apply size limits
     pack = _apply_size_limits_v2(pack, max_pack_chars)
@@ -216,6 +285,11 @@ def _build_preparation_context(
 
     # CV structured data (for mapping) - compact version
     context['cv_data'] = _extract_cv_structured_compact(cv_data)
+
+    # Unconfirmed DOCX extraction snapshot (reference only).
+    # Sessions now start empty; this helps the agent re-populate required fields quickly and explicitly.
+    if isinstance(session_metadata, dict) and session_metadata.get("docx_prefill_unconfirmed"):
+        context["docx_prefill_unconfirmed"] = session_metadata.get("docx_prefill_unconfirmed")
 
     # Proposal history (from session metadata) - keep last 3 only
     if session_metadata and 'proposal_history' in session_metadata:
@@ -269,7 +343,9 @@ def _build_execution_context(
     context['hard_limits'] = {
         'work_experience_max': 5,
         'work_bullets_per_entry_max': 4,
-        'work_bullet_chars_max': 90,
+        # Soft limits: bullet wrapping is allowed; page-fit is the DoD.
+        'work_bullet_chars_soft': 99,
+        'work_bullet_chars_hard': 180,
         'education_max': 3,
         'profile_chars_max': 320,
         'languages_max': 5,
@@ -280,6 +356,54 @@ def _build_execution_context(
     context['self_validation_checklist'] = _build_validation_checklist(cv_data)
 
     return context
+
+
+def _compute_completeness(cv_data: Dict[str, Any]) -> Dict[str, Any]:
+    required_present = {
+        "full_name": bool(cv_data.get("full_name", "").strip()) if isinstance(cv_data.get("full_name"), str) else False,
+        "email": bool(cv_data.get("email", "").strip()) if isinstance(cv_data.get("email"), str) else False,
+        "phone": bool(cv_data.get("phone", "").strip()) if isinstance(cv_data.get("phone"), str) else False,
+        "work_experience": bool(cv_data.get("work_experience")) and isinstance(cv_data.get("work_experience"), list),
+        "education": bool(cv_data.get("education")) and isinstance(cv_data.get("education"), list),
+    }
+
+    work = cv_data.get("work_experience", []) if isinstance(cv_data.get("work_experience"), list) else []
+    edu = cv_data.get("education", []) if isinstance(cv_data.get("education"), list) else []
+    langs = cv_data.get("languages", []) if isinstance(cv_data.get("languages"), list) else []
+    skills = cv_data.get("it_ai_skills", []) if isinstance(cv_data.get("it_ai_skills"), list) else []
+    interests = cv_data.get("interests", "")
+
+    counts = {
+        "work_experience": len(work),
+        "education": len(edu),
+        "languages": len(langs),
+        "it_ai_skills": len(skills),
+    }
+
+    # Determine next missing section in template order
+    template_order = [
+        ("education", edu),
+        ("work_experience", work),
+        ("further_experience", cv_data.get("further_experience", []) if isinstance(cv_data.get("further_experience"), list) else []),
+        ("languages", langs),
+        ("it_ai_skills", skills),
+        ("interests", interests if isinstance(interests, str) else ""),
+        ("references", cv_data.get("references", "")),
+    ]
+    next_missing = None
+    for name, val in template_order:
+        if isinstance(val, list) and len(val) == 0:
+            next_missing = name
+            break
+        if isinstance(val, str) and len(val.strip()) == 0:
+            next_missing = name
+            break
+
+    return {
+        "required_present": required_present,
+        "counts": counts,
+        "next_missing_section": next_missing,
+    }
 
 
 def _extract_cv_structured_compact(cv_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -418,17 +542,139 @@ def _build_validation_checklist(cv_data: Dict[str, Any]) -> List[Dict[str, Any]]
 
 
 def _apply_size_limits_v2(pack: Dict[str, Any], max_chars: int) -> Dict[str, Any]:
-    """Apply size limits to context pack (similar to V1 but for V2 structure)."""
-    pack_str = json.dumps(pack, ensure_ascii=False, sort_keys=True)
-    size = len(pack_str)
+    """Apply size limits to context pack (for V2 structure).
 
+    Strategy: keep the pack useful to the agent but bounded.
+    - Prefer dropping low-priority history before dropping CV structure.
+    - Never drop required session metadata fields.
+    """
+    limits = pack.setdefault('limits', {})
+
+    def _size(p: Dict[str, Any]) -> int:
+        return len(json.dumps(p, ensure_ascii=False, sort_keys=True))
+
+    truncated_fields: List[str] = []
+    size = _size(pack)
+    if size <= max_chars:
+        return pack
+
+    phase = pack.get("phase")
+
+    # 1) Drop proposal history first (most token-heavy + low priority).
+    try:
+        if phase == "preparation" and isinstance(pack.get("preparation"), dict):
+            prep = pack["preparation"]
+            if isinstance(prep.get("proposal_history"), list) and prep["proposal_history"]:
+                prep["proposal_history"] = []
+                truncated_fields.append("preparation.proposal_history")
+    except Exception:
+        pass
+
+    size = _size(pack)
+    if size <= max_chars:
+        limits["final_size"] = size
+        limits["max_chars"] = max_chars
+        limits["truncated_fields"] = truncated_fields
+        return pack
+
+    # 2) Compact CV structures: trim bullets/details to avoid bloat.
+    def _compact_work(work: Any) -> Any:
+        if not isinstance(work, list):
+            return work
+        out: List[Dict[str, Any]] = []
+        for j in work:
+            if not isinstance(j, dict):
+                continue
+            bullets = j.get("bullets", [])
+            if isinstance(bullets, list):
+                bullets = [str(b)[:140] for b in bullets if str(b).strip()]
+                bullets = bullets[:2]
+            out.append(
+                {
+                    "date_range": j.get("date_range", ""),
+                    "employer": j.get("employer", ""),
+                    "location": j.get("location", ""),
+                    "title": j.get("title", ""),
+                    "bullets": bullets,
+                    "bullets_count": len(j.get("bullets", [])) if isinstance(j.get("bullets"), list) else 0,
+                }
+            )
+        return out
+
+    def _compact_edu(edu: Any) -> Any:
+        if not isinstance(edu, list):
+            return edu
+        out: List[Dict[str, Any]] = []
+        for e in edu:
+            if not isinstance(e, dict):
+                continue
+            out.append(
+                {
+                    "date_range": e.get("date_range", ""),
+                    "institution": e.get("institution", ""),
+                    "title": e.get("title", ""),
+                    "details_count": len(e.get("details", [])) if isinstance(e.get("details"), list) else 0,
+                }
+            )
+        return out
+
+    def _apply_compaction(section: Dict[str, Any], prefix: str) -> None:
+        if not isinstance(section, dict):
+            return
+        cv = section.get("cv_data") or section.get("approved_cv_data") or None
+        if isinstance(cv, dict):
+            if "work_experience" in cv:
+                cv["work_experience"] = _compact_work(cv.get("work_experience"))
+                truncated_fields.append(f"{prefix}.work_experience(compact)")
+            if "education" in cv:
+                cv["education"] = _compact_edu(cv.get("education"))
+                truncated_fields.append(f"{prefix}.education(compact)")
+            if "it_ai_skills" in cv and isinstance(cv.get("it_ai_skills"), list):
+                cv["it_ai_skills"] = [str(x)[:70] for x in cv.get("it_ai_skills") if str(x).strip()][:8]
+                truncated_fields.append(f"{prefix}.it_ai_skills(compact)")
+            if "languages" in cv and isinstance(cv.get("languages"), list):
+                cv["languages"] = [str(x)[:60] for x in cv.get("languages") if str(x).strip()][:5]
+                truncated_fields.append(f"{prefix}.languages(compact)")
+            if "interests" in cv and isinstance(cv.get("interests"), str):
+                if len(cv["interests"]) > 320:
+                    cv["interests"] = cv["interests"][:320] + "…"
+                    truncated_fields.append(f"{prefix}.interests(truncate)")
+
+    try:
+        if phase == "preparation" and isinstance(pack.get("preparation"), dict):
+            _apply_compaction(pack["preparation"], "preparation")
+        if phase == "confirmation" and isinstance(pack.get("confirmation"), dict):
+            # Confirmation packs don't include full CV data by default, but keep safe.
+            pass
+        if phase == "execution" and isinstance(pack.get("execution"), dict):
+            _apply_compaction(pack["execution"], "execution")
+    except Exception:
+        pass
+
+    size = _size(pack)
+    # 3) If still too large, drop job snippet (it is also present in UI capsule separately).
+    try:
+        if phase == "preparation" and isinstance(pack.get("preparation"), dict):
+            prep = pack["preparation"]
+            if isinstance(prep.get("job_analysis"), dict) and prep["job_analysis"].get("text_snippet"):
+                prep["job_analysis"]["text_snippet"] = ""
+                truncated_fields.append("preparation.job_analysis.text_snippet")
+    except Exception:
+        pass
+
+    size = _size(pack)
+    # 4) If still too large, drop recent event ledger (keep template + core identifiers).
+    if size > max_chars and isinstance(pack.get("recent_events"), list) and pack["recent_events"]:
+        pack["recent_events"] = []
+        truncated_fields.append("recent_events")
+
+    size = _size(pack)
+    limits["final_size"] = size
+    limits["max_chars"] = max_chars
+    if truncated_fields:
+        limits["truncated_fields"] = truncated_fields
     if size > max_chars:
-        # Log warning but don't truncate critical data
-        # Phase-specific packs should already be within budget
-        pack.setdefault('limits', {})['final_size'] = size
-        pack.setdefault('limits', {})['max_chars'] = max_chars
-        pack.setdefault('limits', {})['note'] = f'Pack size ({size} chars) exceeds limit ({max_chars} chars)'
-
+        limits["note"] = f'Pack size ({size} chars) exceeds limit ({max_chars} chars) after compaction'
     return pack
 
 

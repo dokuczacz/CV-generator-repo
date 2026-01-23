@@ -27,6 +27,7 @@ from src.schema_validator import (
     build_schema_error_response,
     log_schema_debug_info
 )
+from typing import Any
 from src.session_store import CVSessionStore
 
 
@@ -331,6 +332,18 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400
         )
     
+    # Default: start-fresh semantics to avoid stale merges.
+    purge_flag = True
+    if purge_flag:
+        try:
+            store = CVSessionStore()
+            deleted_sessions = store.delete_all_sessions()
+            blob_store = CVBlobStore()
+            deleted_blobs = blob_store.purge_all()
+            logging.info(f"Reset requested: deleted_sessions={deleted_sessions}, deleted_blobs={deleted_blobs}")
+        except Exception as e:
+            logging.warning(f"Purge/reset failed (continuing): {e}")
+
     # Extract photo if requested (store in Blob; do not store base64 in Table Storage)
     extracted_photo = None
     photo_extracted = False
@@ -346,25 +359,27 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             logging.warning(f"Photo extraction failed: {e}")
     
     # Best-effort extraction of basic CV fields from DOCX (no OpenAI call)
+    # We now start sessions EMPTY to avoid stale/legacy data sneaking in.
+    # The prefill is kept only as metadata for reference; it is not applied to cv_data.
     prefill = prefill_cv_from_docx_bytes(docx_bytes)
 
-    # Minimal structure; agent can fill/adjust the rest (but avoid empty required arrays when possible)
+    # Minimal empty structure; the agent/user will populate it explicitly.
     cv_data = {
-        "full_name": prefill.get("full_name", "") or "",
-        "email": prefill.get("email", "") or "",
-        "phone": prefill.get("phone", "") or "",
-        "address_lines": prefill.get("address_lines", []) or [],
+        "full_name": "",
+        "email": "",
+        "phone": "",
+        "address_lines": [],
         "photo_url": "",
         "birth_date": "",
         "nationality": "",
-        "profile": prefill.get("profile", "") or "",
-        "work_experience": prefill.get("work_experience", []) or [],
-        "education": prefill.get("education", []) or [],
-        "it_ai_skills": prefill.get("it_ai_skills", []) or [],
-        "languages": prefill.get("languages", []) or [],
+        "profile": "",
+        "work_experience": [],
+        "education": [],
+        "it_ai_skills": [],
+        "languages": [],
         "certifications": [],
-        "interests": prefill.get("interests", "") or "",
-        "further_experience": prefill.get("further_experience", []) or [],
+        "interests": "",
+        "further_experience": [],
         "references": "",
         "language": language
     }
@@ -375,8 +390,52 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
         metadata = {
             "language": language,
             "source_file": "uploaded.docx",
-            "extraction_method": "docx_prefill_v1"
+            "extraction_method": "docx_prefill_v1",
+            "event_log": [],
         }
+        # Keep a lightweight summary of prefill (for reference only, not applied).
+        try:
+            metadata["prefill_summary"] = {
+                "full_name_present": bool(prefill.get("full_name")),
+                "work_count": len(prefill.get("work_experience", []) or []),
+                "education_count": len(prefill.get("education", []) or []),
+                "languages_count": len(prefill.get("languages", []) or []),
+                "skills_count": len(prefill.get("it_ai_skills", []) or []),
+                "profile_chars": len(prefill.get("profile", "") or ""),
+            }
+        except Exception:
+            metadata["prefill_summary"] = {"error": "prefill_summary_failed"}
+
+        # Keep a bounded, unconfirmed prefill snapshot for the agent to re-populate
+        # the empty canonical schema explicitly (avoids stale auto-merges).
+        try:
+            def _bounded_list(items, max_items: int):
+                if not isinstance(items, list):
+                    return []
+                return items[:max_items]
+
+            def _bounded_str(s: Any, max_chars: int):
+                if not isinstance(s, str):
+                    return ""
+                s = s.strip()
+                return s[:max_chars]
+
+            metadata["docx_prefill_unconfirmed"] = {
+                "full_name": _bounded_str(prefill.get("full_name"), 80),
+                "email": _bounded_str(prefill.get("email"), 120),
+                "phone": _bounded_str(prefill.get("phone"), 60),
+                "address_lines": _bounded_list(prefill.get("address_lines") or [], 3),
+                "profile": _bounded_str(prefill.get("profile"), 1200),
+                "education": _bounded_list(prefill.get("education") or [], 4),
+                "work_experience": _bounded_list(prefill.get("work_experience") or [], 6),
+                "languages": _bounded_list(prefill.get("languages") or [], 8),
+                "it_ai_skills": _bounded_list(prefill.get("it_ai_skills") or [], 15),
+                "interests": _bounded_str(prefill.get("interests"), 800),
+                "further_experience": _bounded_list(prefill.get("further_experience") or [], 6),
+                "notes": "UNCONFIRMED: extracted from uploaded DOCX. Use only as a reference to explicitly populate cv_data via update_cv_field.",
+            }
+        except Exception:
+            metadata["docx_prefill_unconfirmed"] = {"error": "docx_prefill_unconfirmed_failed"}
         if job_posting_url:
             metadata["job_posting_url"] = job_posting_url
         if job_posting_text:
@@ -524,24 +583,18 @@ def get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="update-cv-field", methods=["POST"])
 def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Update specific field in CV session
-    
+    Update CV session fields (single, batch edits[], or a single-section cv_patch).
+
     Request:
         {
             "session_id": "uuid",
-            "field_path": "full_name" or "work_experience[0].employer",
-            "value": "new value"
-        }
-    
-    Response:
-        {
-            "success": true,
-            "session_id": "uuid",
-            "field_updated": "field_path"
+            "field_path": "...", "value": ...    // single update
+            OR
+            "edits": [{"field_path": "...", "value": ...}, ...]  // batch
         }
     """
-    logging.info('Update CV field requested')
-    
+    logging.info('Update CV field(s) requested')
+
     try:
         req_body = req.get_json()
     except ValueError:
@@ -550,29 +603,151 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=400
         )
-    
+
     session_id = req_body.get("session_id")
+    client_context = req_body.get("client_context")
+    edits = req_body.get("edits")
     field_path = req_body.get("field_path")
     value = req_body.get("value")
+    cv_patch = req_body.get("cv_patch")
 
-    if not session_id or not field_path:
+    if not session_id:
         return func.HttpResponse(
-            json.dumps({"error": "session_id and field_path are required"}),
+            json.dumps({"error": "session_id is required"}),
             mimetype="application/json",
             status_code=400
         )
 
-    # Log the update request with value preview for debugging
-    value_preview = str(value)[:150] if value is not None else "(None)"
-    if isinstance(value, list):
-        value_preview = f"[{len(value)} items]"
-    elif isinstance(value, dict):
-        value_preview = f"{{dict with {len(value)} keys}}"
-    logging.info(f"[update-cv-field] Updating {field_path} with value_type={type(value).__name__}, preview={value_preview}")
+    is_batch = isinstance(edits, list) and len(edits) > 0
+    is_patch = isinstance(cv_patch, dict) and len(cv_patch.keys()) > 0
+    if not is_batch and not field_path and not is_patch:
+        return func.HttpResponse(
+            json.dumps({"error": "field_path/value or edits[] or cv_patch is required"}),
+            mimetype="application/json",
+            status_code=400
+        )
+
+    def _preview(val: Any) -> str:
+        pv = str(val)[:150] if val is not None else "(None)"
+        if isinstance(val, list):
+            pv = f"[{len(val)} items]"
+        elif isinstance(val, dict):
+            pv = f"{{dict with {len(val)} keys}}"
+        return pv
 
     try:
         store = CVSessionStore()
-        updated = store.update_field(session_id, field_path, value)
+        applied = 0
+
+        # cv_patch path: allow exactly one top-level section to be replaced/merged
+        if is_patch:
+            allowed_sections = {
+                "profile",
+                "work_experience",
+                "education",
+                "languages",
+                "it_ai_skills",
+                "further_experience",
+                "interests",
+                "references",
+                "contact",
+                "address_lines",
+                "email",
+                "phone",
+                "full_name",
+                "nationality",
+                "birth_date",
+                "certifications",
+                "trainings",
+                "data_privacy",
+            }
+            if len(cv_patch.keys()) != 1:
+                return func.HttpResponse(
+                    json.dumps({"error": "cv_patch must contain exactly one top-level section"}),
+                    mimetype="application/json",
+                    status_code=400,
+                )
+            key = next(iter(cv_patch.keys()))
+            if key not in allowed_sections:
+                return func.HttpResponse(
+                    json.dumps({"error": f"cv_patch section '{key}' not allowed"}),
+                    mimetype="application/json",
+                    status_code=400,
+                )
+
+            session = store.get_session(session_id)
+            if not session:
+                return func.HttpResponse(
+                    json.dumps({"error": "Session not found"}),
+                    mimetype="application/json",
+                    status_code=404
+                )
+
+            cv_data = session["cv_data"]
+            metadata = session.get("metadata") or {}
+            cv_data = dict(cv_data)
+            cv_data[key] = cv_patch[key]
+
+            # Validate before persisting
+            try:
+                log_schema_debug_info(cv_data, context="update-cv-field-cv_patch")
+                ok, schema_errors = validate_canonical_schema(cv_data, strict=True)
+                if not ok:
+                    return func.HttpResponse(
+                        json.dumps({"error": "Schema validation failed", "validation_errors": schema_errors}),
+                        mimetype="application/json",
+                        status_code=400
+                    )
+                validation_result = validate_cv(cv_data)
+                if not validation_result.is_valid:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "error": "Validation failed",
+                            "validation": _serialize_validation_result(validation_result),
+                        }),
+                        mimetype="application/json",
+                        status_code=400,
+                    )
+            except Exception as e:
+                return func.HttpResponse(
+                    json.dumps({"error": "Validation crashed", "details": str(e)}),
+                    mimetype="application/json",
+                    status_code=500,
+                )
+
+            store.update_session(session_id, cv_data, metadata)
+            applied = 1
+            logging.info(f"[update-cv-field/cv_patch] replaced section {key} (len={_preview(cv_patch[key])})")
+
+        elif is_batch:
+            for edit in edits:
+                if not isinstance(edit, dict):
+                    continue
+                fp = edit.get("field_path")
+                if not fp:
+                    continue
+                val = edit.get("value")
+                logging.info(f"[update-cv-field/batch] {fp} <= {_preview(val)}")
+                if store.update_field(session_id, fp, val):
+                    applied += 1
+        else:
+            logging.info(f"[update-cv-field] {field_path} <= {_preview(value)}")
+            if store.update_field(session_id, field_path, value):
+                applied = 1
+
+        # Best-effort: also record client context (stage/seq) for stateless continuity.
+        if applied > 0 and isinstance(client_context, dict) and client_context:
+            store.append_event(
+                session_id,
+                {
+                    "type": "client_context",
+                    "client_context": {
+                        "stage": client_context.get("stage"),
+                        "stage_seq": client_context.get("stage_seq"),
+                        "source": client_context.get("source"),
+                    },
+                },
+            )
     except Exception as e:
         logging.error(f"Field update failed: {e}")
         return func.HttpResponse(
@@ -580,10 +755,10 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=500
         )
-    
-    if not updated:
+
+    if applied == 0:
         return func.HttpResponse(
-            json.dumps({"error": "Session not found"}),
+            json.dumps({"error": "Session not found or no edits applied"}),
             mimetype="application/json",
             status_code=404
         )
@@ -597,7 +772,7 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps({
                     "success": True,
                     "session_id": session_id,
-                    "field_updated": field_path,
+                    **({"field_updated": field_path} if not is_batch else {"edits_applied": applied}),
                     "updated_version": updated_session.get("version"),
                     "updated_at": updated_session.get("updated_at")
                 }),
@@ -611,7 +786,7 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
         json.dumps({
             "success": True,
             "session_id": session_id,
-            "field_updated": field_path
+            **({"field_updated": field_path} if not is_batch else {"edits_applied": applied})
         }),
         mimetype="application/json",
         status_code=200
@@ -672,9 +847,41 @@ def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=404
         )
+
+    # Best-effort: store that the session was accessed (helps with stateless continuity/debugging).
+    try:
+        if req.method == "POST":
+            req_body = req.get_json()
+            client_context = req_body.get("client_context")
+        else:
+            client_context = None
+        store.append_event(
+            session_id,
+            {
+                "type": "get_cv_session",
+                "client_context": client_context if isinstance(client_context, dict) else None,
+            },
+        )
+    except Exception:
+        pass
     
     cv_data = session["cv_data"]
     language = req_body.get("language") or session["metadata"].get("language", "en")
+    client_context = req_body.get("client_context")
+
+    # Best-effort: record a generation attempt in session metadata (helps stateless continuity/debugging).
+    try:
+        store = CVSessionStore()
+        store.append_event(
+            session_id,
+            {
+                "type": "generate_cv_from_session_attempt",
+                "language": language,
+                "client_context": client_context if isinstance(client_context, dict) else None,
+            },
+        )
+    except Exception:
+        pass
 
     # Log CV data version and content for debugging staleness issues
     session_version = session.get("version", "unknown")

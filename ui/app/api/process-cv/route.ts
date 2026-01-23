@@ -149,26 +149,32 @@ async function autoSqueezeForTwoPages(sessionId: string, language: string) {
 }
 
 function wantsGenerate(userMessage: string): boolean {
-  const m = (userMessage || '').toLowerCase().trim();
-  if (!m) return false;
-  return (
-    m.includes('proceed') ||
-    m.includes('generate') ||
-    m.includes('pdf') ||
-    m.includes('final') ||
-    m.includes('move forward') ||
-    m.includes('next step') ||
-    m.includes('dalej') ||
-    m.includes('jedziemy') ||
-    m.includes('lecimy') ||
-    m === 'ok' ||
-    m.startsWith('ok,') ||
-    m.includes('to jest ok') ||
-    m.includes('jest ok') ||
-    m.includes('gotowe') ||
-    m.includes('zatwierdzam') ||
-    m.includes('zatwierdź')
-  );
+  // IMPORTANT: Do NOT scan the entire user message for keywords like "final" or "pdf".
+  // Users often paste job postings that contain phrases like "final product" which should
+  // not trigger PDF generation. Only consider the "intent header" (first couple lines).
+  const raw = (userMessage || '').trim();
+  if (!raw) return false;
+
+  const intentHeader = raw
+    .split('\n')
+    .slice(0, 3)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .slice(0, 400);
+
+  if (!intentHeader) return false;
+
+  // If the user is explicitly saying "don't generate", never treat as approval.
+  const negative = /\b(do not|don't|not yet|stop|cancel|no|nie|nie generuj|nie tworz|bez generowania|bez pdf)\b/i;
+  if (negative.test(intentHeader)) return false;
+
+  // Explicit approval / command only. Avoid weak signals like plain "ok".
+  const explicit =
+    /\b(proceed|ok to generate|go ahead|generate pdf|generate the pdf|generate cv|create pdf|make pdf|download pdf|finalize|finalise|zatwierdzam|zatwierd[zź]|generuj)\b/i;
+
+  return explicit.test(intentHeader);
 }
 
 function getResponseUsageSummary(response: any): {
@@ -199,7 +205,10 @@ function extractFirstUrl(text: string): string | null {
   const m = text.match(/https?:\/\/[^\s)\]]+/i);
   if (!m) return null;
   // Trim common trailing punctuation
-  return m[0].replace(/[),.]+$/, '');
+  const cleaned = m[0].replace(/[),.]+$/, '');
+  // Guard against obviously incomplete URLs (very short) which often 404.
+  if (cleaned.length < 20) return null;
+  return cleaned;
 }
 
 function wantsSkipPhoto(text: string): boolean {
@@ -208,11 +217,23 @@ function wantsSkipPhoto(text: string): boolean {
   );
 }
 
-function detectLanguage(text: string): 'pl' | 'en' | 'de' {
-  if (/\b(de|deutsch|german)\b/i.test(text)) return 'de';
-  if (/\b(en|eng|english)\b/i.test(text)) return 'en';
-  if (/\b(pl|polski|polish)\b/i.test(text)) return 'pl';
-  return 'en';
+function detectLanguage(text: string, defaultLang: 'pl' | 'en' | 'de' = 'en'): 'pl' | 'en' | 'de' {
+  const t = (text || '').toLowerCase();
+
+  // Explicit language switch patterns (avoid triggering on proficiency mentions like "German B2").
+  const explicitDe = /\b(write|respond|reply|switch|use|generate|produce|in)\s+(german|deutsch)\b/;
+  const explicitPl = /\b(write|respond|reply|switch|use|generate|produce|in)\s+(polish|polski|po polsku)\b/;
+  const explicitEn = /\b(write|respond|reply|switch|use|generate|produce|in)\s+(english|angielski)\b/;
+  const langTag = /\blang\s*[:=]\s*(en|de|pl)\b/;
+
+  const mTag = t.match(langTag);
+  if (mTag?.[1]) return mTag[1] as 'pl' | 'en' | 'de';
+  if (explicitDe.test(t)) return 'de';
+  if (explicitPl.test(t)) return 'pl';
+  if (explicitEn.test(t)) return 'en';
+
+  // Fallback: keep current/default language even if proficiency is mentioned (e.g., "German B2").
+  return defaultLang;
 }
 
 async function extractDocxTextFromBase64(docxBase64: string): Promise<string | null> {
@@ -303,6 +324,11 @@ async function callAzureFunction(endpoint: string, body: any) {
       details = '';
     }
     const snippet = details ? details.slice(0, 800) : '';
+    // Log server-side for UI log visibility (helps detect silent tool failures)
+    console.error(
+      `❌ Azure Function call failed: ${url} status=${response.status} ${response.statusText} ` +
+        (snippet ? `body=${snippet}` : '')
+    );
     throw new Error(
       `Azure Function error: ${response.status} ${response.statusText}${snippet ? ` - ${snippet}` : ''}`
     );
@@ -321,6 +347,9 @@ async function callAzureFunction(endpoint: string, body: any) {
 
 async function processToolCall(toolName: string, toolInput: any): Promise<string> {
   try {
+    const client_context = toolInput?.client_context && typeof toolInput.client_context === 'object'
+      ? toolInput.client_context
+      : undefined;
     switch (toolName) {
       case 'extract_and_store_cv': {
         const result = await callAzureFunction('/extract-and-store-cv', {
@@ -336,6 +365,7 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
       case 'get_cv_session': {
         const result = await callAzureFunction('/get-cv-session', {
           session_id: toolInput.session_id,
+          ...(client_context ? { client_context } : {}),
         });
         return JSON.stringify(result);
       }
@@ -345,6 +375,8 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
           session_id: toolInput.session_id,
           field_path: toolInput.field_path,
           value: toolInput.value,
+          edits: toolInput.edits,
+          ...(client_context ? { client_context } : {}),
         });
         return JSON.stringify(result);
       }
@@ -353,6 +385,7 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
         const result = await callAzureFunction('/generate-cv-from-session', {
           session_id: toolInput.session_id,
           language: toolInput.language,
+          ...(client_context ? { client_context } : {}),
         });
         return JSON.stringify(result);
       }
@@ -585,7 +618,7 @@ async function fastPathTailorAndGenerate(args: {
       modelOverride,
       stage,
       stageSeq,
-      systemPrompt: CV_SYSTEM_PROMPT,
+      systemPrompt: '',
       stagePrompt: CV_STAGE_PROMPT(stage),
       inputList,
       tools,
@@ -710,7 +743,8 @@ async function chatWithCV(
   const hasDocx = !!docx_base64;
   const hasSession = !!sessionId;
   const skipPhoto = wantsSkipPhoto(userMessage);
-  const language = detectLanguage(userMessage);
+  // Default language: stay with EN unless the user explicitly asks to switch.
+  const language = detectLanguage(userMessage, 'en');
   const extractedUrl = extractFirstUrl(userMessage);
   const url = extractedUrl || jobPostingUrlFromClient || null;
   const jobText =
@@ -719,6 +753,22 @@ async function chatWithCV(
       : url
       ? await fetchJobPostingText(url)
       : null;
+
+  // If we have no job text and we are not in execution, return a minimal ask instead of running OpenAI.
+  if (!jobText && stage !== 'generate_pdf' && stage !== 'final') {
+    return {
+      response:
+        'I could not fetch the job posting. Please paste the full job description (responsibilities + requirements + job title/company). I will not summarize or generate until I have it.',
+      pdf_base64: '',
+      last_response_id: null,
+      session_id: sessionId || null,
+      stage,
+      stage_seq: 0,
+      stage_updates: [],
+      job_posting_url: url,
+      job_posting_text: null,
+    };
+  }
 
   // No previous_response_id: treat each HTTP request as stateless.
   // If we already have a session_id, do NOT resend the DOCX text; rely on session state/tools.
@@ -832,6 +882,33 @@ async function chatWithCV(
     });
   }
 
+  // Parse completeness from session snapshot to gate execution/generation.
+  let requiredPresent: Record<string, boolean> | null = null;
+  try {
+    if (sessionSnapshot) {
+      const snap = JSON.parse(sessionSnapshot);
+      requiredPresent = snap?.required_present || snap?.completeness?.required_present || null;
+    }
+  } catch {
+    requiredPresent = null;
+  }
+  const canGenerate =
+    (stage === 'generate_pdf' || stage === 'final') &&
+    requiredPresent &&
+    Object.values(requiredPresent).every(Boolean);
+
+  // Filter tools per stage to prevent accidental generation in preparation/confirmation.
+  const toolsForStage = CV_TOOLS_RESPONSES.filter((t: any) => {
+    if (t.name === 'generate_cv_from_session' || t.name === 'process_cv_orchestrated') {
+      return false; // default blocked; we enable per-iteration below when allowed and not yet attempted
+    }
+    // Block extract/process if a session already exists (avoid model re-calling extract)
+    if ((t.name === 'extract_and_store_cv' || t.name === 'process_cv_orchestrated') && hasSession) {
+      return false;
+    }
+    return true;
+  });
+
   const inputList = buildBaseInputList({ hasDocx, systemPrompt: systemPromptToSend, userContent });
 
   console.log('📤 Calling OpenAI Responses API...');
@@ -840,6 +917,7 @@ async function chatWithCV(
   // Stage already initialized above for buildUserContent
   let stageSeq = 0;
   const stageUpdates: Array<{ from: CVStage; to: CVStage; via: string }> = [];
+  let generateAllowedThisTurn = canGenerate;
 
   const stageFromTool = (toolName: string, toolOutputRaw: string): CVStage => {
     if (toolName === 'extract_and_store_cv' || toolName === 'process_cv_orchestrated') {
@@ -848,9 +926,9 @@ async function chatWithCV(
     if (toolName === 'get_cv_session') {
       return 'draft_proposal';
     }
-    if (toolName === 'update_cv_field') {
-      return 'draft_proposal';
-    }
+      if (toolName === 'update_cv_field') {
+        return 'draft_proposal';
+      }
     if (toolName === 'generate_cv_from_session') {
       try {
         const parsed = JSON.parse(toolOutputRaw);
@@ -870,16 +948,16 @@ async function chatWithCV(
   // Log prompt ID to verify .env.local is loaded
   console.log('[DEBUG] OpenAI request config:', { promptId, modelOverride, stage, has_prompt: !!promptId });
 
-  const buildRequest = (input: any[]) =>
+  const buildRequest = (input: any[], iterationTools?: any[]) =>
     buildResponsesRequest({
       promptId,
       modelOverride,
       stage,
       stageSeq,
-      systemPrompt: CV_SYSTEM_PROMPT,
+      systemPrompt: systemPromptToSend,
       stagePrompt: CV_STAGE_PROMPT(stage),
       inputList: input,
-      tools: CV_TOOLS_RESPONSES,
+      tools: iterationTools || toolsForStage,
     });
 
   if (DEBUG_TOKENS) {
@@ -902,6 +980,7 @@ async function chatWithCV(
   let iteration = 0;
   const maxIterations = 10;
   let extractToolCalls = 0;
+  let generateAttempted = false;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -915,7 +994,17 @@ async function chatWithCV(
     if (toolCalls.length === 0) {
       // Deterministic fallback: if the user asked to generate a PDF but the model stopped
       // without calling the generation tool, do one server-side attempt using the current session.
-      if (userRequestedGenerate && !pdfBase64 && typeof currentSessionId === 'string' && currentSessionId.trim()) {
+      // Safety: Only allow fallback when this request was already in "generate_pdf" stage.
+      // Otherwise, a pasted job posting containing "final" could accidentally auto-generate a PDF.
+      if (
+        stage === 'generate_pdf' &&
+        userRequestedGenerate &&
+        !pdfBase64 &&
+        typeof currentSessionId === 'string' &&
+        currentSessionId.trim() &&
+        canGenerate &&
+        !generateAttempted
+      ) {
         try {
           console.log('🛟 Fallback: user requested PDF; attempting server-side generate_cv_from_session');
           // Preview session state before final generation to ensure edits are persisted
@@ -923,9 +1012,16 @@ async function chatWithCV(
             const previewRaw = await processToolCall('get_cv_session', { session_id: currentSessionId });
             try {
               const preview = JSON.parse(previewRaw);
-              const hasCv = !!preview?.cv;
-              const lastUpdated = preview?.updated_at || preview?.last_updated || preview?.timestamp || null;
-              const weCount = Array.isArray(preview?.cv?.work_experience) ? preview.cv.work_experience.length : undefined;
+              const hasCv = !!preview?.cv_data;
+              const lastUpdated =
+                preview?._metadata?.updated_at ||
+                preview?.updated_at ||
+                preview?.last_updated ||
+                preview?.timestamp ||
+                null;
+              const weCount = Array.isArray(preview?.cv_data?.work_experience)
+                ? preview.cv_data.work_experience.length
+                : undefined;
               console.log('🗃️ Session preview before fallback generate:', { hasCv, lastUpdated, weCount });
             } catch {}
           } catch {}
@@ -960,6 +1056,7 @@ async function chatWithCV(
           const parsed = JSON.parse(effectiveToolOutput);
           if (typeof parsed?.pdf_base64 === 'string' && parsed.pdf_base64.length > 1000) {
             pdfBase64 = parsed.pdf_base64;
+            generateAttempted = true;
             stageUpdates.push({ from: stage, to: 'final', via: 'server_fallback_generate_cv_from_session' });
             stage = 'final';
             console.log('  📄 Fallback PDF generated, length:', pdfBase64.length);
@@ -1030,6 +1127,23 @@ async function chatWithCV(
         toolArgs.session_id = currentSessionId;
       }
 
+      // Batch edits supported via update_cv_field.edits; cv_patch passthrough
+      if (toolName === 'update_cv_field') {
+        if (toolArgs.edits && !Array.isArray(toolArgs.edits)) {
+          toolArgs.edits = undefined;
+        }
+        if (toolArgs.cv_patch && typeof toolArgs.cv_patch !== 'object') {
+          toolArgs.cv_patch = undefined;
+        }
+      }
+
+      // Attach client context so the backend can store a bounded event ledger (stateless continuity).
+      toolArgs.client_context = {
+        stage,
+        stage_seq: stageSeq,
+        source: 'ui/api/process-cv',
+      };
+
       // Inject DOCX base64 if the model omitted it.
       if (toolName === 'extract_and_store_cv') {
         extractToolCalls += 1;
@@ -1057,6 +1171,48 @@ async function chatWithCV(
 
       if (toolName === 'generate_cv_from_session') {
         toolArgs.language = toolArgs.language || language;
+        if (!canGenerate) {
+          console.log('  ⛔ generate_cv_from_session blocked (not in execution or required fields missing)');
+          inputList.push({
+            type: 'function_call_output',
+            call_id: toolCall.call_id,
+            output: JSON.stringify({
+              ok: false,
+              blocked: 'generate_not_allowed',
+              reason: 'Execution phase not reached or required fields missing',
+              required_present: requiredPresent,
+            }),
+          });
+          continue;
+        }
+        if (generateAttempted) {
+          console.log('  ⛔ generate_cv_from_session blocked (already attempted this turn)');
+          inputList.push({
+            type: 'function_call_output',
+            call_id: toolCall.call_id,
+            output: JSON.stringify({
+              ok: false,
+              blocked: 'duplicate_generate',
+              reason: 'Only one generate attempt per request',
+            }),
+          });
+          continue;
+        }
+      }
+
+      if (toolName === 'process_cv_orchestrated' && !canGenerate) {
+        console.log('  ⛔ process_cv_orchestrated blocked (not in execution or required fields missing)');
+        inputList.push({
+          type: 'function_call_output',
+          call_id: toolCall.call_id,
+          output: JSON.stringify({
+            ok: false,
+            blocked: 'orchestrated_not_allowed',
+            reason: 'Execution phase not reached or required fields missing',
+            required_present: requiredPresent,
+          }),
+        });
+        continue;
       }
 
       console.log(`  → Calling tool: ${toolName}`);
@@ -1115,6 +1271,7 @@ async function chatWithCV(
         const parsed = JSON.parse(effectiveToolOutput);
         if ((toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') && parsed?.pdf_base64) {
           pdfBase64 = parsed.pdf_base64;
+          generateAttempted = true;
           console.log('  📄 PDF generated, length:', pdfBase64.length);
         }
       } catch {
@@ -1146,7 +1303,16 @@ async function chatWithCV(
       console.log('📏 Input items:', inputList.length, 'rough chars:', roughInputChars(inputList));
     }
     stageSeq += 1;
-    response = await openai.responses.create(buildRequest(inputList));
+    const iterationTools = toolsForStage
+      .map((t: any) => {
+        if (t.name === 'generate_cv_from_session' || t.name === 'process_cv_orchestrated') {
+          const enabled = generateAllowedThisTurn && !generateAttempted;
+          return { ...t, enabled };
+        }
+        return t;
+      })
+      .filter((t: any) => t.enabled !== false);
+    response = await openai.responses.create(buildRequest(inputList, iterationTools));
 
     const usage = getResponseUsageSummary(response);
     if (usage) {

@@ -151,6 +151,9 @@ class CVSessionStore:
             return False
 
         cv_data = session["cv_data"]
+        metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
 
         # Log what we're updating for debugging
         value_preview = str(value)[:100] if value else "(empty)"
@@ -162,16 +165,33 @@ class CVSessionStore:
 
         for i, part in enumerate(parts[:-1]):
             if part.isdigit():
-                current = current[int(part)]
+                idx = int(part)
+                if not isinstance(current, list):
+                    raise TypeError(
+                        f"Invalid path '{field_path}': expected list at '{'.'.join(parts[:i])}', got {type(current).__name__}"
+                    )
+                # Auto-expand lists for start-from-0 sessions (common for work_experience[0] style updates)
+                if idx >= len(current):
+                    current.extend({} for _ in range(idx - len(current) + 1))
+                current = current[idx]
             else:
                 if part not in current:
-                    current[part] = {}
+                    # If the next segment is a numeric index, this key should be a list.
+                    next_part = parts[i + 1]
+                    current[part] = [] if next_part.isdigit() else {}
                 current = current[part]
 
         # Set final value
         last_key = parts[-1]
         if last_key.isdigit():
-            current[int(last_key)] = value
+            idx = int(last_key)
+            if not isinstance(current, list):
+                raise TypeError(
+                    f"Invalid path '{field_path}': expected list at '{'.'.join(parts[:-1])}', got {type(current).__name__}"
+                )
+            if idx >= len(current):
+                current.extend(None for _ in range(idx - len(current) + 1))
+            current[idx] = value
         else:
             current[last_key] = value
 
@@ -180,7 +200,60 @@ class CVSessionStore:
         profile_len = len(str(cv_data.get("profile", "")))
         logging.info(f"update_field: after update - work_exp_count={work_exp_count}, profile_len={profile_len}")
 
-        return self.update_session(session_id, cv_data, session.get("metadata"))
+        # Append a bounded event log entry (helps stateless agent keep continuity across turns).
+        try:
+            event_log = metadata.get("event_log")
+            if not isinstance(event_log, list):
+                event_log = []
+
+            preview = value_preview
+            if isinstance(value, list):
+                preview = f"[{len(value)} items]"
+            elif isinstance(value, dict):
+                preview = f"{{dict with {len(value)} keys}}"
+
+            event_log.append(
+                {
+                    "ts": datetime.utcnow().isoformat(),
+                    "type": "update_cv_field",
+                    "field_path": field_path,
+                    "value_type": type(value).__name__,
+                    "preview": preview,
+                }
+            )
+
+            # Keep only last N events to cap Table Storage size.
+            metadata["event_log"] = event_log[-50:]
+        except Exception as e:
+            logging.warning(f"update_field: failed to append event_log for session {session_id}: {e}")
+
+        return self.update_session(session_id, cv_data, metadata)
+
+    def append_event(self, session_id: str, event: Dict[str, Any]) -> bool:
+        """Append a small event record to session metadata (bounded) without changing CV data."""
+        session = self.get_session(session_id)
+        if not session:
+            return False
+
+        cv_data = session["cv_data"]
+        metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        try:
+            event_log = metadata.get("event_log")
+            if not isinstance(event_log, list):
+                event_log = []
+
+            out = dict(event or {})
+            out.setdefault("ts", datetime.utcnow().isoformat())
+            event_log.append(out)
+            metadata["event_log"] = event_log[-50:]
+        except Exception as e:
+            logging.warning(f"append_event: failed to append event_log for session {session_id}: {e}")
+            return False
+
+        return self.update_session(session_id, cv_data, metadata)
     
     def delete_session(self, session_id: str) -> bool:
         """
@@ -223,4 +296,18 @@ class CVSessionStore:
         if deleted > 0:
             logging.info(f"Cleaned up {deleted} expired sessions")
         
+        return deleted
+
+    def delete_all_sessions(self) -> int:
+        """
+        Danger zone: delete all CV sessions (used for explicit reset).
+        Returns number of deleted sessions.
+        """
+        table_client = self.service_client.get_table_client(self.TABLE_NAME)
+        deleted = 0
+        for entity in table_client.list_entities():
+            if entity.get("PartitionKey") == "cv":
+                table_client.delete_entity(partition_key=entity["PartitionKey"], row_key=entity["RowKey"])
+                deleted += 1
+        logging.info(f"Deleted {deleted} session(s) via delete_all_sessions()")
         return deleted

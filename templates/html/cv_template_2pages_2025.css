@@ -39,20 +39,40 @@
    See: templates/html/CV_template_2pages_2025.spec.md for detailed specification
    ============================================================================ */
 
+
 :root {
   --bg: #ffffff;
-  --accent: #0000ff;
+  --accent: #2a2a2a; /* Section title color */
   --text: #000000;
-  --muted: #333333;
-  --border: #d8d8d8;
-  --font-main: "Arial", "Helvetica", sans-serif;
+  --muted: #666666;
+  --border: #c0c0c0;
+  --font-main: "Lato", "Helvetica Neue", "Arial", sans-serif;
+}
+
+/* Force consistent typography across all paginated fragments */
+* {
+  font-family: var(--font-main) !important;
+  font-weight: 400;
+  color: #000000;
 }
 
 @page {
   size: A4;
-  /* Use Word-equivalent page margins so every physical page gets consistent padding,
-     even when the content naturally flows across pages. */
-  margin: 20mm 22.4mm 20mm 25mm;
+  /* Updated breathing room per v2.3 spec */
+  margin: 23mm 17.25mm 23mm 17.25mm;
+  font-family: "Lato", "Helvetica Neue", "Arial", sans-serif;
+  font-weight: 400;
+  color: #000000;
+  @top-right {
+    content: string(cv-header);
+    font-size: 9pt;
+    color: #666666;
+  }
+  /* Page numbering moved to inline template (language-conditional) */
+}
+
+@page :first {
+  @top-right { content: none; }
 }
 
 * { box-sizing: border-box; }
@@ -66,8 +86,18 @@ body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-size: 11pt;
-  line-height: 1.3;
+  font-size: 10.5pt;
+  line-height: 1.43; /* +10% interline spacing */
+  /* Enable safe wrapping for long technical strings and prevent overflow */
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: auto;
+}
+
+/* Enforce consistent line-height/font-size across paginated fragments */
+body, .page, .section, .entry, .entry-body, .entry-line, .simple-list, .bullets, .bullets li {
+  line-height: 1.43 !important;
+  font-size: 10.5pt !important;
 }
 
 .page {
@@ -93,6 +123,9 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  margin-top: 10mm; /* Extra breathing room at top */
+  padding-bottom: 4mm;
+  border-bottom: 0.5pt solid var(--border);
   /* Flexbox preferred over Grid for better WeasyPrint compatibility */
 }
 
@@ -104,18 +137,19 @@ body {
 }
 
 .name {
-  font-size: 16pt;
+  font-size: 18pt;
   font-weight: 700;
   font-style: normal;
-  color: var(--accent);
+  color: var(--text);
   font-family: var(--font-main);
   margin: 0 0 2mm 0;
+  string-set: cv-header content();
 }
 
 .contact {
   display: flex;
   flex-direction: column;
-  font-size: 11pt;
+  font-size: 10pt;
   color: var(--muted);
 }
 
@@ -172,23 +206,20 @@ a {
 
 .content {
   padding-top: 0;
-  padding-bottom: 0;
+  padding-bottom: 15mm; /* reserve footer space */
 }
 
 .section {
-  margin-top: 5mm;
-  /* IMPORTANT:
-     Do NOT prevent breaking inside whole sections.
-     If a large section (e.g., Work experience) doesn't fit in the remaining space on page 1,
-     break-inside:avoid will push the entire section to the next physical page, causing:
-       - large whitespace on page 1
-       - content spilling to a 3rd page even though we have an explicit 2-page template
-  */
+  margin-top: 5mm; /* ~14pt per spec */
+  /* Deterministic section keep-together: prevent small sections from splitting */
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 14pt;
 }
 
 .section-title {
-  font-size: 11pt;
-  font-weight: 700;
+  font-size: 12pt;
+  font-weight: 600;
   font-variant: small-caps;
   letter-spacing: 0.3px;
   margin: 0 0 2mm 0;
@@ -204,7 +235,7 @@ a {
 .section-title::after {
   content: "";
   flex: 1;
-  border-bottom: 1px solid var(--accent);
+  border-bottom: 0.5pt solid #c0c0c0;
 }
 
 .entry {
@@ -255,27 +286,35 @@ a {
 
 .bullets {
   margin: 0.8mm 0 0 42.5mm;
-  padding-left: 5mm;
-  font-size: inherit;
+  padding-left: 4mm;
+  font-size: 10pt;
+  line-height: 1.4;
   list-style: disc;
   list-style-position: outside;
 }
 
 .bullets li {
   margin-bottom: 0.3mm;
-  line-height: 1.15;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .simple-list {
   margin: 0;
   padding-left: 0;
   list-style: none;
-  font-size: inherit;
+  font-size: 10.5pt;
+  line-height: 1.43;
 }
 
 .simple-list li {
   margin-bottom: 0.7mm;
   line-height: 1.25;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .footer {
@@ -286,7 +325,7 @@ a {
   display: flex;
   justify-content: space-between;
   gap: 6mm;
-  font-size: 11pt;
+  font-size: 9pt;
   color: var(--muted);
 }
 

@@ -15,6 +15,7 @@ Golden Rule: REJECT if estimated pages > 2.0
 
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+import math
 
 
 @dataclass
@@ -155,6 +156,18 @@ SECTION_TITLE_HEIGHT_MM = 6  # Per section
 PAGE_HEIGHT_MM = 297  # A4
 MAX_PAGES = 2.0  # Hard limit
 
+# Soft/hard tolerance: prefer page-fit over micro character policing.
+SOFT_CHAR_RATIO = 1.10  # +10% warning threshold
+HARD_CHAR_RATIO = 2.00  # extreme outliers become errors (safety guard)
+
+
+def _soft_limit(max_chars: int) -> int:
+    return int(math.ceil(max_chars * SOFT_CHAR_RATIO))
+
+
+def _hard_limit(max_chars: int) -> int:
+    return int(math.ceil(max_chars * HARD_CHAR_RATIO))
+
 
 class CVValidator:
     """Validates CV content against 2-page constraints"""
@@ -176,17 +189,17 @@ class CVValidator:
         warnings = []
         height_details = {}
         
-        # Validate each section
-        errors.extend(self._validate_string_field(cv_data, "full_name"))
-        errors.extend(self._validate_string_field(cv_data, "interests"))
-        
-        errors.extend(self._validate_list_field(cv_data, "address_lines"))
-        errors.extend(self._validate_list_field(cv_data, "languages"))
-        errors.extend(self._validate_list_field(cv_data, "it_ai_skills"))
-        
-        errors.extend(self._validate_work_experience(cv_data.get("work_experience", [])))
-        errors.extend(self._validate_education(cv_data.get("education", [])))
-        errors.extend(self._validate_further_experience(cv_data.get("further_experience", [])))
+        # Validate each section (soft warnings for small overages; hard errors only for extreme outliers).
+        errors.extend(self._validate_string_field(cv_data, "full_name", warnings))
+        errors.extend(self._validate_string_field(cv_data, "interests", warnings))
+
+        errors.extend(self._validate_list_field(cv_data, "address_lines", warnings))
+        errors.extend(self._validate_list_field(cv_data, "languages", warnings))
+        errors.extend(self._validate_list_field(cv_data, "it_ai_skills", warnings))
+
+        errors.extend(self._validate_work_experience(cv_data.get("work_experience", []), warnings))
+        errors.extend(self._validate_education(cv_data.get("education", []), warnings))
+        errors.extend(self._validate_further_experience(cv_data.get("further_experience", []), warnings))
         
         # Estimate total height
         estimated_height = self._estimate_height(cv_data, height_details)
@@ -241,7 +254,7 @@ class CVValidator:
             details=height_details
         )
     
-    def _validate_string_field(self, cv_data: Dict, field: str) -> List[ValidationError]:
+    def _validate_string_field(self, cv_data: Dict, field: str, warnings: List[str]) -> List[ValidationError]:
         """Validate a simple string field"""
         errors = []
         value = cv_data.get(field, "")
@@ -252,20 +265,27 @@ class CVValidator:
         limits = self.limits[field]
         max_chars = limits.get("max_chars")
         
-        if max_chars and len(value) > max_chars:
-            errors.append(ValidationError(
-                field=field,
-                current_value=len(value),
-                limit=max_chars,
-                excess=len(value) - max_chars,
-                message=f"{field}: {len(value)} chars exceeds limit of {max_chars}",
-                suggestion=f"Reduce by {len(value) - max_chars} characters "
-                          f"({int((len(value) - max_chars) / len(value) * 100)}%)"
-            ))
+        if max_chars:
+            vlen = len(value)
+            soft = _soft_limit(max_chars)
+            hard = _hard_limit(max_chars)
+            if vlen > hard:
+                errors.append(
+                    ValidationError(
+                        field=field,
+                        current_value=vlen,
+                        limit=hard,
+                        excess=vlen - hard,
+                        message=f"{field}: {vlen} chars exceeds hard limit of {hard}",
+                        suggestion=f"Reduce by {vlen - hard} characters",
+                    )
+                )
+            elif vlen > soft:
+                warnings.append(f"{field}: {vlen} chars (soft cap {soft}, hard cap {hard})")
         
         return errors
     
-    def _validate_list_field(self, cv_data: Dict, field: str) -> List[ValidationError]:
+    def _validate_list_field(self, cv_data: Dict, field: str, warnings: List[str]) -> List[ValidationError]:
         """Validate a list field (e.g., languages, skills)"""
         errors = []
         items = cv_data.get(field, [])
@@ -278,44 +298,37 @@ class CVValidator:
         max_chars = limits.get("max_chars_per_item")
         
         if max_items and len(items) > max_items:
-            errors.append(ValidationError(
-                field=field,
-                current_value=len(items),
-                limit=max_items,
-                excess=len(items) - max_items,
-                message=f"{field}: {len(items)} items exceeds limit of {max_items}",
-                suggestion=f"Remove {len(items) - max_items} item(s)"
-            ))
+            warnings.append(f"{field}: {len(items)} items (recommended max {max_items})")
         
         if max_chars:
+            soft = _soft_limit(max_chars)
+            hard = _hard_limit(max_chars)
             for i, item in enumerate(items):
                 item_str = str(item)
-                if len(item_str) > max_chars:
-                    errors.append(ValidationError(
-                        field=f"{field}[{i}]",
-                        current_value=len(item_str),
-                        limit=max_chars,
-                        excess=len(item_str) - max_chars,
-                        message=f"{field}[{i}]: '{item_str[:30]}...' is {len(item_str)} chars (limit: {max_chars})",
-                        suggestion=f"Shorten by {len(item_str) - max_chars} characters"
-                    ))
+                ilen = len(item_str)
+                if ilen > hard:
+                    errors.append(
+                        ValidationError(
+                            field=f"{field}[{i}]",
+                            current_value=ilen,
+                            limit=hard,
+                            excess=ilen - hard,
+                            message=f"{field}[{i}]: {ilen} chars exceeds hard limit {hard}",
+                            suggestion=f"Shorten by {ilen - hard} characters",
+                        )
+                    )
+                elif ilen > soft:
+                    warnings.append(f"{field}[{i}]: {ilen} chars (soft cap {soft}, hard cap {hard})")
         
         return errors
     
-    def _validate_work_experience(self, entries: List[Dict]) -> List[ValidationError]:
+    def _validate_work_experience(self, entries: List[Dict], warnings: List[str]) -> List[ValidationError]:
         """Validate work experience entries"""
         errors = []
         limits = self.limits["work_experience"]
         
         if len(entries) > limits["max_entries"]:
-            errors.append(ValidationError(
-                field="work_experience",
-                current_value=len(entries),
-                limit=limits["max_entries"],
-                excess=len(entries) - limits["max_entries"],
-                message=f"Work experience: {len(entries)} entries exceeds limit of {limits['max_entries']}",
-                suggestion=f"Remove {len(entries) - limits['max_entries']} oldest or least relevant position(s)"
-            ))
+            warnings.append(f"work_experience: {len(entries)} entries (recommended max {limits['max_entries']})")
         
         for i, entry in enumerate(entries):
             per_entry = limits["per_entry"]
@@ -328,54 +341,61 @@ class CVValidator:
                     max_chars = field_limits["max_chars_per_bullet"]
                     
                     if len(bullets) > max_bullets:
-                        errors.append(ValidationError(
-                            field=f"work_experience[{i}].bullets",
-                            current_value=len(bullets),
-                            limit=max_bullets,
-                            excess=len(bullets) - max_bullets,
-                            message=f"Entry {i}: {len(bullets)} bullets exceeds limit of {max_bullets}",
-                            suggestion=f"Remove {len(bullets) - max_bullets} bullet(s) or combine them"
-                        ))
-                    
+                        warnings.append(
+                            f"work_experience[{i}].bullets: {len(bullets)} bullets (recommended max {max_bullets})"
+                        )
+
+                    soft = _soft_limit(max_chars)
+                    hard = _hard_limit(max_chars)
                     for j, bullet in enumerate(bullets):
-                        if len(bullet) > max_chars:
-                            errors.append(ValidationError(
-                                field=f"work_experience[{i}].bullets[{j}]",
-                                current_value=len(bullet),
-                                limit=max_chars,
-                                excess=len(bullet) - max_chars,
-                                message=f"Entry {i}, bullet {j}: {len(bullet)} chars exceeds {max_chars}",
-                                suggestion=f"Shorten: '{bullet[:40]}...' by {len(bullet) - max_chars} chars"
-                            ))
+                        blen = len(bullet)
+                        if blen > hard:
+                            errors.append(
+                                ValidationError(
+                                    field=f"work_experience[{i}].bullets[{j}]",
+                                    current_value=blen,
+                                    limit=hard,
+                                    excess=blen - hard,
+                                    message=f"Entry {i}, bullet {j}: {blen} chars exceeds hard limit {hard}",
+                                    suggestion=f"Shorten: '{bullet[:40]}...' by {blen - hard} chars",
+                                )
+                            )
+                        elif blen > soft:
+                            warnings.append(
+                                f"work_experience[{i}].bullets[{j}]: {blen} chars (soft cap {soft}, hard cap {hard})"
+                            )
                 else:
                     value = entry.get(field, "")
                     max_chars = field_limits.get("max_chars")
-                    if max_chars and len(value) > max_chars:
-                        errors.append(ValidationError(
-                            field=f"work_experience[{i}].{field}",
-                            current_value=len(value),
-                            limit=max_chars,
-                            excess=len(value) - max_chars,
-                            message=f"Entry {i}.{field}: {len(value)} chars exceeds {max_chars}",
-                            suggestion=f"Shorten by {len(value) - max_chars} characters"
-                        ))
+                    if max_chars:
+                        vlen = len(value)
+                        soft = _soft_limit(max_chars)
+                        hard = _hard_limit(max_chars)
+                        if vlen > hard:
+                            errors.append(
+                                ValidationError(
+                                    field=f"work_experience[{i}].{field}",
+                                    current_value=vlen,
+                                    limit=hard,
+                                    excess=vlen - hard,
+                                    message=f"Entry {i}.{field}: {vlen} chars exceeds hard limit {hard}",
+                                    suggestion=f"Shorten by {vlen - hard} characters",
+                                )
+                            )
+                        elif vlen > soft:
+                            warnings.append(
+                                f"work_experience[{i}].{field}: {vlen} chars (soft cap {soft}, hard cap {hard})"
+                            )
         
         return errors
     
-    def _validate_education(self, entries: List[Dict]) -> List[ValidationError]:
+    def _validate_education(self, entries: List[Dict], warnings: List[str]) -> List[ValidationError]:
         """Validate education entries"""
         errors = []
         limits = self.limits["education"]
         
         if len(entries) > limits["max_entries"]:
-            errors.append(ValidationError(
-                field="education",
-                current_value=len(entries),
-                limit=limits["max_entries"],
-                excess=len(entries) - limits["max_entries"],
-                message=f"Education: {len(entries)} entries exceeds limit of {limits['max_entries']}",
-                suggestion=f"Remove {len(entries) - limits['max_entries']} entry/entries"
-            ))
+            warnings.append(f"education: {len(entries)} entries (recommended max {limits['max_entries']})")
         
         for i, entry in enumerate(entries):
             per_entry = limits["per_entry"]
@@ -390,44 +410,52 @@ class CVValidator:
                         combined = str(details)
                     
                     max_chars = field_limits["max_chars"]
-                    if len(combined) > max_chars:
-                        errors.append(ValidationError(
-                            field=f"education[{i}].details",
-                            current_value=len(combined),
-                            limit=max_chars,
-                            excess=len(combined) - max_chars,
-                            message=f"Education {i} details: {len(combined)} chars exceeds {max_chars}",
-                            suggestion=f"Reduce details by {len(combined) - max_chars} characters"
-                        ))
+                    clen = len(combined)
+                    soft = _soft_limit(max_chars)
+                    hard = _hard_limit(max_chars)
+                    if clen > hard:
+                        errors.append(
+                            ValidationError(
+                                field=f"education[{i}].details",
+                                current_value=clen,
+                                limit=hard,
+                                excess=clen - hard,
+                                message=f"Education {i} details: {clen} chars exceeds hard limit {hard}",
+                                suggestion=f"Reduce details by {clen - hard} characters",
+                            )
+                        )
+                    elif clen > soft:
+                        warnings.append(f"education[{i}].details: {clen} chars (soft cap {soft}, hard cap {hard})")
                 else:
                     value = entry.get(field, "")
                     max_chars = field_limits.get("max_chars")
-                    if max_chars and len(value) > max_chars:
-                        errors.append(ValidationError(
-                            field=f"education[{i}].{field}",
-                            current_value=len(value),
-                            limit=max_chars,
-                            excess=len(value) - max_chars,
-                            message=f"Education {i}.{field}: {len(value)} chars exceeds {max_chars}",
-                            suggestion=f"Shorten by {len(value) - max_chars} characters"
-                        ))
+                    if max_chars:
+                        vlen = len(value)
+                        soft = _soft_limit(max_chars)
+                        hard = _hard_limit(max_chars)
+                        if vlen > hard:
+                            errors.append(
+                                ValidationError(
+                                    field=f"education[{i}].{field}",
+                                    current_value=vlen,
+                                    limit=hard,
+                                    excess=vlen - hard,
+                                    message=f"Education {i}.{field}: {vlen} chars exceeds hard limit {hard}",
+                                    suggestion=f"Shorten by {vlen - hard} characters",
+                                )
+                            )
+                        elif vlen > soft:
+                            warnings.append(f"education[{i}].{field}: {vlen} chars (soft cap {soft}, hard cap {hard})")
         
         return errors
     
-    def _validate_further_experience(self, entries: List[Dict]) -> List[ValidationError]:
+    def _validate_further_experience(self, entries: List[Dict], warnings: List[str]) -> List[ValidationError]:
         """Validate further experience entries"""
         errors = []
         limits = self.limits["further_experience"]
         
         if len(entries) > limits["max_entries"]:
-            errors.append(ValidationError(
-                field="further_experience",
-                current_value=len(entries),
-                limit=limits["max_entries"],
-                excess=len(entries) - limits["max_entries"],
-                message=f"Further Experience: {len(entries)} entries exceeds limit of {limits['max_entries']}",
-                suggestion=f"Remove {len(entries) - limits['max_entries']} entry/entries"
-            ))
+            warnings.append(f"further_experience: {len(entries)} entries (recommended max {limits['max_entries']})")
         
         for i, entry in enumerate(entries):
             per_entry = limits["per_entry"]
@@ -436,37 +464,52 @@ class CVValidator:
                 if field == "bullets":
                     bullets = entry.get(field, [])
                     if len(bullets) > field_limits["max_count"]:
-                        errors.append(ValidationError(
-                            field=f"further_experience[{i}].bullets",
-                            current_value=len(bullets),
-                            limit=field_limits["max_count"],
-                            excess=len(bullets) - field_limits["max_count"],
-                            message=f"Further Experience {i} bullets: {len(bullets)} exceeds limit of {field_limits['max_count']}",
-                            suggestion=f"Reduce to {field_limits['max_count']} bullets or less"
-                        ))
-                    
+                        warnings.append(
+                            f"further_experience[{i}].bullets: {len(bullets)} bullets (recommended max {field_limits['max_count']})"
+                        )
+
+                    max_chars = field_limits["max_chars_per_bullet"]
+                    soft = _soft_limit(max_chars)
+                    hard = _hard_limit(max_chars)
                     for j, bullet in enumerate(bullets):
-                        if len(bullet) > field_limits["max_chars_per_bullet"]:
-                            errors.append(ValidationError(
-                                field=f"further_experience[{i}].bullets[{j}]",
-                                current_value=len(bullet),
-                                limit=field_limits["max_chars_per_bullet"],
-                                excess=len(bullet) - field_limits["max_chars_per_bullet"],
-                                message=f"Further Experience {i} bullet {j}: {len(bullet)} chars exceeds {field_limits['max_chars_per_bullet']}",
-                                suggestion=f"Reduce by {len(bullet) - field_limits['max_chars_per_bullet']} characters"
-                            ))
+                        blen = len(bullet)
+                        if blen > hard:
+                            errors.append(
+                                ValidationError(
+                                    field=f"further_experience[{i}].bullets[{j}]",
+                                    current_value=blen,
+                                    limit=hard,
+                                    excess=blen - hard,
+                                    message=f"Further Experience {i} bullet {j}: {blen} chars exceeds hard limit {hard}",
+                                    suggestion=f"Reduce by {blen - hard} characters",
+                                )
+                            )
+                        elif blen > soft:
+                            warnings.append(
+                                f"further_experience[{i}].bullets[{j}]: {blen} chars (soft cap {soft}, hard cap {hard})"
+                            )
                 else:
                     value = entry.get(field, "")
                     max_chars = field_limits.get("max_chars")
-                    if max_chars and len(value) > max_chars:
-                        errors.append(ValidationError(
-                            field=f"further_experience[{i}].{field}",
-                            current_value=len(value),
-                            limit=max_chars,
-                            excess=len(value) - max_chars,
-                            message=f"Further Experience {i}.{field}: {len(value)} chars exceeds {max_chars}",
-                            suggestion=f"Shorten by {len(value) - max_chars} characters"
-                        ))
+                    if max_chars:
+                        vlen = len(value)
+                        soft = _soft_limit(max_chars)
+                        hard = _hard_limit(max_chars)
+                        if vlen > hard:
+                            errors.append(
+                                ValidationError(
+                                    field=f"further_experience[{i}].{field}",
+                                    current_value=vlen,
+                                    limit=hard,
+                                    excess=vlen - hard,
+                                    message=f"Further Experience {i}.{field}: {vlen} chars exceeds hard limit {hard}",
+                                    suggestion=f"Shorten by {vlen - hard} characters",
+                                )
+                            )
+                        elif vlen > soft:
+                            warnings.append(
+                                f"further_experience[{i}].{field}: {vlen} chars (soft cap {soft}, hard cap {hard})"
+                            )
         
         return errors
     
@@ -483,21 +526,27 @@ class CVValidator:
         total += header_height
         details["header"] = header_height
         
+        def _lines(s: str, chars_per_line: int) -> int:
+            s = s or ""
+            return int(math.ceil(len(s) / float(chars_per_line))) if s else 0
+
         # Profile section
         profile = cv_data.get("profile", "")
         profile = profile.strip() if isinstance(profile, str) else ""
-        profile_lines = max(1, len(profile) // 70)  # ~70 chars per line
-        profile_height = (SECTION_TITLE_HEIGHT_MM + (profile_lines * 4.5)) if profile else 0
+        profile_lines = _lines(profile, 70)
+        profile_height = (SECTION_TITLE_HEIGHT_MM + (max(1, profile_lines) * 4.5)) if profile else 0
         total += profile_height
         details["profile"] = profile_height
         
         # Work experience
         work_entries = cv_data.get("work_experience", [])
         work_height = SECTION_TITLE_HEIGHT_MM
+        per_bullet_chars = self.limits["work_experience"]["per_entry"]["bullets"]["max_chars_per_bullet"]
         for entry in work_entries:
             work_height += 5  # Entry header
             bullets = entry.get("bullets", [])
-            work_height += len(bullets) * 4.5  # 4.5mm per bullet
+            bullet_lines = sum(max(1, _lines(str(b), per_bullet_chars)) for b in bullets) if bullets else 0
+            work_height += bullet_lines * 4.5  # 4.5mm per rendered line
             work_height += 3  # Entry margin
         total += work_height
         details["work_experience"] = work_height
@@ -522,20 +571,27 @@ class CVValidator:
         
         # Further Experience
         further_exp_items = cv_data.get("further_experience", [])
-        further_exp_height = SECTION_TITLE_HEIGHT_MM + (len(further_exp_items) * 20)  # ~20mm per entry
+        fe_bullet_chars = self.limits["further_experience"]["per_entry"]["bullets"]["max_chars_per_bullet"]
+        further_exp_height = SECTION_TITLE_HEIGHT_MM
+        for entry in further_exp_items:
+            further_exp_height += 6  # entry header (date + title)
+            bullets = entry.get("bullets", [])
+            bullet_lines = sum(max(1, _lines(str(b), fe_bullet_chars)) for b in bullets) if bullets else 0
+            further_exp_height += bullet_lines * 4.5
+            further_exp_height += 2  # entry margin
         total += further_exp_height
         details["further_experience"] = further_exp_height
         
         # Interests
         interests = cv_data.get("interests", "")
-        interests_lines = max(1, len(interests) // 70)
+        interests_lines = max(1, _lines(str(interests), 70))
         interests_height = SECTION_TITLE_HEIGHT_MM + (interests_lines * 4.5)
         total += interests_height
         details["interests"] = interests_height
 
         # References (always rendered by the template; defaults to a short sentence)
         references = cv_data.get("references") or "Will be announced on request."
-        references_lines = max(1, len(str(references)) // 70)
+        references_lines = max(1, _lines(str(references), 70))
         references_height = SECTION_TITLE_HEIGHT_MM + (references_lines * 4.5)
         total += references_height
         details["references"] = references_height

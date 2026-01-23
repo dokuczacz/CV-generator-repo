@@ -13,6 +13,7 @@ interface Message {
 const SESSION_ID_KEY = 'cvgen:session_id';
 const JOB_URL_KEY = 'cvgen:job_posting_url';
 const JOB_TEXT_KEY = 'cvgen:job_posting_text';
+const SESSION_TIMESTAMP_KEY = 'cvgen:session_timestamp';
 const DEBUG_STAGE = process.env.NEXT_PUBLIC_CV_DEBUG_STAGE === '1';
 
 export default function CVGenerator() {
@@ -22,12 +23,15 @@ export default function CVGenerator() {
       content: '👋 Cześć! Wrzuć swoje CV (DOCX lub PDF) lub napisz informacje o sobie. Pomogę Ci stworzyć profesjonalne CV w PDF.',
     },
   ]);
+  const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [jobPostingUrl, setJobPostingUrl] = useState<string | null>(null);
   const [jobPostingText, setJobPostingText] = useState<string | null>(null);
+  const [showSessionDialog, setShowSessionDialog] = useState(false);
+  const [pendingSession, setPendingSession] = useState<{ id: string; timestamp: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -40,16 +44,62 @@ export default function CVGenerator() {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(SESSION_ID_KEY);
-      if (stored) setSessionId(stored);
-      const jobUrl = window.localStorage.getItem(JOB_URL_KEY);
-      if (jobUrl) setJobPostingUrl(jobUrl);
-      const jobText = window.localStorage.getItem(JOB_TEXT_KEY);
-      if (jobText) setJobPostingText(jobText);
+      const storedSessionId = window.localStorage.getItem(SESSION_ID_KEY);
+      const storedTimestamp = window.localStorage.getItem(SESSION_TIMESTAMP_KEY);
+
+      if (storedSessionId) {
+        // Found a previous session - ask user if they want to continue or start fresh
+        setPendingSession({
+          id: storedSessionId,
+          timestamp: storedTimestamp || 'unknown',
+        });
+        setShowSessionDialog(true);
+      }
+      // Job URL/text are only loaded if user chooses to continue session
     } catch {
       // ignore
     }
   }, []);
+
+  const handleContinueSession = () => {
+    if (pendingSession) {
+      setSessionId(pendingSession.id);
+      try {
+        const jobUrl = window.localStorage.getItem(JOB_URL_KEY);
+        if (jobUrl) setJobPostingUrl(jobUrl);
+        const jobText = window.localStorage.getItem(JOB_TEXT_KEY);
+        if (jobText) setJobPostingText(jobText);
+      } catch {
+        // ignore
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `✅ Kontynuuję poprzednią sesję. Możesz kontynuować edycję CV lub wrzuć nowy plik, żeby zacząć od nowa.`,
+        },
+      ]);
+    }
+    setShowSessionDialog(false);
+    setPendingSession(null);
+  };
+
+  const handleStartFresh = () => {
+    // Clear all stored session data
+    try {
+      window.localStorage.removeItem(SESSION_ID_KEY);
+      window.localStorage.removeItem(JOB_URL_KEY);
+      window.localStorage.removeItem(JOB_TEXT_KEY);
+      window.localStorage.removeItem(SESSION_TIMESTAMP_KEY);
+    } catch {
+      // ignore
+    }
+    setSessionId(null);
+    setJobPostingUrl(null);
+    setJobPostingText(null);
+    setShowSessionDialog(false);
+    setPendingSession(null);
+  };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -70,6 +120,7 @@ export default function CVGenerator() {
           window.localStorage.removeItem(SESSION_ID_KEY);
           window.localStorage.removeItem(JOB_URL_KEY);
           window.localStorage.removeItem(JOB_TEXT_KEY);
+          window.localStorage.removeItem(SESSION_TIMESTAMP_KEY);
         } catch {
           // ignore
         }
@@ -184,6 +235,7 @@ export default function CVGenerator() {
         setSessionId(result.session_id);
         try {
           window.localStorage.setItem(SESSION_ID_KEY, result.session_id);
+          window.localStorage.setItem(SESSION_TIMESTAMP_KEY, new Date().toISOString());
         } catch {
           // ignore
         }
@@ -254,8 +306,53 @@ export default function CVGenerator() {
     }
   };
 
+  // Format timestamp for display
+  const formatSessionTime = (isoString: string) => {
+    if (isoString === 'unknown') return 'nieznany czas';
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleString('pl-PL', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return 'nieznany czas';
+    }
+  };
+
   return (
     <div className="flex h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* Session Resume Dialog */}
+      {showSessionDialog && pendingSession && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md mx-4 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Znaleziono poprzednią sesję</h3>
+            <p className="text-gray-600 mb-4">
+              Masz zapisaną sesję CV z {formatSessionTime(pendingSession.timestamp)}.
+              <br />
+              Czy chcesz kontynuować poprzednią pracę czy zacząć od nowa?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleContinueSession}
+                className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
+              >
+                Kontynuuj
+              </button>
+              <button
+                onClick={handleStartFresh}
+                className="flex-1 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition"
+              >
+                Zacznij od nowa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar - File Upload */}
       <div className="w-72 bg-white border-r border-gray-200 p-6 flex flex-col">
         <h2 className="text-lg font-bold text-gray-900 mb-4">CV Generator</h2>
@@ -302,37 +399,53 @@ export default function CVGenerator() {
       <div className="flex-1 flex flex-col">
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
+          {messages.map((msg, idx) => {
+            const len = msg.content?.length || 0;
+            // Keep user messages collapsible for very long pastes; show assistant messages fully unless extreme.
+            const collapseThreshold = msg.role === 'assistant' ? 8000 : 1800;
+            const isCollapsible = len > collapseThreshold;
+            const isExpanded = !!expandedMessages[idx];
+            const toggleExpand = () =>
+              setExpandedMessages((prev) => ({ ...prev, [idx]: !isExpanded }));
+
+            return (
               <div
-                className={`max-w-2xl rounded-lg p-4 ${
-                  msg.role === 'user'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-gray-900 border border-gray-200'
-                }`}
+                key={idx}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
-                {msg.pdfBase64 && (
-                  <button
-                    onClick={() => downloadPDF(msg.pdfBase64!, `CV_${idx}.pdf`)}
-                    className="mt-2 text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200"
-                  >
-                    📥 Download PDF
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-white text-gray-900 border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center gap-2">
-                  <span className="animate-spin">⚙️</span>
-                  <span>Processing...</span>
+                <div
+                  className={`max-w-2xl rounded-lg p-4 ${
+                    msg.role === 'user'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-white text-gray-900 border border-gray-200'
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {isCollapsible && (
+                    <button
+                      onClick={toggleExpand}
+                      className="mt-2 text-sm text-indigo-700 hover:text-indigo-900"
+                    >
+                      {isExpanded ? 'Show less' : 'Show more'}
+                    </button>
+                  )}
+                  {msg.pdfBase64 && (
+                    <button
+                      onClick={() => downloadPDF(msg.pdfBase64!, `CV_${idx}.pdf`)}
+                      className="mt-2 text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200"
+                    >
+                      📥 Download PDF
+                    </button>
+                  )}
                 </div>
+              </div>
+            );
+          })}
+          {isLoading && (
+            <div className="bg-white text-gray-900 border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <span className="animate-spin">⚙️</span>
+                <span>Processing...</span>
               </div>
             </div>
           )}

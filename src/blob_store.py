@@ -65,3 +65,25 @@ class CVBlobStore:
             return blob.download_blob().readall()
         except ResourceNotFoundError as exc:
             raise FileNotFoundError(f"Blob not found: {pointer.container}/{pointer.blob_name}") from exc
+
+    def delete_prefix(self, prefix: str) -> int:
+        """
+        Delete all blobs under a given prefix. Returns count deleted.
+        """
+        deleted = 0
+        container_client = self.client.get_container_client(self.container)
+        for blob in container_client.list_blobs(name_starts_with=prefix):
+            container_client.delete_blob(blob)
+            deleted += 1
+        return deleted
+
+    def purge_all(self) -> int:
+        """
+        Delete all blobs in the container. Returns count deleted.
+        """
+        deleted = 0
+        container_client = self.client.get_container_client(self.container)
+        for blob in container_client.list_blobs():
+            container_client.delete_blob(blob)
+            deleted += 1
+        return deleted

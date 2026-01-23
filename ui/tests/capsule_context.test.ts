@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as capsule from '../lib/capsule';
 
-test('capsule: buildUserContent includes snapshot + job posting and truncates job text to 20k', () => {
+test('capsule: buildUserContent includes snapshot + job posting and truncates job text to 6k', () => {
   const jobPostingUrl = 'https://example.com/job';
   const jobPostingText = 'J'.repeat(25000);
   const sessionSnapshot = JSON.stringify({ ok: true, session_id: 'sess_123', limit_risks: { work_entries: 5 } });
@@ -20,14 +20,15 @@ test('capsule: buildUserContent includes snapshot + job posting and truncates jo
     jobPostingUrl,
     jobPostingText,
     language: 'en',
+    stage: 'draft_proposal',
   });
 
   assert.match(content, /\[SESSION_SNAPSHOT_JSON\]/);
-  assert.match(content, /\[CONTEXT_PACK_JSON\]/);
+  assert.match(content, /\[CONTEXT_PACK_V2\]/);
   assert.match(content, new RegExp(`\\[Job posting text extracted from ${jobPostingUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  assert.match(content, /truncated to 20000 chars/);
-  assert.ok(content.includes('J'.repeat(20000)));
-  assert.ok(!content.includes('J'.repeat(20001)));
+  assert.match(content, /truncated to 6000 chars/);
+  assert.ok(content.includes('J'.repeat(6000)));
+  assert.ok(!content.includes('J'.repeat(6001)));
 });
 
 test('capsule: buildUserContent emits missing markers when session/job artifacts are unavailable', () => {
@@ -43,6 +44,7 @@ test('capsule: buildUserContent emits missing markers when session/job artifacts
     jobPostingUrl: 'https://example.com/job',
     jobPostingText: null,
     language: 'en',
+    stage: 'review_session',
   });
 
   assert.match(content, /\[SESSION_SNAPSHOT_JSON_MISSING\]/);
@@ -65,14 +67,16 @@ test('capsule: buildBaseInputList omits systemPrompt when blank (dashboard promp
   const userContent = 'hello';
   const input = capsule.buildBaseInputList({ hasDocx: false, systemPrompt: '', userContent });
 
-  // 2 baseline system messages + 1 user message.
-  assert.equal(input.length, 3);
+  // 3 baseline system messages + 1 user message.
+  assert.equal(input.length, 4);
   assert.equal(input[0]?.role, 'system');
   assert.match(String(input[0]?.content), /session-based workflow/i);
   assert.equal(input[1]?.role, 'system');
   assert.match(String(input[1]?.content), /stateless/i);
-  assert.equal(input[2]?.role, 'user');
-  assert.equal(input[2]?.content, userContent);
+  assert.equal(input[2]?.role, 'system');
+  assert.match(String(input[2]?.content), /template note/i);
+  assert.equal(input[3]?.role, 'user');
+  assert.equal(input[3]?.content, userContent);
 });
 
 test('capsule: buildResponsesRequest keeps metadata contract (stage_seq string, truncation disabled)', () => {
@@ -163,7 +167,7 @@ test('capsule: sanitizeToolOutputForModel(generate_cv_from_session) strips pdf_b
   assert.equal(parsed.pdf_base64, undefined);
 });
 
-test('capsule: sanitizeToolOutputForModel(fetch_job_posting_text) clamps job text to 20k', () => {
+test('capsule: sanitizeToolOutputForModel(fetch_job_posting_text) clamps job text to 6k', () => {
   const toolOutput = JSON.stringify({
     success: true,
     url: 'https://example.com/job',
@@ -176,7 +180,7 @@ test('capsule: sanitizeToolOutputForModel(fetch_job_posting_text) clamps job tex
   assert.equal(parsed.ok, true);
   assert.equal(parsed.url, 'https://example.com/job');
   assert.equal(parsed.job_posting_text_length, 25000);
-  assert.equal(parsed.job_posting_text.length, 20000);
+  assert.equal(parsed.job_posting_text.length, 6000);
 });
 
 test('capsule: roughInputChars accounts for message sizes (smoke)', () => {

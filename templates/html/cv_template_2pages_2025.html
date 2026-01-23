@@ -7,16 +7,27 @@
   {% if _styles %}
   <style>
     :root{
-      --font-main: "{{ _styles.font_family }}", "Helvetica", sans-serif;
+      --font-main: "{{ _styles.font_family }}", "Helvetica Neue", "Arial", sans-serif;
       --text: {{ _styles.body_color_hex }};
       --accent: {{ _styles.title_color_hex }};
     }
-    body{ font-size: {{ _styles.body_font_size_pt }}pt; }
+    body{ font-size: {{ _styles.body_font_size_pt }}pt; line-height: 1.43; }
     .name{ font-size: {{ _styles.name_font_size_pt }}pt; }
     .section-title{ font-size: {{ _styles.title_font_size_pt }}pt; }
-    @page{ margin: {{ _styles.margin_top_mm }}mm {{ _styles.margin_right_mm|round(1) }}mm {{ _styles.margin_bottom_mm }}mm {{ _styles.margin_left_mm }}mm; }
-    .section{ margin-top: {{ _styles.section_gap_mm }}mm; }
-    .bullets{ margin-left: 42.5mm; padding-left: {{ _styles.bullet_hanging_mm }}mm; }
+    @page{
+      margin: {{ _styles.margin_top_mm }}mm {{ _styles.margin_right_mm|round(2) }}mm {{ _styles.margin_bottom_mm }}mm {{ _styles.margin_left_mm|round(2) }}mm;
+      @top-right { content: string(cv-header); font-size: 9pt; color: #666666; }
+      {% if language == 'de' %}
+      @bottom-right { content: "Seite " counter(page) " von " counter(pages); font-size: 9pt; color: #666666; font-weight: 300; text-align: right; }
+      {% elif language == 'pl' %}
+      @bottom-right { content: "Strona " counter(page) " z " counter(pages); font-size: 9pt; color: #666666; font-weight: 300; text-align: right; }
+      {% else %}
+      @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #666666; font-weight: 300; text-align: right; }
+      {% endif %}
+    }
+    @page :first { @top-right { content: none; } }
+    .section{ margin-top: {{ _styles.section_gap_mm }}mm; break-inside: avoid; page-break-inside: avoid; }
+    .bullets{ margin-left: 42.5mm; padding-left: {{ _styles.bullet_hanging_mm }}mm; font-size: 10pt; line-height: 1.4; }
   </style>
   {% endif %}
 </head>
