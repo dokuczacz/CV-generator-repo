@@ -6,12 +6,13 @@ This document describes how the CV generation workflow is orchestrated end‑to�
 
 - **Request handling** (`ui/app/api/process-cv/route.ts`):
   1. Parses the HTTP body (`message`, `docx_base64`, `session_id`, `job_posting_url/text`).
-  2. If the request carries a DOCX, the UI extracts its text once (bounded to 12 000 chars) for diagnostics and optional fast-path context.
+  2. If the request carries a DOCX, the UI extracts its text once (bounded to 12 000 chars) for diagnostics (not used for orchestration when a session exists).
   3. Determines `stage` based on existing session and intent (`generate_pdf` only when user explicitly asks for PDF; otherwise defaults to `review_session` or `extract`).
-  4. Builds the system prompt:
-     * Sends `PROMPT_SYSTEM_REVISED.md` as a long-form system instruction (or uses the dashboard prompt).
-     * Fetches the stage prompt from `ui/lib/prompts.ts` (stages: `extract`, `review_session`, `draft_proposal`, `generate_pdf`, etc.).
-  5. Pulls `ContextPackV2` if a session exists; otherwise uses the legacy `ContextPackV1` during bootstrap/extract.
+  4. Pulls `ContextPackV2` if a session exists; otherwise skips the pack (bootstrap/extract is driven by tools).
+  5. Builds prompts for the OpenAI request:
+     * **Dashboard prompt mode (default in prod/dev):** when `OPENAI_PROMPT_ID` is set, the request uses `promptId=...` and `systemPrompt` is sent as an empty string.
+     * **Local fallback mode:** when `OPENAI_PROMPT_ID` is missing, the request sends `systemPrompt=CV_SYSTEM_PROMPT` from `ui/lib/prompts.ts`.
+     * The **stage prompt** always comes from `CV_STAGE_PROMPT(stage)` in `ui/lib/prompts.ts` and is included in the request.
   6. Controls tool availability per stage:
      * Blocks all generation tools until `required_present` (contact + education + work) is true.
      * Once `canGenerate` is true, enables `generate_cv_from_session` only once per iteration; duplicate attempts are rejected.
@@ -29,7 +30,7 @@ This document describes how the CV generation workflow is orchestrated end‑to�
 ### 2. Backend Azure Functions
 
 - **Session reset + extraction** (`extract-and-store-cv`):
-  * Purges all existing sessions and blobs, ensuring every new upload starts from zero.
+  * Creates a fresh session and ensures the session’s persisted artifacts start from zero (no carry-over from prior runs).
   * Decodes the DOCX and runs `prefill_cv_from_docx_bytes`.
   * **First major change:** only metadata is populated. `cv_data` is initialized as a canonical empty object (blank name, contact, lists).
   * Metadata now stores:
@@ -49,7 +50,12 @@ This document describes how the CV generation workflow is orchestrated end‑to�
     * `execution`: `approved_cv_data`, hard limits, checklist.
     * `completeness`: `required_present` booleans, counts, `next_missing_section`.
     * `hard_limits`/`self_validation_checklist`: DoD guards and warnings.
-  * The capsule is capped (default 12k chars). Work experience bullets are preserved verbatim.
+  * The capsule is capped (default 12k chars). When needed, `ContextPackV2` compacts large sections (e.g., trims bullet text and list lengths) **in the pack only**; it does not mutate the stored session `cv_data`.
+
+- **Tool dispatcher** (`/cv-tool-call-handler`, `function_app.py`):
+  * Single endpoint for “extra” tools to keep the public surface small.
+  * Current tool(s):
+    * `cv_session_search` — searches across `cv_data`, `docx_prefill_unconfirmed`, and recent `event_log` entries and returns bounded previews.
 
 - **Update CV field** (`update-cv-field`):
   * Supports single paths, batch `edits[]`, and `cv_patch` (one top-level section at a time).
@@ -63,16 +69,39 @@ This document describes how the CV generation workflow is orchestrated end‑to�
 
 ### 3. System/stage prompts
 
-- **System prompt** (`PROMPT_SYSTEM_REVISED.md`):
-  * Describes the three phases (Preparation, Confirmation, Execution) and their goals.
-  * Emphasizes phase authority, statelessness, and the mandatory immediate persistence of user-provided data.
-  * Recommends `web_search` when job info is missing.
-  * New entry: sessions start empty. The agent must **immediately** repopulate missing required sections using `ContextPackV2.preparation.docx_prefill_unconfirmed` via a single batch call.
+- **Dashboard system prompt** (OpenAI Prompt ID):
+  * When `OPENAI_PROMPT_ID=pmpt_...` is present, the UI sends `promptId` on every Responses API call.
+  * This is the authoritative system prompt (managed in the OpenAI dashboard).
+  * Local prompts in the repo are **fallback/reference** and should not duplicate long system instructions.
 
 - **Stage prompts** (`ui/lib/prompts.ts`):
   * Provide stage‑specific directives (e.g., `review_session` stage asks for CV job-fit mapping using `completeness.next_missing_section` and no more than 3–4 questions per turn).
   * The `review_session` prompt now explicitly instructs the agent to auto-apply the unconfirmed DOCX snapshot when required sections are missing and to stay in preparation.
   * Prompt also enforces the “speed rule”: populate education/work/contact before asking more than one question.
+
+### 3.1 OpenAI request payload (what is actually sent)
+
+The UI builds the Responses request via `buildResponsesRequest(...)` (`ui/lib/capsule.ts`) and calls `openai.responses.create(...)` (`ui/app/api/process-cv/route.ts`). Shape (example, redacted):
+
+```json
+{
+  "promptId": "pmpt_…",
+  "model": "gpt-5-mini-… (optional override via OPENAI_MODEL)",
+  "input": [
+    { "role": "user", "content": "…capsule + user message…" }
+  ],
+  "tools": [
+    { "type": "web_search" },
+    { "type": "function", "name": "get_cv_session", "parameters": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } }
+  ],
+  "metadata": { "stage": "review_session", "stage_seq": "1" },
+  "store": false
+}
+```
+
+Notes:
+- `store: false` is intentional; it means **tool outputs must be re-sent** each iteration (the UI does this by appending `function_call` items to `inputList`).
+- When `promptId` is set, `systemPrompt` is sent as empty and the dashboard prompt defines system behavior.
 
 ### 4. Capsule + completeness/ DoD
 
