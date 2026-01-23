@@ -258,6 +258,13 @@ def build_context_pack_v2(
 
     # Add completeness + next_missing_section
     completeness = _compute_completeness(normalized)
+    confirmation_state = _compute_confirmation_state(normalized, session_metadata)
+    pack['confirmation_state'] = confirmation_state
+    pack['readiness'] = {
+        "can_generate": confirmation_state.get("can_generate"),
+        "missing": confirmation_state.get("missing"),
+        "required_present": completeness.get("required_present"),
+    }
     pack['completeness'] = completeness
 
     # Apply size limits
@@ -403,6 +410,33 @@ def _compute_completeness(cv_data: Dict[str, Any]) -> Dict[str, Any]:
         "required_present": required_present,
         "counts": counts,
         "next_missing_section": next_missing,
+    }
+
+
+def _compute_confirmation_state(cv_data: Dict[str, Any], session_metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    confirmed_flags = {}
+    if isinstance(session_metadata, dict):
+        confirmed_flags = session_metadata.get("confirmed_flags") or {}
+    contact_confirmed = bool(confirmed_flags.get("contact_confirmed"))
+    education_confirmed = bool(confirmed_flags.get("education_confirmed"))
+    required_present = _compute_completeness(cv_data).get("required_present", {})
+    missing: List[str] = []
+    for k, v in required_present.items():
+        if not v:
+            missing.append(k)
+    if not contact_confirmed:
+        missing.append("contact_not_confirmed")
+    if not education_confirmed:
+        missing.append("education_not_confirmed")
+
+    return {
+        "confirmed_flags": {
+            "contact_confirmed": contact_confirmed,
+            "education_confirmed": education_confirmed,
+            "confirmed_at": confirmed_flags.get("confirmed_at"),
+        },
+        "missing": missing,
+        "can_generate": all(required_present.values()) and contact_confirmed and education_confirmed,
     }
 
 
@@ -711,6 +745,19 @@ def format_context_pack_with_delimiters(pack: Dict[str, Any]) -> str:
         '</session_metadata>',
         '',
     ]
+
+    # Add confirmation state and readiness up front (applies to all phases)
+    if "confirmation_state" in pack:
+        cs = pack["confirmation_state"]
+        lines.append("<confirmation_state>")
+        lines.append(json.dumps(cs, ensure_ascii=False, indent=2))
+        lines.append("</confirmation_state>")
+        lines.append("")
+    if "readiness" in pack:
+        lines.append("<readiness>")
+        lines.append(json.dumps(pack["readiness"], ensure_ascii=False, indent=2))
+        lines.append("</readiness>")
+        lines.append("")
 
     # Add phase-specific context
     if phase == 'preparation' and 'preparation' in pack:

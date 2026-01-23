@@ -11,6 +11,7 @@ import io
 from pathlib import Path
 from dataclasses import asdict
 import sys
+from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -29,6 +30,46 @@ from src.schema_validator import (
 )
 from typing import Any
 from src.session_store import CVSessionStore
+
+
+def _now_iso():
+    return datetime.utcnow().isoformat()
+
+
+def _compute_required_present(cv_data: dict) -> dict:
+    return {
+        "full_name": bool(cv_data.get("full_name", "").strip()) if isinstance(cv_data.get("full_name"), str) else False,
+        "email": bool(cv_data.get("email", "").strip()) if isinstance(cv_data.get("email"), str) else False,
+        "phone": bool(cv_data.get("phone", "").strip()) if isinstance(cv_data.get("phone"), str) else False,
+        "work_experience": bool(cv_data.get("work_experience")) and isinstance(cv_data.get("work_experience"), list),
+        "education": bool(cv_data.get("education")) and isinstance(cv_data.get("education"), list),
+    }
+
+
+def _compute_readiness(cv_data: dict, metadata: dict) -> dict:
+    required_present = _compute_required_present(cv_data)
+    confirmed_flags = (metadata or {}).get("confirmed_flags") or {}
+    contact_ok = bool(confirmed_flags.get("contact_confirmed"))
+    education_ok = bool(confirmed_flags.get("education_confirmed"))
+    missing = []
+    for k, v in required_present.items():
+        if not v:
+            missing.append(k)
+    if not contact_ok:
+        missing.append("contact_not_confirmed")
+    if not education_ok:
+        missing.append("education_not_confirmed")
+    can_generate = all(required_present.values()) and contact_ok and education_ok
+    return {
+        "can_generate": can_generate,
+        "required_present": required_present,
+        "confirmed_flags": {
+            "contact_confirmed": contact_ok,
+            "education_confirmed": education_ok,
+            "confirmed_at": confirmed_flags.get("confirmed_at"),
+        },
+        "missing": missing,
+    }
 
 
 def _serialize_validation_result(validation_result):
@@ -392,6 +433,11 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
             "source_file": "uploaded.docx",
             "extraction_method": "docx_prefill_v1",
             "event_log": [],
+            "confirmed_flags": {
+                "contact_confirmed": False,
+                "education_confirmed": False,
+                "confirmed_at": None,
+            },
         }
         # Keep a lightweight summary of prefill (for reference only, not applied).
         try:
@@ -553,12 +599,14 @@ def get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
     
     # Include version info and content signature for model to verify data freshness
     cv_data = session["cv_data"]
+    readiness = _compute_readiness(cv_data, session.get("metadata") or {})
     version_info = {
         "success": True,
         "session_id": session["session_id"],
         "cv_data": cv_data,
         "metadata": session["metadata"],
         "expires_at": session["expires_at"],
+        "readiness": readiness,
         # Include metadata about CV content freshness for debugging
         "_metadata": {
             "version": session.get("version"),
@@ -610,6 +658,7 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
     field_path = req_body.get("field_path")
     value = req_body.get("value")
     cv_patch = req_body.get("cv_patch")
+    confirm_flags = req_body.get("confirm")
 
     if not session_id:
         return func.HttpResponse(
@@ -638,6 +687,7 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
     try:
         store = CVSessionStore()
         applied = 0
+        metadata_after_confirm = None
 
         # cv_patch path: allow exactly one top-level section to be replaced/merged
         if is_patch:
@@ -734,6 +784,22 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
             logging.info(f"[update-cv-field] {field_path} <= {_preview(value)}")
             if store.update_field(session_id, field_path, value):
                 applied = 1
+
+        # Apply confirmation flags (contact/education) if provided.
+        if applied > 0 and isinstance(confirm_flags, dict):
+            session = store.get_session(session_id)
+            if session:
+                metadata = session.get("metadata") or {}
+                flags = metadata.get("confirmed_flags") or {}
+                if confirm_flags.get("contact") is True:
+                    flags["contact_confirmed"] = True
+                    flags["confirmed_at"] = _now_iso()
+                if confirm_flags.get("education") is True:
+                    flags["education_confirmed"] = True
+                    flags["confirmed_at"] = flags.get("confirmed_at") or _now_iso()
+                metadata["confirmed_flags"] = flags
+                metadata_after_confirm = metadata
+                store.update_session(session_id, session["cv_data"], metadata)
 
         # Best-effort: also record client context (stage/seq) for stateless continuity.
         if applied > 0 and isinstance(client_context, dict) and client_context:
@@ -868,6 +934,25 @@ def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
     cv_data = session["cv_data"]
     language = req_body.get("language") or session["metadata"].get("language", "en")
     client_context = req_body.get("client_context")
+
+    readiness = _compute_readiness(cv_data, session.get("metadata") or {})
+    run_summary = {
+        "stage": "generate_pdf",
+        "can_generate": readiness.get("can_generate"),
+        "required_present": readiness.get("required_present"),
+        "confirmed_flags": readiness.get("confirmed_flags"),
+    }
+    if not readiness.get("can_generate"):
+        return func.HttpResponse(
+            json.dumps({
+                "error": "readiness_not_met",
+                "message": "Cannot generate until required fields are present and confirmed.",
+                "readiness": readiness,
+                "run_summary": run_summary,
+            }),
+            mimetype="application/json",
+            status_code=400,
+        )
 
     # Best-effort: record a generation attempt in session metadata (helps stateless continuity/debugging).
     try:
@@ -1088,7 +1173,15 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
         }
         
         try:
-            metadata = {"language": language, "source_file": "uploaded.docx"}
+            metadata = {
+                "language": language,
+                "source_file": "uploaded.docx",
+                "confirmed_flags": {
+                    "contact_confirmed": False,
+                    "education_confirmed": False,
+                    "confirmed_at": None,
+                },
+            }
             if job_posting_url:
                 metadata["job_posting_url"] = job_posting_url
             if job_posting_text:
@@ -1191,7 +1284,9 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
                 "session_id": session_id,
                 "pdf_base64": pdf_base64,
                 "validation": _serialize_validation_result(validation_result),
-                "cv_data_summary": summary
+                "cv_data_summary": summary,
+                "readiness": readiness,
+                "run_summary": run_summary,
             }),
             mimetype="application/json",
             status_code=200
@@ -1203,6 +1298,110 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=500
         )
+
+
+@app.route(route="cv-session-search", methods=["POST"])
+def cv_session_search(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Lightweight search over session data (cv_data, docx_prefill_unconfirmed, recent events).
+    Returns bounded previews to avoid token bloat.
+    """
+    try:
+        body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(json.dumps({"error": "Invalid JSON"}), mimetype="application/json", status_code=400)
+
+    session_id = body.get("session_id")
+    q = str(body.get("q") or "").lower().strip()
+    section = str(body.get("section") or "").lower().strip()
+    try:
+        limit = int(body.get("limit", 20))
+    except Exception:
+        limit = 20
+    limit = max(1, min(limit, 50))
+
+    if not session_id:
+        return func.HttpResponse(json.dumps({"error": "session_id is required"}), mimetype="application/json", status_code=400)
+
+    try:
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+    except Exception as e:
+        return func.HttpResponse(json.dumps({"error": "Failed to retrieve session", "details": str(e)}), mimetype="application/json", status_code=500)
+
+    if not session:
+        return func.HttpResponse(json.dumps({"error": "Session not found or expired"}), mimetype="application/json", status_code=404)
+
+    hits = []
+
+    def _add_hit(source: str, field_path: str, value: Any, meta: dict | None = None):
+        preview = ""
+        if isinstance(value, str):
+            preview = value[:240]
+        elif isinstance(value, (int, float)):
+            preview = str(value)
+        elif isinstance(value, list):
+            preview = json.dumps(value[:2], ensure_ascii=False)[:240]
+        elif isinstance(value, dict):
+            preview = json.dumps(value, ensure_ascii=False)[:240]
+        hit = {
+            "source": source,
+            "field_path": field_path,
+            "preview": preview,
+        }
+        if meta:
+            hit.update(meta)
+        if q and q not in preview.lower():
+            return
+        hits.append(hit)
+
+    meta = session.get("metadata") or {}
+    docx_prefill = meta.get("docx_prefill_unconfirmed") or {}
+    cv_data = session.get("cv_data") or {}
+
+    # Contact
+    for fp in ["full_name", "email", "phone"]:
+        if fp in docx_prefill:
+            _add_hit("docx_prefill_unconfirmed", fp, docx_prefill[fp])
+        if fp in cv_data:
+            _add_hit("cv_data", fp, cv_data.get(fp))
+
+    # Education
+    def _walk_list(lst, base):
+        if not isinstance(lst, list):
+            return
+        for idx, item in enumerate(lst):
+            if not isinstance(item, dict):
+                continue
+            for k, v in item.items():
+                _add_hit("docx_prefill_unconfirmed" if base.startswith("docx") else "cv_data", f"{base}[{idx}].{k}", v)
+
+    _walk_list(docx_prefill.get("education"), "docx.education")
+    _walk_list(cv_data.get("education"), "education")
+    _walk_list(docx_prefill.get("work_experience"), "docx.work_experience")
+    _walk_list(cv_data.get("work_experience"), "work_experience")
+
+    # Recent events
+    events = meta.get("event_log") or []
+    if isinstance(events, list):
+        for e in events[-20:]:
+            _add_hit("event_log", f"event_log[{events.index(e)}]", e)
+
+    truncated = False
+    if len(hits) > limit:
+        hits = hits[:limit]
+        truncated = True
+
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "session_id": session_id,
+            "hits": hits,
+            "truncated": truncated
+        }),
+        mimetype="application/json",
+        status_code=200
+    )
 
 
 @app.route(route="cleanup-expired-sessions", methods=["POST"])

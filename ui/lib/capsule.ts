@@ -412,6 +412,19 @@ function formatContextPackWithDelimiters(pack: any): string {
     '',
   ];
 
+  if (pack.confirmation_state) {
+    lines.push('<confirmation_state>');
+    lines.push(JSON.stringify(pack.confirmation_state, null, 2));
+    lines.push('</confirmation_state>');
+    lines.push('');
+  }
+  if (pack.readiness) {
+    lines.push('<readiness>');
+    lines.push(JSON.stringify(pack.readiness, null, 2));
+    lines.push('</readiness>');
+    lines.push('');
+  }
+
   // Add phase-specific sections
   if (phase === 'preparation' && pack.preparation) {
     const prep = pack.preparation;
