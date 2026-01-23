@@ -53,6 +53,41 @@ test('capsule: buildUserContent emits missing markers when session/job artifacts
   assert.match(content, /\bAsk the user to paste\b/);
 });
 
+test('capsule: ContextPackV2 delimiters include docx_prefill_unconfirmed in preparation', () => {
+  const content = capsule.buildUserContent({
+    userMessage: 'go',
+    hasDocx: true,
+    hasSession: true,
+    sessionId: 'sess_123',
+    skipPhoto: false,
+    sessionSnapshot: JSON.stringify({ ok: true }),
+    contextPack: {
+      schema_version: 'cvgen.context_pack.v2',
+      phase: 'preparation',
+      session_id: 'sess_123',
+      language: 'en',
+      cv_fingerprint: 'sha256:abc',
+      preparation: {
+        cv_data: { full_name: '' },
+        docx_prefill_unconfirmed: {
+          education: [{ institution: 'Uni', title: 'MSc', date_range: '2010–2015', details: [] }],
+          email: 'a@example.com',
+        },
+      },
+    },
+    boundedCvText: null,
+    jobPostingUrl: null,
+    jobPostingText: null,
+    language: 'en',
+    stage: 'review_session',
+  });
+
+  assert.match(content, /<docx_prefill_unconfirmed>/);
+  assert.match(content, /\"education\"/);
+  assert.match(content, /\"institution\": \"Uni\"/);
+  assert.match(content, /<\/docx_prefill_unconfirmed>/);
+});
+
 test('capsule: buildBaseInputList produces required system + user messages', () => {
   const userContent = 'hello';
   const input = capsule.buildBaseInputList({ hasDocx: true, systemPrompt: 'SYS', userContent });

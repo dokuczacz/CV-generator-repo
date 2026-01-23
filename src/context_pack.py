@@ -577,7 +577,37 @@ def _apply_size_limits_v2(pack: Dict[str, Any], max_chars: int) -> Dict[str, Any
         limits["truncated_fields"] = truncated_fields
         return pack
 
-    # 2) Compact CV structures: trim bullets/details to avoid bloat.
+    # 2) Drop job snippet early (it is also included in the UI capsule separately).
+    size = _size(pack)
+    try:
+        if phase == "preparation" and isinstance(pack.get("preparation"), dict):
+            prep = pack["preparation"]
+            if isinstance(prep.get("job_analysis"), dict) and prep["job_analysis"].get("text_snippet"):
+                prep["job_analysis"]["text_snippet"] = ""
+                truncated_fields.append("preparation.job_analysis.text_snippet")
+    except Exception:
+        pass
+
+    size = _size(pack)
+    if size <= max_chars:
+        limits["final_size"] = size
+        limits["max_chars"] = max_chars
+        limits["truncated_fields"] = truncated_fields
+        return pack
+
+    # 3) Drop recent event ledger before touching CV structure (keep template + core identifiers).
+    if size > max_chars and isinstance(pack.get("recent_events"), list) and pack["recent_events"]:
+        pack["recent_events"] = []
+        truncated_fields.append("recent_events")
+
+    size = _size(pack)
+    if size <= max_chars:
+        limits["final_size"] = size
+        limits["max_chars"] = max_chars
+        limits["truncated_fields"] = truncated_fields
+        return pack
+
+    # 4) Compact CV structures: trim bullets/details to avoid bloat.
     def _compact_work(work: Any) -> Any:
         if not isinstance(work, list):
             return work
@@ -652,23 +682,6 @@ def _apply_size_limits_v2(pack: Dict[str, Any], max_chars: int) -> Dict[str, Any
         pass
 
     size = _size(pack)
-    # 3) If still too large, drop job snippet (it is also present in UI capsule separately).
-    try:
-        if phase == "preparation" and isinstance(pack.get("preparation"), dict):
-            prep = pack["preparation"]
-            if isinstance(prep.get("job_analysis"), dict) and prep["job_analysis"].get("text_snippet"):
-                prep["job_analysis"]["text_snippet"] = ""
-                truncated_fields.append("preparation.job_analysis.text_snippet")
-    except Exception:
-        pass
-
-    size = _size(pack)
-    # 4) If still too large, drop recent event ledger (keep template + core identifiers).
-    if size > max_chars and isinstance(pack.get("recent_events"), list) and pack["recent_events"]:
-        pack["recent_events"] = []
-        truncated_fields.append("recent_events")
-
-    size = _size(pack)
     limits["final_size"] = size
     limits["max_chars"] = max_chars
     if truncated_fields:
@@ -720,6 +733,13 @@ def format_context_pack_with_delimiters(pack: Dict[str, Any]) -> str:
             lines.append('<cv_structured>')
             lines.append(json.dumps(prep['cv_data'], ensure_ascii=False, indent=2))
             lines.append('</cv_structured>')
+            lines.append('')
+
+        # Unconfirmed DOCX snapshot (reference-only): used to hydrate empty sessions quickly.
+        if 'docx_prefill_unconfirmed' in prep:
+            lines.append('<docx_prefill_unconfirmed>')
+            lines.append(json.dumps(prep['docx_prefill_unconfirmed'], ensure_ascii=False, indent=2))
+            lines.append('</docx_prefill_unconfirmed>')
             lines.append('')
 
         # Proposal history section
