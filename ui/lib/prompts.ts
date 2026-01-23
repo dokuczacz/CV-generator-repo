@@ -59,5 +59,5 @@ Instructions:
 3. Show a concise summary (use get_cv_session) and ask the user to say 'proceed'.
 4. After confirmation, call generate_cv_from_session(session_id, language=${language}).
 
-Use process_cv_orchestrated if the user already supplied all edits in one turn.
+Do NOT use any orchestration/one-shot endpoints. Use update_cv_field(edits=[...]) + generate_cv_from_session in execution.
 `;

@@ -716,6 +716,34 @@ def _apply_size_limits_v2(pack: Dict[str, Any], max_chars: int) -> Dict[str, Any
         pass
 
     size = _size(pack)
+
+    # 5) Last-resort shrink: keep only the most recent entries in large lists.
+    # This is intentionally conservative (keeps structure useful, but bounded).
+    try:
+        if size > max_chars and phase == "preparation" and isinstance(pack.get("preparation"), dict):
+            prep = pack["preparation"]
+            cv = prep.get("cv_data")
+            if isinstance(cv, dict):
+                we = cv.get("work_experience")
+                if isinstance(we, list) and len(we) > 3:
+                    cv["work_experience"] = we[:3]
+                    truncated_fields.append("preparation.work_experience(truncate)")
+                edu = cv.get("education")
+                if isinstance(edu, list) and len(edu) > 2:
+                    cv["education"] = edu[:2]
+                    truncated_fields.append("preparation.education(truncate)")
+                skills = cv.get("it_ai_skills")
+                if isinstance(skills, list) and len(skills) > 6:
+                    cv["it_ai_skills"] = skills[:6]
+                    truncated_fields.append("preparation.it_ai_skills(truncate)")
+                langs = cv.get("languages")
+                if isinstance(langs, list) and len(langs) > 3:
+                    cv["languages"] = langs[:3]
+                    truncated_fields.append("preparation.languages(truncate)")
+    except Exception:
+        pass
+
+    size = _size(pack)
     limits["final_size"] = size
     limits["max_chars"] = max_chars
     if truncated_fields:

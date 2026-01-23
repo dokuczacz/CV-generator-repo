@@ -56,7 +56,7 @@
 
   **Tools to AVOID:**
   - ❌ `generate_cv_from_session` — Never call this in PREPARATION
-  - ❌ `process_cv_orchestrated` — Never call this in PREPARATION
+
 
   **Examples of User Signals for PREPARATION:**
   - "Analyze this CV for this job"
@@ -84,13 +84,13 @@
 
   **Tools to AVOID:**
   - ❌ `generate_cv_from_session` — Never call this in CONFIRMATION
-  - ❌ `process_cv_orchestrated` — Never call this in CONFIRMATION
+
 
   **Transition Trigger to EXECUTION:**
   - User says: "proceed", "generate", "looks good", "show final", "final draft", "ok to generate", "perfect, go ahead"
   - Combined with NO negative signals like "wait", "change", "edit", "modify", "hold on"
 
-  **If the backend blocks generation** (tool availability shows `generate_cv_from_session` or `process_cv_orchestrated` is disabled), explain that required fields or approvals are missing, finish collecting missing data, and await explicit approval before retrying. Never override the backend phase signal.
+  **If the backend blocks generation** (tool availability shows `generate_cv_from_session` is disabled/blocked), explain that required fields or approvals are missing, finish collecting missing data, and await explicit approval before retrying. Never override the backend phase signal.
 
 **Transition BACK to PREPARATION (User provides new feedback):**
 - User provides new content: "actually, add this achievement...", "I also did X at company Y"
@@ -209,7 +209,7 @@ User: "Add project management to skills, update profile to mention leadership"
 
   **Tools to AVOID:**
   - ❌ `extract_and_store_cv` — Session already exists
-  - ❌ `process_cv_orchestrated` — Use step-by-step approach for clarity
+
   - ❌ `fetch_job_posting_text` — Already have job context
 
   **Critical: DO NOT Re-enter PREPARATION in This Phase**
@@ -237,7 +237,7 @@ User: "Add project management to skills, update profile to mention leadership"
   | `generate_cv_from_session` | **Generate final PDF** | EXECUTION ONLY | Only call when user approves. This is the terminal action. |
   | `fetch_job_posting_text` | Fetch & parse job posting from URL | PREPARATION, CONFIRMATION | Fallback when user provides URL. |
   | `web_search` | Search web for CV best practices & standards | PREPARATION, CONFIRMATION | Use to verify formatting conventions, industry standards, professional writing guidelines. |
-  | `process_cv_orchestrated` | Orchestrated 1-call extraction & generation | (Deprecated) | Avoid; use step-by-step for clarity and user control. |
+
 
   ---
 
@@ -388,7 +388,7 @@ User: "Add project management to skills, update profile to mention leadership"
 - update_cv_field ✓
 - generate_cv_from_session ✓ (was missing from original prompt!)
 - fetch_job_posting_text ✓
-- process_cv_orchestrated ✓ (deprecated note added)
+
 
 ✅ **Phase logic matches code:**
 - PREPARATION → CONFIRMATION → EXECUTION (matches lines 726-732 in route.ts)

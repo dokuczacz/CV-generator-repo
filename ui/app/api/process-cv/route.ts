@@ -403,15 +403,15 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
         });
       }
 
-      case 'process_cv_orchestrated': {
-        const result = await callAzureFunction('/process-cv-orchestrated', {
+      case 'cv_session_search': {
+        const result = await callAzureFunction('/cv-tool-call-handler', {
+          tool_name: 'cv_session_search',
           session_id: toolInput.session_id,
-          docx_base64: toolInput.docx_base64,
-          language: toolInput.language,
-          edits: toolInput.edits,
-          extract_photo: toolInput.extract_photo,
-          job_posting_url: toolInput.job_posting_url,
-          job_posting_text: toolInput.job_posting_text,
+          params: {
+            q: toolInput.q,
+            section: toolInput.section,
+            limit: toolInput.limit,
+          },
         });
         return JSON.stringify(result);
       }
@@ -634,84 +634,16 @@ async function fastPathTailorAndGenerate(args: {
       console.warn('⚠️ fast-path: dropped unsafe edits:', filtered.dropped);
     }
 
-    // Step 4: apply edits + validate + render in one backend call
-    const orchestratedRaw = await processToolCall('process_cv_orchestrated', {
-      session_id: sessionId,
-      language: parsed.language || args.language,
-      edits: filtered.edits,
-      extract_photo: false,
-      job_posting_url: args.url,
-      job_posting_text: args.jobText,
-    });
-    let orchestrated = JSON.parse(orchestratedRaw);
-    let autoFixedValidation = false;
-
-    // Deterministic safety net: if the backend rejects due to validation limits,
-    // apply the same clamps we use for DoD overflow and retry once.
-    if (orchestrated?.error && typeof sessionId === 'string' && sessionId.trim()) {
-      const err = String(orchestrated.error || '');
-      if (err.toLowerCase().includes('validation failed')) {
-        console.log('🛠️ fast-path: validation failed; applying deterministic clamps and retrying once');
-        await autoFixForTwoPages(sessionId, parsed.language || args.language);
-        autoFixedValidation = true;
-
-        const retryRaw = await processToolCall('process_cv_orchestrated', {
-          session_id: sessionId,
-          language: parsed.language || args.language,
-          edits: [],
-          extract_photo: false,
-          job_posting_url: args.url,
-          job_posting_text: args.jobText,
-        });
-        orchestrated = JSON.parse(retryRaw);
-      }
-    }
-
-    // Deterministic safety net: if we still fail due to strict 2-page DoD, squeeze further and retry once.
-    let autoSqueezedDod = false;
-    if (orchestrated?.error && typeof sessionId === 'string' && sessionId.trim()) {
-      const err = String(orchestrated.error || '');
-      const details = String(orchestrated.details || '');
-      if (details.includes('DoD violation') || details.includes('pages != 2')) {
-        console.log('🛠️ fast-path: DoD overflow (3 pages); applying aggressive squeeze and retrying once');
-        await autoSqueezeForTwoPages(sessionId, parsed.language || args.language);
-        autoSqueezedDod = true;
-
-        const retryRaw = await processToolCall('process_cv_orchestrated', {
-          session_id: sessionId,
-          language: parsed.language || args.language,
-          edits: [],
-          extract_photo: false,
-          job_posting_url: args.url,
-          job_posting_text: args.jobText,
-        });
-        orchestrated = JSON.parse(retryRaw);
-      }
-    }
-
-    const summaryLines = [
-      parsed.summary ? `Changes summary:\n${parsed.summary}` : '',
-      filtered.dropped.length ? `Dropped unsafe edits:\n- ${filtered.dropped.join('\n- ')}` : '',
-      autoFixedValidation
-        ? 'Auto-fix applied: clamped CV fields to backend limits (bullets<=4, bullet length<=80, titles truncated).'
-        : '',
-      autoSqueezedDod
-        ? 'Auto-squeeze applied: reduced verbosity further to satisfy strict 2-page DoD (kept entry counts, trimmed page-2 sections).'
-        : '',
-      orchestrated?.error ? `Backend error: ${orchestrated.error}${orchestrated.details ? ` (${orchestrated.details})` : ''}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-    const hasPdf = typeof orchestrated?.pdf_base64 === 'string' && orchestrated.pdf_base64.length > 1000;
+    // NOTE: Legacy fast-path used to call a deprecated backend endpoint.
+    // It is intentionally disabled; keep the consultative staged workflow only.
     return {
-      response: summaryLines || (orchestrated?.success ? 'Generated CV updates applied.' : 'Processing completed.'),
-      pdf_base64: typeof orchestrated?.pdf_base64 === 'string' ? orchestrated.pdf_base64 : '',
+      response: 'Fast-path orchestration is removed. Use the staged workflow (update_cv_field + generate_cv_from_session).',
+      pdf_base64: '',
       last_response_id: response?.id,
-      session_id: orchestrated?.session_id || sessionId,
-      stage: hasPdf ? 'final' : 'draft_proposal',
+      session_id: sessionId,
+      stage: 'draft_proposal' as CVStage,
       stage_seq: stageSeq,
-      stage_updates: [{ from: 'edits_only' as CVStage, to: hasPdf ? ('final' as CVStage) : ('draft_proposal' as CVStage), via: 'fast_path' }],
+      stage_updates: [{ from: 'edits_only' as CVStage, to: 'draft_proposal' as CVStage, via: 'fast_path_removed' }],
       job_posting_url: args.url,
       job_posting_text: args.jobText,
     };
@@ -745,6 +677,15 @@ async function chatWithCV(
   const skipPhoto = wantsSkipPhoto(userMessage);
   // Default language: stay with EN unless the user explicitly asks to switch.
   const language = detectLanguage(userMessage, 'en');
+  const userRequestedGenerate = wantsGenerate(userMessage);
+  // Determine initial stage for phase-aware context (must be set before any short-circuit logic).
+  let stage: CVStage = hasSession
+    ? userRequestedGenerate
+      ? 'generate_pdf'
+      : 'review_session'
+    : hasDocx
+    ? 'extract'
+    : 'bootstrap';
   const extractedUrl = extractFirstUrl(userMessage);
   const url = extractedUrl || jobPostingUrlFromClient || null;
   const jobText =
@@ -778,16 +719,6 @@ async function chatWithCV(
   if (hasDocx) {
     console.log('📄 Extracted DOCX text:', boundedCvText ? `${boundedCvText.length} chars (bounded)` : 'none');
   }
-
-  // Determine initial stage for phase-aware context
-  const userRequestedGenerate = wantsGenerate(userMessage);
-  let stage: CVStage = hasSession
-    ? userRequestedGenerate
-      ? 'generate_pdf'
-      : 'review_session'
-    : hasDocx
-    ? 'extract'
-    : 'bootstrap';
 
   // If session is present, fetch phase-specific ContextPackV2
   // Otherwise, use legacy V1 context pack (or skip for bootstrap/extract)
@@ -859,29 +790,6 @@ async function chatWithCV(
   const modelOverride = process.env.OPENAI_MODEL;
   const systemPromptToSend = promptId ? '' : CV_SYSTEM_PROMPT;
 
-  // DEPRECATED: Fast-path bypasses consultation phase (violates user intent for CV preparation)
-  // Only use if user explicitly requests instant generation without consultation
-  // Default: DISABLED (consultation workflow is default for CV document preparation)
-  const useFastPath =
-    !!promptId &&
-    process.env.CV_FAST_PATH === '1' &&  // Changed: Now opt-in (was !== '0')
-    (hasDocx || hasSession) &&
-    userExplicitlyRequestsInstantGeneration(userMessage);  // Changed: Stricter condition
-
-  if (useFastPath) {
-    console.log('⚡ FAST-PATH TRIGGERED: User explicitly requested instant generation without consultation');
-    console.log('⚠️  Note: Fast-path is deprecated and should be rare. Consider using consultative workflow.');
-    return await fastPathTailorAndGenerate({
-      userMessage,
-      docx_base64,
-      sessionId,
-      language,
-      url,
-      jobText,
-      skipPhoto,
-    });
-  }
-
   // Parse completeness from session snapshot to gate execution/generation.
   let requiredPresent: Record<string, boolean> | null = null;
   try {
@@ -899,11 +807,11 @@ async function chatWithCV(
 
   // Filter tools per stage to prevent accidental generation in preparation/confirmation.
   const toolsForStage = CV_TOOLS_RESPONSES.filter((t: any) => {
-    if (t.name === 'generate_cv_from_session' || t.name === 'process_cv_orchestrated') {
+    if (t.name === 'generate_cv_from_session') {
       return false; // default blocked; we enable per-iteration below when allowed and not yet attempted
     }
     // Block extract/process if a session already exists (avoid model re-calling extract)
-    if ((t.name === 'extract_and_store_cv' || t.name === 'process_cv_orchestrated') && hasSession) {
+    if (t.name === 'extract_and_store_cv' && hasSession) {
       return false;
     }
     return true;
@@ -920,7 +828,7 @@ async function chatWithCV(
   let generateAllowedThisTurn = canGenerate;
 
   const stageFromTool = (toolName: string, toolOutputRaw: string): CVStage => {
-    if (toolName === 'extract_and_store_cv' || toolName === 'process_cv_orchestrated') {
+    if (toolName === 'extract_and_store_cv') {
       return 'review_session';
     }
     if (toolName === 'get_cv_session') {
@@ -1119,8 +1027,7 @@ async function chatWithCV(
       if (
         (toolName === 'get_cv_session' ||
           toolName === 'update_cv_field' ||
-          toolName === 'generate_cv_from_session' ||
-          toolName === 'process_cv_orchestrated') &&
+          toolName === 'generate_cv_from_session') &&
         typeof currentSessionId === 'string' &&
         currentSessionId.trim()
       ) {
@@ -1149,17 +1056,6 @@ async function chatWithCV(
         extractToolCalls += 1;
         // Never trust model-provided docx_base64 (it can be truncated/corrupted).
         // If the HTTP request included the DOCX, always inject the exact bytes here.
-        if (typeof docx_base64 === 'string' && docx_base64.trim()) {
-          toolArgs.docx_base64 = docx_base64;
-        }
-        toolArgs.language = toolArgs.language || language;
-        if (skipPhoto) {
-          toolArgs.extract_photo = false;
-        }
-      }
-
-      if (toolName === 'process_cv_orchestrated') {
-        // Same rule: use request-provided DOCX bytes when available.
         if (typeof docx_base64 === 'string' && docx_base64.trim()) {
           toolArgs.docx_base64 = docx_base64;
         }
@@ -1200,24 +1096,9 @@ async function chatWithCV(
         }
       }
 
-      if (toolName === 'process_cv_orchestrated' && !canGenerate) {
-        console.log('  ⛔ process_cv_orchestrated blocked (not in execution or required fields missing)');
-        inputList.push({
-          type: 'function_call_output',
-          call_id: toolCall.call_id,
-          output: JSON.stringify({
-            ok: false,
-            blocked: 'orchestrated_not_allowed',
-            reason: 'Execution phase not reached or required fields missing',
-            required_present: requiredPresent,
-          }),
-        });
-        continue;
-      }
-
       console.log(`  → Calling tool: ${toolName}`);
       console.log(`  📋 Tool args keys:`, Object.keys(toolArgs));
-      if (toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') {
+      if (toolName === 'generate_cv_from_session') {
         console.log(`  📋 ${toolName} args preview:`, {
           session_id: toolArgs.session_id,
           language: toolArgs.language,
@@ -1254,7 +1135,7 @@ async function chatWithCV(
       }
 
       // Track session id for stateless frontend usage.
-      if (toolName === 'extract_and_store_cv' || toolName === 'process_cv_orchestrated' || toolName === 'get_cv_session') {
+      if (toolName === 'extract_and_store_cv' || toolName === 'get_cv_session') {
         try {
           const parsed = JSON.parse(effectiveToolOutput);
           const sid = parsed?.session_id;
@@ -1269,7 +1150,7 @@ async function chatWithCV(
       // Capture PDF if present.
       try {
         const parsed = JSON.parse(effectiveToolOutput);
-        if ((toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') && parsed?.pdf_base64) {
+        if (toolName === 'generate_cv_from_session' && parsed?.pdf_base64) {
           pdfBase64 = parsed.pdf_base64;
           generateAttempted = true;
           console.log('  📄 PDF generated, length:', pdfBase64.length);
@@ -1305,7 +1186,7 @@ async function chatWithCV(
     stageSeq += 1;
     const iterationTools = toolsForStage
       .map((t: any) => {
-        if (t.name === 'generate_cv_from_session' || t.name === 'process_cv_orchestrated') {
+        if (t.name === 'generate_cv_from_session') {
           const enabled = generateAllowedThisTurn && !generateAttempted;
           return { ...t, enabled };
         }

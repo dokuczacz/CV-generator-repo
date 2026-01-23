@@ -226,7 +226,7 @@ export function sanitizeToolOutputForModel(toolName: string, toolOutput: string)
     }
   }
 
-  if (toolName === 'generate_cv_from_session' || toolName === 'process_cv_orchestrated') {
+  if (toolName === 'generate_cv_from_session') {
     const pdfLen = typeof parsed.pdf_base64 === 'string' ? parsed.pdf_base64.length : 0;
     return JSON.stringify({
       ok: parsed.success !== false && pdfLen > 0,
@@ -600,7 +600,7 @@ export function buildBaseInputList(args: { hasDocx: boolean; systemPrompt: strin
     inputList.push({
       role: 'system',
       content:
-        'The user already uploaded a CV document. Never ask them to paste base64 or re-upload. If you need the file bytes, call the session tools (extract_and_store_cv or process_cv_orchestrated) and the backend will inject docx_base64 for you.',
+        'The user already uploaded a CV document. Never ask them to paste base64 or re-upload. If you need the file bytes, call extract_and_store_cv and the backend will inject docx_base64 for you.',
     });
   }
 
@@ -608,7 +608,7 @@ export function buildBaseInputList(args: { hasDocx: boolean; systemPrompt: strin
   inputList.push({
     role: 'system',
     content:
-      'Use session-based workflow only: extract_and_store_cv → get_cv_session → update_cv_field → generate_cv_from_session (or process_cv_orchestrated when all data is present). Do NOT call legacy tools. Always reuse session_id, ask for missing required fields (full_name, email, phone, work_experience, education), then generate.',
+      'Use session-based workflow only: extract_and_store_cv → get_cv_session → update_cv_field → generate_cv_from_session. Do NOT call legacy tools. Always reuse session_id, ask for missing required fields (full_name, email, phone, work_experience, education), then generate.',
   });
   inputList.push({
     role: 'system',

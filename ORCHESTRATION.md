@@ -15,7 +15,7 @@ This document describes how the CV generation workflow is orchestrated endâ€‘toâ
   6. Controls tool availability per stage:
      * Blocks all generation tools until `required_present` (contact + education + work) is true.
      * Once `canGenerate` is true, enables `generate_cv_from_session` only once per iteration; duplicate attempts are rejected.
-     * `extract_and_store_cv`/`process_cv_orchestrated` are automatically blocked whenever a session already exists to prevent deterministic loops.
+     * `extract_and_store_cv` is automatically blocked whenever a session already exists to prevent deterministic loops.
   7. Iteratively calls OpenAI Responses with up to 10 iterations, passing:
      * `inputList` (user + tool outputs).
      * `tools` (filtered per iteration, stage, and generate attempts).

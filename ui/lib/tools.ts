@@ -127,47 +127,18 @@ export const CV_TOOLS = [
   {
     type: 'function' as const,
     function: {
-      name: 'process_cv_orchestrated',
+      name: 'cv_session_search',
       description:
-        'Single-call workflow: extract, apply edits, validate, and generate PDF. Creates or reuses session.',
+        'Search session data (cv_data + docx_prefill_unconfirmed + recent events) and return bounded previews. Use to recover education/contact/work without asking the user again.',
       parameters: {
         type: 'object' as const,
         properties: {
-          session_id: {
-            type: 'string',
-            description: 'Optional: reuse an existing session',
-          },
-          docx_base64: {
-            type: 'string',
-            description: 'Required if no session_id: Base64 encoded DOCX',
-          },
-          language: {
-            type: 'string',
-            enum: ['en', 'de', 'pl'],
-            description: 'CV language (default: en)',
-          },
-          edits: {
-            type: 'array',
-            description: 'Optional list of edits to apply before generation',
-            items: {
-              type: 'object',
-              properties: {
-                field_path: {
-                  type: 'string',
-                  description: "Field path (e.g., 'full_name', 'work_experience[0].title')",
-                },
-                value: {
-                  description: 'New value for the field',
-                },
-              },
-              required: ['field_path', 'value'],
-            },
-          },
-          extract_photo: {
-            type: 'boolean',
-            description: 'Whether to extract photo (default: true)',
-          },
+          session_id: { type: 'string', description: 'Session identifier' },
+          q: { type: 'string', description: 'Optional text query (case-insensitive substring match)' },
+          section: { type: 'string', description: "Optional section hint (e.g., 'education', 'contact')" },
+          limit: { type: 'integer', description: 'Max hits (1..50, default 20)' },
         },
+        required: ['session_id'],
         additionalProperties: false,
       },
     },
@@ -336,48 +307,19 @@ export const CV_TOOLS_RESPONSES = [
   },
   {
     type: 'function' as const,
-    name: 'process_cv_orchestrated',
+    name: 'cv_session_search',
     description:
-      'Single-call workflow: extract, apply edits, validate, and generate PDF. Creates or reuses session.',
+      'Search session data (cv_data + docx_prefill_unconfirmed + recent events) and return bounded previews. Use to recover education/contact/work without asking the user again.',
     strict: false,
     parameters: {
       type: 'object' as const,
       properties: {
-        session_id: {
-          type: 'string' as const,
-          description: 'Optional: reuse an existing session',
-        },
-        docx_base64: {
-          type: 'string' as const,
-          description: 'Required if no session_id: Base64 encoded DOCX',
-        },
-        language: {
-          type: 'string' as const,
-          enum: ['en', 'de', 'pl'],
-          description: 'CV language (default: en)',
-        },
-        edits: {
-          type: 'array' as const,
-          description: 'Optional list of edits to apply before generation',
-          items: {
-            type: 'object' as const,
-            properties: {
-              field_path: {
-                type: 'string' as const,
-                description: "Field path (e.g., 'full_name', 'work_experience[0].title')",
-              },
-              value: {
-                description: 'New value for the field',
-              },
-            },
-            required: ['field_path', 'value'],
-          },
-        },
-        extract_photo: {
-          type: 'boolean' as const,
-          description: 'Whether to extract photo (default: true)',
-        },
+        session_id: { type: 'string' as const, description: 'Session identifier' },
+        q: { type: 'string' as const, description: 'Optional text query (case-insensitive substring match)' },
+        section: { type: 'string' as const, description: "Optional section hint (e.g., 'education', 'contact')" },
+        limit: { type: 'integer' as const, description: 'Max hits (1..50, default 20)' },
       },
+      required: ['session_id'],
       additionalProperties: false,
     },
   },

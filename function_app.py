@@ -12,6 +12,7 @@ from pathlib import Path
 from dataclasses import asdict
 import sys
 from datetime import datetime
+import os
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -72,6 +73,65 @@ def _compute_readiness(cv_data: dict, metadata: dict) -> dict:
     }
 
 
+def _cv_session_search_hits(*, session: dict, q: str, limit: int) -> dict:
+    """Pure helper: build bounded search hits from a session dict (no storage I/O)."""
+    q = (q or "").lower().strip()
+    limit = max(1, min(int(limit or 20), 50))
+
+    hits: list = []
+
+    def _add_hit(source: str, field_path: str, value: Any):
+        preview = ""
+        if isinstance(value, str):
+            preview = value[:240]
+        elif isinstance(value, (int, float)):
+            preview = str(value)
+        elif isinstance(value, list):
+            preview = json.dumps(value[:2], ensure_ascii=False)[:240]
+        elif isinstance(value, dict):
+            preview = json.dumps(value, ensure_ascii=False)[:240]
+        if q and q not in preview.lower():
+            return
+        hits.append({"source": source, "field_path": field_path, "preview": preview})
+
+    meta = session.get("metadata") or {}
+    docx_prefill = meta.get("docx_prefill_unconfirmed") or {}
+    cv_data = session.get("cv_data") or {}
+
+    # Contact
+    for fp in ["full_name", "email", "phone"]:
+        if fp in docx_prefill:
+            _add_hit("docx_prefill_unconfirmed", fp, docx_prefill[fp])
+        if fp in cv_data:
+            _add_hit("cv_data", fp, cv_data.get(fp))
+
+    def _walk_list(lst, base, source):
+        if not isinstance(lst, list):
+            return
+        for idx, item in enumerate(lst):
+            if not isinstance(item, dict):
+                continue
+            for k, v in item.items():
+                _add_hit(source, f"{base}[{idx}].{k}", v)
+
+    _walk_list(docx_prefill.get("education"), "docx.education", "docx_prefill_unconfirmed")
+    _walk_list(cv_data.get("education"), "education", "cv_data")
+    _walk_list(docx_prefill.get("work_experience"), "docx.work_experience", "docx_prefill_unconfirmed")
+    _walk_list(cv_data.get("work_experience"), "work_experience", "cv_data")
+
+    events = meta.get("event_log") or []
+    if isinstance(events, list):
+        for i, e in enumerate(events[-20:]):
+            _add_hit("event_log", f"event_log[-{min(20, len(events))}+{i}]", e)
+
+    truncated = False
+    if len(hits) > limit:
+        hits = hits[:limit]
+        truncated = True
+
+    return {"hits": hits, "truncated": truncated}
+
+
 def _serialize_validation_result(validation_result):
     """Convert ValidationResult to JSON-safe dict."""
     return {
@@ -84,6 +144,76 @@ def _serialize_validation_result(validation_result):
     }
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+
+
+@app.route(route="cv-tool-call-handler", methods=["POST"])
+def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Single tool dispatcher for the UI/agent. Keeps the public surface small while allowing new tools.
+
+    Request:
+      {
+        "tool_name": "cv_session_search",
+        "session_id": "<uuid>",
+        "params": {...}
+      }
+    """
+    try:
+        body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(json.dumps({"error": "Invalid JSON"}), mimetype="application/json", status_code=400)
+
+    tool_name = str(body.get("tool_name") or "").strip()
+    session_id = str(body.get("session_id") or "").strip()
+    params = body.get("params") or {}
+
+    if not tool_name:
+        return func.HttpResponse(json.dumps({"error": "tool_name is required"}), mimetype="application/json", status_code=400)
+    if not session_id:
+        return func.HttpResponse(json.dumps({"error": "session_id is required"}), mimetype="application/json", status_code=400)
+    if not isinstance(params, dict):
+        return func.HttpResponse(json.dumps({"error": "params must be an object"}), mimetype="application/json", status_code=400)
+
+    try:
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to retrieve session", "details": str(e)}),
+            mimetype="application/json",
+            status_code=500,
+        )
+
+    if not session:
+        return func.HttpResponse(json.dumps({"error": "Session not found or expired"}), mimetype="application/json", status_code=404)
+
+    if tool_name == "cv_session_search":
+        q = str(params.get("q") or "")
+        try:
+            limit = int(params.get("limit", 20))
+        except Exception:
+            limit = 20
+        limit = max(1, min(limit, 50))
+        result = _cv_session_search_hits(session=session, q=q, limit=limit)
+        return func.HttpResponse(
+            json.dumps(
+                {
+                    "success": True,
+                    "tool_name": tool_name,
+                    "session_id": session_id,
+                    "hits": result["hits"],
+                    "truncated": result["truncated"],
+                }
+            ),
+            mimetype="application/json",
+            status_code=200,
+        )
+
+    return func.HttpResponse(
+        json.dumps({"error": "Unknown tool_name", "tool_name": tool_name}),
+        mimetype="application/json",
+        status_code=400,
+    )
 
 
 @app.route(route="health", methods=["GET"])
@@ -1042,12 +1172,16 @@ def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-# ============================================================================
-# PHASE 3: ORCHESTRATION ENDPOINT
-# ============================================================================
-
-@app.route(route="process-cv-orchestrated", methods=["POST"])
-def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
+# NOTE: Legacy endpoints removed from the public surface.
+#
+# The staged workflow is supported via:
+# - extract-and-store-cv
+# - get-cv-session
+# - update-cv-field
+# - generate-cv-from-session
+# - generate-context-pack-v2
+# - cv-tool-call-handler (tool dispatcher)
+def _legacy_process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
     """
     Orchestrated CV processing - single endpoint for full workflow
     
@@ -1078,7 +1212,17 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
             "cv_data_summary": {...}
         }
     """
-    logging.info('Orchestrated CV processing requested')
+    logging.info("Legacy endpoint invoked (removed)")
+    return func.HttpResponse(
+        json.dumps(
+            {
+                "error": "endpoint_removed",
+                "message": "This endpoint was removed. Use the staged workflow endpoints and the tool dispatcher.",
+            }
+        ),
+        mimetype="application/json",
+        status_code=410,
+    )
     
     try:
         req_body = req.get_json()
@@ -1300,12 +1444,22 @@ def process_cv_orchestrated(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="cv-session-search", methods=["POST"])
-def cv_session_search(req: func.HttpRequest) -> func.HttpResponse:
+def _legacy_cv_session_search(req: func.HttpRequest) -> func.HttpResponse:
     """
     Lightweight search over session data (cv_data, docx_prefill_unconfirmed, recent events).
     Returns bounded previews to avoid token bloat.
     """
+    logging.info("Legacy endpoint invoked (removed)")
+    return func.HttpResponse(
+        json.dumps(
+            {
+                "error": "endpoint_removed",
+                "message": "This endpoint was removed. Use the tool dispatcher (cv-tool-call-handler).",
+            }
+        ),
+        mimetype="application/json",
+        status_code=410,
+    )
     try:
         body = req.get_json()
     except ValueError:
@@ -1332,72 +1486,14 @@ def cv_session_search(req: func.HttpRequest) -> func.HttpResponse:
     if not session:
         return func.HttpResponse(json.dumps({"error": "Session not found or expired"}), mimetype="application/json", status_code=404)
 
-    hits = []
-
-    def _add_hit(source: str, field_path: str, value: Any, meta: dict | None = None):
-        preview = ""
-        if isinstance(value, str):
-            preview = value[:240]
-        elif isinstance(value, (int, float)):
-            preview = str(value)
-        elif isinstance(value, list):
-            preview = json.dumps(value[:2], ensure_ascii=False)[:240]
-        elif isinstance(value, dict):
-            preview = json.dumps(value, ensure_ascii=False)[:240]
-        hit = {
-            "source": source,
-            "field_path": field_path,
-            "preview": preview,
-        }
-        if meta:
-            hit.update(meta)
-        if q and q not in preview.lower():
-            return
-        hits.append(hit)
-
-    meta = session.get("metadata") or {}
-    docx_prefill = meta.get("docx_prefill_unconfirmed") or {}
-    cv_data = session.get("cv_data") or {}
-
-    # Contact
-    for fp in ["full_name", "email", "phone"]:
-        if fp in docx_prefill:
-            _add_hit("docx_prefill_unconfirmed", fp, docx_prefill[fp])
-        if fp in cv_data:
-            _add_hit("cv_data", fp, cv_data.get(fp))
-
-    # Education
-    def _walk_list(lst, base):
-        if not isinstance(lst, list):
-            return
-        for idx, item in enumerate(lst):
-            if not isinstance(item, dict):
-                continue
-            for k, v in item.items():
-                _add_hit("docx_prefill_unconfirmed" if base.startswith("docx") else "cv_data", f"{base}[{idx}].{k}", v)
-
-    _walk_list(docx_prefill.get("education"), "docx.education")
-    _walk_list(cv_data.get("education"), "education")
-    _walk_list(docx_prefill.get("work_experience"), "docx.work_experience")
-    _walk_list(cv_data.get("work_experience"), "work_experience")
-
-    # Recent events
-    events = meta.get("event_log") or []
-    if isinstance(events, list):
-        for e in events[-20:]:
-            _add_hit("event_log", f"event_log[{events.index(e)}]", e)
-
-    truncated = False
-    if len(hits) > limit:
-        hits = hits[:limit]
-        truncated = True
+    result = _cv_session_search_hits(session=session, q=q, limit=limit)
 
     return func.HttpResponse(
         json.dumps({
             "success": True,
             "session_id": session_id,
-            "hits": hits,
-            "truncated": truncated
+            "hits": result["hits"],
+            "truncated": result["truncated"]
         }),
         mimetype="application/json",
         status_code=200
