@@ -49,7 +49,8 @@ export const CV_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'update_cv_field',
-      description: 'Updates CV session fields (single or batch edits).',
+      description:
+        'Updates CV session fields (single update, batch edits[], one-section cv_patch, and/or confirmation flags).',
       parameters: {
         type: 'object' as const,
         properties: {
@@ -76,6 +77,42 @@ export const CV_TOOLS = [
               required: ['field_path', 'value'],
             },
           },
+          cv_patch: {
+            type: 'object',
+            description: 'Replace a single top-level section (exactly one key).',
+            additionalProperties: true,
+          },
+          confirm: {
+            type: 'object',
+            description:
+              'Confirmation flags for stable personal data; set both true before generating a PDF (contact_confirmed + education_confirmed).',
+            properties: {
+              contact_confirmed: { type: 'boolean' },
+              education_confirmed: { type: 'boolean' },
+            },
+            additionalProperties: false,
+          },
+          client_context: {
+            type: 'object',
+            description: 'Optional UI context (non-sensitive); backend stores a bounded summary in event log.',
+            additionalProperties: true,
+          },
+        },
+        required: ['session_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'validate_cv',
+      description:
+        'Runs deterministic schema + DoD validation checks for the current session (no PDF render). Use to decide next missing fields/edits.',
+      parameters: {
+        type: 'object' as const,
+        properties: {
+          session_id: { type: 'string', description: 'Session identifier' },
         },
         required: ['session_id'],
         additionalProperties: false,
@@ -198,7 +235,8 @@ export const CV_TOOLS_RESPONSES = [
   {
     type: 'function' as const,
     name: 'update_cv_field',
-    description: 'Updates CV session fields (single, batch edits[], or one-section cv_patch).',
+    description:
+      'Updates CV session fields (single update, batch edits[], one-section cv_patch, and/or confirmation flags).',
     strict: false,
     parameters: {
       type: 'object' as const,
@@ -231,6 +269,21 @@ export const CV_TOOLS_RESPONSES = [
             required: ['field_path', 'value'],
           },
         },
+        confirm: {
+          type: 'object' as const,
+          description:
+            'Confirmation flags for stable personal data; set both true before generating a PDF (contact_confirmed + education_confirmed).',
+          properties: {
+            contact_confirmed: { type: 'boolean' as const },
+            education_confirmed: { type: 'boolean' as const },
+          },
+          additionalProperties: false,
+        },
+        client_context: {
+          type: 'object' as const,
+          description: 'Optional UI context (non-sensitive).',
+          additionalProperties: true,
+        },
       },
       required: ['session_id'],
       additionalProperties: false,
@@ -238,30 +291,16 @@ export const CV_TOOLS_RESPONSES = [
   },
   {
     type: 'function' as const,
-    name: 'update_cv_fields',
-    description: 'Batch update multiple fields in the CV session to reduce tool calls.',
+    name: 'validate_cv',
+    description:
+      'Runs deterministic schema + DoD validation checks for the current session (no PDF render). Use to decide next missing fields/edits.',
     strict: false,
     parameters: {
       type: 'object' as const,
       properties: {
-        session_id: {
-          type: 'string' as const,
-          description: 'Session identifier',
-        },
-        edits: {
-          type: 'array' as const,
-          description: 'List of edits to apply',
-          items: {
-            type: 'object' as const,
-            properties: {
-              field_path: { type: 'string' as const, description: 'Field path to update' },
-              value: { description: 'New value for the field' },
-            },
-            required: ['field_path', 'value'],
-          },
-        },
+        session_id: { type: 'string' as const, description: 'Session identifier' },
       },
-      required: ['session_id', 'edits'],
+      required: ['session_id'],
       additionalProperties: false,
     },
   },
