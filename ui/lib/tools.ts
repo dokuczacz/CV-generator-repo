@@ -145,25 +145,6 @@ export const CV_TOOLS = [
   {
     type: 'function' as const,
     function: {
-      name: 'fetch_job_posting_text',
-      description:
-        'Fetches and extracts readable text from a job posting URL. Use as a fallback when job_posting_text is missing.',
-      parameters: {
-        type: 'object' as const,
-        properties: {
-          url: {
-            type: 'string',
-            description: 'Job posting URL to fetch',
-          },
-        },
-        required: ['url'],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
       name: 'cv_session_search',
       description:
         'Search session data (cv_data + docx_prefill_unconfirmed + recent events) and return bounded previews. Use to recover education/contact/work without asking the user again.',
@@ -323,24 +304,6 @@ export const CV_TOOLS_RESPONSES = [
         },
       },
       required: ['session_id'],
-      additionalProperties: false,
-    },
-  },
-  {
-    type: 'function' as const,
-    name: 'fetch_job_posting_text',
-    description:
-      'Fetches and extracts readable text from a job posting URL. Use as a fallback when job_posting_text is missing.',
-    strict: false,
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        url: {
-          type: 'string' as const,
-          description: 'Job posting URL to fetch',
-        },
-      },
-      required: ['url'],
       additionalProperties: false,
     },
   },

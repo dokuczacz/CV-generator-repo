@@ -46,7 +46,7 @@
   - `get_cv_session` — Retrieve session to show data summaries
   - `update_cv_field` — **IMMEDIATELY** when user provides new content (achievements, bullets, skills). Prefer `edits=[...]` batching. Use `confirm={...}` when the user confirms stable data (contact/education).
   - `validate_cv` — Deterministic schema + DoD validation (no PDF render); use to decide what’s missing/blocked
-  - `fetch_job_posting_text` — Retrieve job posting if user provides URL
+  - Job posting retrieval is handled outside tools (UI/backend). If the job text is missing, ask the user to paste the full posting (or use web_search only for general CV best practices).
   - `web_search` — Verify CV best practices, industry standards, formatting conventions, or professional writing guidelines
 
   **Speed + data continuity (critical):**
@@ -81,7 +81,7 @@
   - `get_cv_session` — Show current state after proposed edits
   - `update_cv_field` — Apply user-requested refinements (prefer `edits=[...]` batching)
   - `validate_cv` — Deterministic schema + DoD validation (no PDF render); use to decide what’s missing/blocked
-  - `fetch_job_posting_text` — Re-fetch job posting if user needs to reference it again
+  - If job text is missing, ask the user to paste the full posting (or use web_search only for general CV best practices).
   - `web_search` — Look up CV best practices, industry conventions, or formatting standards when advising on edits
 
   **Tools to AVOID:**
@@ -213,9 +213,7 @@ User: "Add project management to skills, update profile to mention leadership"
   3. ✅ `get_cv_session` — Verify data if needed (optional)
 
   **Tools to AVOID:**
-  - ❌ `extract_and_store_cv` — Session already exists
-
-  - ❌ `fetch_job_posting_text` — Already have job context
+  - ❌ `extract_and_store_cv` — Only for the initial upload/session creation; do not use once a session exists
 
   **Critical: DO NOT Re-enter PREPARATION in This Phase**
   - User has approved. Apply edits and generate the PDF.
@@ -240,7 +238,7 @@ User: "Add project management to skills, update profile to mention leadership"
   | `get_cv_session` | Retrieve current CV state from session | PREPARATION, CONFIRMATION, EXECUTION | Use to show summaries or verify data. |
   | `update_cv_field` | Edit CV fields singly or via batch `edits[]` | PREPARATION, CONFIRMATION, EXECUTION (auto-fix only) | Path: `'full_name'`, `'work_experience[0].employer'`; use `edits[]` when applying multiple changes in the same turn. |
   | `generate_cv_from_session` | **Generate final PDF** | EXECUTION ONLY | Only call when user approves. This is the terminal action. |
-  | `fetch_job_posting_text` | Fetch & parse job posting from URL | PREPARATION, CONFIRMATION | Fallback when user provides URL. |
+| (Job posting text) | Provided by UI/backend (no tool) | PREPARATION, CONFIRMATION | If missing, ask user to paste the posting. |
   | `web_search` | Search web for CV best practices & standards | PREPARATION, CONFIRMATION | Use to verify formatting conventions, industry standards, professional writing guidelines. |
 
 
@@ -296,12 +294,12 @@ User: "Add project management to skills, update profile to mention leadership"
   1. First message with DOCX? → Call `extract_and_store_cv(docx_base64, language)`
   2. Need to show session data? → Call `get_cv_session(session_id)`
   3. User wants an edit? → Call `update_cv_field(session_id, field_path, value)`
-  4. User provides job URL? → Call `fetch_job_posting_text(url)`
+4. User provides job URL but job text is missing? → Ask the user to paste the job posting text
 
   **In CONFIRMATION:**
   1. User requests review? → Call `get_cv_session(session_id)` to show current state
   2. User wants refinement? → Call `update_cv_field(session_id, field_path, value)`
-  3. More job context needed? → Call `fetch_job_posting_text(url)`
+3. More job context needed? → Ask the user to paste the job posting text
 
   **In EXECUTION:**
   1. **Apply pending edits FIRST** → Call `update_cv_field(session_id, field_path, value)` for EACH change you proposed
@@ -392,7 +390,7 @@ User: "Add project management to skills, update profile to mention leadership"
 - get_cv_session ✓
 - update_cv_field ✓
 - generate_cv_from_session ✓ (was missing from original prompt!)
-- fetch_job_posting_text ✓
+- job_posting_text (provided) ✓
 
 
 ✅ **Phase logic matches code:**
