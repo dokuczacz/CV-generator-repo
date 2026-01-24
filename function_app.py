@@ -143,6 +143,26 @@ def _serialize_validation_result(validation_result):
         "details": validation_result.details,
     }
 
+
+def _validate_cv_data_for_tool(cv_data: dict) -> dict:
+    """Deterministic validation for tool use (no rendering)."""
+    cv_data = normalize_cv_data(cv_data or {})
+    is_schema_valid, schema_errors = validate_canonical_schema(cv_data, strict=True)
+    validation_result = validate_cv(cv_data)
+    return {
+        "schema_valid": bool(is_schema_valid),
+        "schema_errors": schema_errors,
+        "validation": _serialize_validation_result(validation_result),
+    }
+
+
+def _render_html_for_tool(cv_data: dict, *, inline_css: bool = True) -> dict:
+    """Render HTML for tool use (debug/preview)."""
+    cv_data = normalize_cv_data(cv_data or {})
+    html_content = render_html(cv_data, inline_css=inline_css)
+    return {"html": html_content, "html_length": len(html_content or "")}
+
+
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -169,10 +189,28 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     if not tool_name:
         return func.HttpResponse(json.dumps({"error": "tool_name is required"}), mimetype="application/json", status_code=400)
-    if not session_id:
-        return func.HttpResponse(json.dumps({"error": "session_id is required"}), mimetype="application/json", status_code=400)
     if not isinstance(params, dict):
         return func.HttpResponse(json.dumps({"error": "params must be an object"}), mimetype="application/json", status_code=400)
+
+    # Admin-ish operation: session_id not required.
+    if tool_name == "cleanup_expired_sessions":
+        try:
+            store = CVSessionStore()
+            deleted = store.cleanup_expired()
+            return func.HttpResponse(
+                json.dumps({"success": True, "tool_name": tool_name, "deleted_count": deleted}),
+                mimetype="application/json",
+                status_code=200,
+            )
+        except Exception as e:
+            return func.HttpResponse(
+                json.dumps({"error": "Cleanup failed", "details": str(e)}),
+                mimetype="application/json",
+                status_code=500,
+            )
+
+    if not session_id:
+        return func.HttpResponse(json.dumps({"error": "session_id is required"}), mimetype="application/json", status_code=400)
 
     try:
         store = CVSessionStore()
@@ -209,6 +247,42 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
             status_code=200,
         )
 
+    if tool_name == "validate_cv":
+        cv_data = (session or {}).get("cv_data") or {}
+        out = _validate_cv_data_for_tool(cv_data)
+        readiness = _compute_readiness(cv_data, (session or {}).get("metadata") or {})
+        return func.HttpResponse(
+            json.dumps(
+                {
+                    "success": True,
+                    "tool_name": tool_name,
+                    "session_id": session_id,
+                    **out,
+                    "readiness": readiness,
+                }
+            ),
+            mimetype="application/json",
+            status_code=200,
+        )
+
+    if tool_name == "preview_html":
+        inline_css = params.get("inline_css", True)
+        inline_css = bool(inline_css)
+        cv_data = (session or {}).get("cv_data") or {}
+        out = _render_html_for_tool(cv_data, inline_css=inline_css)
+        return func.HttpResponse(
+            json.dumps(
+                {
+                    "success": True,
+                    "tool_name": tool_name,
+                    "session_id": session_id,
+                    **out,
+                }
+            ),
+            mimetype="application/json",
+            status_code=200,
+        )
+
     return func.HttpResponse(
         json.dumps({"error": "Unknown tool_name", "tool_name": tool_name}),
         mimetype="application/json",
@@ -234,107 +308,10 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
-@app.route(route="preview-html", methods=["POST"])
-def preview_html(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Generate HTML preview (no PDF rendering)
-    """
-    logging.info('Preview HTML requested')
-    
-    try:
-        req_body = req.get_json()
-    except ValueError:
-        return func.HttpResponse(
-            json.dumps({"error": "Invalid JSON"}),
-            mimetype="application/json",
-            status_code=400
-        )
-    
-    cv_data = req_body.get("cv_data")
-    if not cv_data:
-        return func.HttpResponse(
-            json.dumps({"error": "Missing cv_data in request"}),
-            mimetype="application/json",
-            status_code=400
-        )
-    
-    # Normalize
-    cv_data = normalize_cv_data(cv_data)
-    
-    # Extract photo if provided
-    source_docx_b64 = req_body.get("source_docx_base64")
-    if source_docx_b64:
-        try:
-            docx_bytes = base64.b64decode(source_docx_b64)
-            photo_data_uri = extract_first_photo_data_uri_from_docx_bytes(docx_bytes)
-            if photo_data_uri:
-                cv_data["photo_url"] = photo_data_uri
-        except Exception as e:
-            logging.warning(f"Photo extraction failed: {e}")
-    
-    # Generate HTML
-    try:
-        html_content = render_html(cv_data, inline_css=True)
-        
-        return func.HttpResponse(
-            body=html_content,
-            mimetype="text/html",
-            status_code=200
-        )
-    except Exception as e:
-        logging.error(f"HTML generation failed: {e}")
-        return func.HttpResponse(
-            json.dumps({
-                "error": "HTML generation failed",
-                "details": str(e)
-            }),
-            mimetype="application/json",
-            status_code=500
-        )
 
-
-@app.route(route="validate-cv", methods=["POST"])
-def validate_cv_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Validate CV structure (standalone endpoint)
-    """
-    logging.info('Validate CV requested')
-    
-    try:
-        req_body = req.get_json()
-    except ValueError:
-        return func.HttpResponse(
-            json.dumps({"error": "Invalid JSON"}),
-            mimetype="application/json",
-            status_code=400
-        )
-    
-    cv_data = req_body.get("cv_data")
-    if not cv_data:
-        return func.HttpResponse(
-            json.dumps({"error": "Missing cv_data in request"}),
-            mimetype="application/json",
-            status_code=400
-        )
-    
-    # Normalize first
-    cv_data = normalize_cv_data(cv_data)
-    
-    # Validate
-    validation_result = validate_cv(cv_data)
-    
-    return func.HttpResponse(
-        json.dumps({
-            "is_valid": validation_result.is_valid,
-            "errors": [asdict(err) for err in validation_result.errors],
-            "warnings": validation_result.warnings,
-            "estimated_pages": validation_result.estimated_pages,
-            "estimated_height_mm": validation_result.estimated_height_mm,
-            "details": validation_result.details,
-        }),
-        mimetype="application/json",
-        status_code=200
-    )
+# Removed public endpoints (now available via /api/cv-tool-call-handler):
+# - preview-html (tool_name="preview_html")
+# - validate-cv (tool_name="validate_cv")
 
 
 @app.route(route="generate-context-pack-v2", methods=["POST"])
@@ -1500,29 +1477,5 @@ def _legacy_cv_session_search(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="cleanup-expired-sessions", methods=["POST"])
-def cleanup_expired_sessions(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Cleanup expired sessions (scheduled task or manual trigger)
-    
-    Response:
-        {"deleted_count": 5}
-    """
-    logging.info('Cleanup expired sessions requested')
-    
-    try:
-        store = CVSessionStore()
-        deleted = store.cleanup_expired()
-        
-        return func.HttpResponse(
-            json.dumps({"deleted_count": deleted}),
-            mimetype="application/json",
-            status_code=200
-        )
-    except Exception as e:
-        logging.error(f"Cleanup failed: {e}")
-        return func.HttpResponse(
-            json.dumps({"error": "Cleanup failed", "details": str(e)}),
-            mimetype="application/json",
-            status_code=500
-        )
+# Removed public endpoint cleanup-expired-sessions.
+# Use /api/cv-tool-call-handler with tool_name="cleanup_expired_sessions" instead.

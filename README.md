@@ -56,9 +56,7 @@ cv-generator-repo/
 │   └── package.json
 │
 ├── src/                         # Azure Functions (Python)
-│   ├── extract-photo/          # Extract photo from DOCX
-│   ├── validate-cv/            # Validate CV structure
-│   └── generate-cv-action/     # Generate 2-page PDF
+│   ├── cv-tool-call-handler/   # Tool dispatcher (search/validate/preview via tool_name)
 │
 ├── templates/                   # CV template
 │   ├── CV_template_2pages_2025.spec.md
@@ -140,10 +138,10 @@ python scripts/smoke_local_session.py
 
 ### Test Backend (Azure Functions)
 ```bash
-curl -X POST https://cv-generator-6695.azurewebsites.net/api/validate-cv \
+curl -X POST https://cv-generator-6695.azurewebsites.net/api/cv-tool-call-handler \
   -H "x-functions-key: YOUR_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"cv_data": {...}}'
+  -d '{"tool_name":"validate_cv","session_id":"<session_id>","params":{}}'
 ```
 
 ---
@@ -224,7 +222,7 @@ curl -X POST https://cv-generator-6695.azurewebsites.net/api/validate-cv \
 ### PDF not generating
 - Check Azure Functions logs
 - Verify API key in .env.local
-- Test validate-cv endpoint first
+- Validate via the tool dispatcher first
 
 ### Photo not extracted
 - Ensure DOCX file has embedded image
@@ -244,7 +242,7 @@ This project supports multiple AI coding agents with tailored configurations:
 1. Open project in VSCode with Claude Code extension
 2. Start chatting - context loads automatically
 3. Use custom slash commands:
-   - `/validate-cv` - Validate CV JSON against schema
+   - `/cv-tool-call-handler` (`tool_name=validate_cv`) - Validate the session CV (schema + layout checks)
    - `/visual-regression` - Run visual tests
    - `/multi-claude-review` - Parallel code review
 
