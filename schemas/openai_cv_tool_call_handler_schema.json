@@ -1,0 +1,40 @@
+{
+  "type": "function",
+  "name": "cv_tool_call_handler",
+  "description": "Single dispatcher tool for the CV Generator backend. Use this to call backend tools by name through one function schema.",
+  "strict": false,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "Name of the backend tool to invoke.",
+        "enum": [
+          "cleanup_expired_sessions",
+          "extract_and_store_cv",
+          "get_cv_session",
+          "update_cv_field",
+          "generate_context_pack_v2",
+          "cv_session_search",
+          "validate_cv",
+          "preview_html",
+          "generate_cv_from_session"
+        ]
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Session identifier (required for most tools)."
+      },
+      "params": {
+        "type": "object",
+        "description": "Tool-specific parameters object (schema depends on tool_name).",
+        "additionalProperties": true
+      }
+    },
+    "required": [
+      "tool_name",
+      "params"
+    ],
+    "additionalProperties": false
+  }
+}

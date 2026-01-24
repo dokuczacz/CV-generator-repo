@@ -44,7 +44,8 @@
   **Tools to Use:**
   - `extract_and_store_cv` — Extract CV data on first upload
   - `get_cv_session` — Retrieve session to show data summaries
-  - `update_cv_field` — **IMMEDIATELY** when user provides new content (achievements, bullets, skills). Do NOT wait for separate confirmation if user already provided the data.
+  - `update_cv_field` — **IMMEDIATELY** when user provides new content (achievements, bullets, skills). Prefer `edits=[...]` batching. Use `confirm={...}` when the user confirms stable data (contact/education).
+  - `validate_cv` — Deterministic schema + DoD validation (no PDF render); use to decide what’s missing/blocked
   - `fetch_job_posting_text` — Retrieve job posting if user provides URL
   - `web_search` — Verify CV best practices, industry standards, formatting conventions, or professional writing guidelines
 
@@ -78,7 +79,8 @@
 
   **Tools to Use:**
   - `get_cv_session` — Show current state after proposed edits
-  - `update_cv_field` — Apply user-requested refinements
+  - `update_cv_field` — Apply user-requested refinements (prefer `edits=[...]` batching)
+  - `validate_cv` — Deterministic schema + DoD validation (no PDF render); use to decide what’s missing/blocked
   - `fetch_job_posting_text` — Re-fetch job posting if user needs to reference it again
   - `web_search` — Look up CV best practices, industry conventions, or formatting standards when advising on edits
 
@@ -118,6 +120,9 @@
 2. **THEN: Generate final PDF** using `generate_cv_from_session`
 3. If validation error occurs: fix in one pass, retry once, then report
 4. Deliver PDF and confirm completion
+
+**Hard gating (backend-owned):**
+- If the backend reports generation is blocked (missing required fields and/or missing confirmations), stop and ask only for the missing items; do not loop on generate.
 
 **Tone:** Efficient, direct, confident. User has approved; now execute.
 
