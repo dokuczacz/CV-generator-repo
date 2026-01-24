@@ -29,7 +29,7 @@ This document describes how the CV generation workflow is orchestrated end‑to�
 
 ### 2. Backend Azure Functions
 
-- **Session reset + extraction** (`extract-and-store-cv`):
+- **Session reset + extraction** (tool `extract_and_store_cv` via `/cv-tool-call-handler`):
   * Creates a fresh session and ensures the session’s persisted artifacts start from zero (no carry-over from prior runs).
   * Decodes the DOCX and runs `prefill_cv_from_docx_bytes`.
   * **First major change:** only metadata is populated. `cv_data` is initialized as a canonical empty object (blank name, contact, lists).
@@ -42,7 +42,7 @@ This document describes how the CV generation workflow is orchestrated end‑to�
   * Uses Azure Table Storage; each session keeps serialized `cv_data` and metadata with `event_log`.
   * `update_field` now auto-expands list indexes (e.g., writing `work_experience[0].employer` on an empty array will append an entry and set the field).
 
-- **Context packs** (`/generate-context-pack-v2`, `src/context_pack.py`):
+- **Context packs** (tool `generate_context_pack_v2` via `/cv-tool-call-handler`, `src/context_pack.py`):
   * `ContextPackV2` contains phase-specific data + the capsule sent to the model.
   * Key sections:
     * `preparation`: compact CV, proposal history, and `docx_prefill_unconfirmed` reference.
@@ -57,12 +57,12 @@ This document describes how the CV generation workflow is orchestrated end‑to�
   * Current tool(s):
     * `cv_session_search` — searches across `cv_data`, `docx_prefill_unconfirmed`, and recent `event_log` entries and returns bounded previews.
 
-- **Update CV field** (`update-cv-field`):
+- **Update CV field** (tool `update_cv_field` via `/cv-tool-call-handler`):
   * Supports single paths, batch `edits[]`, and `cv_patch` (one top-level section at a time).
   * Validates patches via `validate_canonical_schema` + `validate_cv` before persisting.
   * Records `event_log` entries for each edit (used later by `recent_events`).
 
-- **Generation** (`generate-cv-from-session`):
+- **Generation** (tool `generate_cv_from_session` via `/cv-tool-call-handler`):
   * Validates session completeness (see `required_present` metadata) before generating; if missing fields, it rejects and returns error details.
   * Logs validation errors so the UI and capsule can display them.
   * The generator uses exactly the stored session data—no hallucinated contact/education.

@@ -41,6 +41,30 @@ def _http_json(method: str, url: str, payload: dict | None = None) -> tuple[int,
             return e.code, dict(e.headers), text
 
 
+def _http(method: str, url: str, payload: dict | None = None) -> tuple[int, dict, bytes]:
+    data = None
+    headers = {"Accept": "*/*"}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, data=data, method=method.upper(), headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read()
+            return resp.status, dict(resp.headers), raw
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        return e.code, dict(e.headers), raw
+
+
+def _tool_call(tool_name: str, *, session_id: str | None = None, params: dict | None = None) -> tuple[int, dict, dict | str]:
+    payload: dict = {"tool_name": tool_name, "params": params or {}}
+    if session_id:
+        payload["session_id"] = session_id
+    return _http_json("POST", f"{BASE_URL}/cv-tool-call-handler", payload)
+
+
 def _require(condition: bool, msg: str) -> None:
     if not condition:
         print(f"FAIL: {msg}", file=sys.stderr)
@@ -55,33 +79,51 @@ def main() -> int:
     _require(status == 200, f"/health expected 200, got {status}: {body}")
     print("OK: /health")
 
-    # 2) Extract + store
+    # 2) Extract + store (sessions start empty; docx data is kept as unconfirmed snapshot in metadata)
     _require(SAMPLE_DOCX.exists(), f"Missing sample docx: {SAMPLE_DOCX}")
     docx_b64 = base64.b64encode(SAMPLE_DOCX.read_bytes()).decode("ascii")
-    status, _, body = _http_json(
-        "POST",
-        f"{BASE_URL}/extract-and-store-cv",
-        {"docx_base64": docx_b64, "language": "en", "extract_photo": True},
+    status, _, body = _tool_call(
+        "extract_and_store_cv",
+        params={"docx_base64": docx_b64, "language": "en", "extract_photo": True},
     )
-    _require(status == 200, f"extract-and-store-cv expected 200, got {status}: {body}")
-    _require(isinstance(body, dict) and body.get("success") is True, f"extract-and-store-cv failed: {body}")
+    _require(status == 200, f"extract_and_store_cv expected 200, got {status}: {body}")
+    _require(isinstance(body, dict) and body.get("success") is True, f"extract_and_store_cv failed: {body}")
     session_id = body.get("session_id")
     _require(isinstance(session_id, str) and session_id, f"missing session_id: {body}")
-    print(f"OK: extract-and-store-cv session_id={session_id}")
+    print(f"OK: extract_and_store_cv session_id={session_id}")
 
-    # 3) Get session and assert required fields present
-    status, _, body = _http_json("POST", f"{BASE_URL}/get-cv-session", {"session_id": session_id})
-    _require(status == 200, f"get-cv-session expected 200, got {status}: {body}")
-    _require(isinstance(body, dict) and body.get("success") is True, f"get-cv-session failed: {body}")
+    # 3) Get session and hydrate required fields from docx_prefill_unconfirmed (smoke only)
+    status, _, body = _tool_call("get_cv_session", session_id=session_id, params={})
+    _require(status == 200, f"get_cv_session expected 200, got {status}: {body}")
+    _require(isinstance(body, dict) and body.get("success") is True, f"get_cv_session failed: {body}")
     cv = body.get("cv_data") or {}
     _require(isinstance(cv, dict), f"cv_data is not a dict: {type(cv)}")
+    meta = body.get("metadata") or {}
+    _require(isinstance(meta, dict), f"metadata is not a dict: {type(meta)}")
+    prefill = meta.get("docx_prefill_unconfirmed") or {}
+    _require(isinstance(prefill, dict), "docx_prefill_unconfirmed missing from metadata")
 
-    _require(bool(str(cv.get("full_name", "")).strip()), "full_name should be extracted")
-    _require(bool(str(cv.get("email", "")).strip()), "email should be extracted")
-    _require(bool(str(cv.get("phone", "")).strip()), "phone should be extracted")
-    _require(isinstance(cv.get("work_experience"), list) and len(cv["work_experience"]) >= 1, "work_experience should have >=1 entry")
-    _require(isinstance(cv.get("education"), list) and len(cv["education"]) >= 1, "education should have >=1 entry")
-    print("OK: get-cv-session required fields present")
+    edits = []
+    for fp in ("full_name", "email", "phone"):
+        v = prefill.get(fp)
+        if isinstance(v, str) and v.strip():
+            edits.append({"field_path": fp, "value": v.strip()})
+    if isinstance(prefill.get("work_experience"), list):
+        edits.append({"field_path": "work_experience", "value": prefill.get("work_experience")})
+    if isinstance(prefill.get("education"), list):
+        edits.append({"field_path": "education", "value": prefill.get("education")})
+    _require(len(edits) >= 3, f"prefill did not contain required fields: keys={list(prefill.keys())}")
+
+    status, _, body = _tool_call(
+        "update_cv_field",
+        session_id=session_id,
+        params={
+            "edits": edits,
+            "confirm": {"contact_confirmed": True, "education_confirmed": True},
+        },
+    )
+    _require(status == 200, f"update_cv_field(expected 200) got {status}: {body}")
+    print("OK: hydrated required fields + confirmed contact/education")
 
     # 3b) Auto-fix common validator constraints so PDF generation can succeed without manual edits.
     # This is a smoke test for the backend pipeline (not the LLM quality).
@@ -124,27 +166,26 @@ def main() -> int:
         fixed["details"] = [_clamp(str(d or ""), 120) for d in details][:4]
         fixed_edu.append(fixed)
 
-    # Apply in 2 calls to keep update_cv_field simple (whole-array replacement).
-    status, _, body = _http_json(
-        "POST",
-        f"{BASE_URL}/update-cv-field",
-        {"session_id": session_id, "field_path": "work_experience", "value": fixed_work},
+    status, _, body = _tool_call(
+        "update_cv_field",
+        session_id=session_id,
+        params={"field_path": "work_experience", "value": fixed_work},
     )
-    _require(status == 200, f"update-cv-field(work_experience) expected 200, got {status}: {body}")
-    status, _, body = _http_json(
-        "POST",
-        f"{BASE_URL}/update-cv-field",
-        {"session_id": session_id, "field_path": "education", "value": fixed_edu},
+    _require(status == 200, f"update_cv_field(work_experience) expected 200, got {status}: {body}")
+    status, _, body = _tool_call(
+        "update_cv_field",
+        session_id=session_id,
+        params={"field_path": "education", "value": fixed_edu},
     )
-    _require(status == 200, f"update-cv-field(education) expected 200, got {status}: {body}")
+    _require(status == 200, f"update_cv_field(education) expected 200, got {status}: {body}")
     # Clamp profile and optional sections to help satisfy strict 2-page DoD in smoke runs.
     profile = cv.get("profile") or cv.get("summary") or ""
-    status, _, body = _http_json(
-        "POST",
-        f"{BASE_URL}/update-cv-field",
-        {"session_id": session_id, "field_path": "profile", "value": _clamp(str(profile), 320)},
+    status, _, body = _tool_call(
+        "update_cv_field",
+        session_id=session_id,
+        params={"field_path": "profile", "value": _clamp(str(profile), 320)},
     )
-    _require(status == 200, f"update-cv-field(profile) expected 200, got {status}: {body}")
+    _require(status == 200, f"update_cv_field(profile) expected 200, got {status}: {body}")
 
     languages = [str(x or "")[:50].rstrip() for x in (cv.get("languages") or [])][:5]
     skills = [str(x or "")[:70].rstrip() for x in (cv.get("it_ai_skills") or [])][:8]
@@ -170,30 +211,31 @@ def main() -> int:
         ("further_experience", fixed_further),
         ("references", str(cv.get("references") or "")),
     ]:
-        status, _, body = _http_json(
-            "POST",
-            f"{BASE_URL}/update-cv-field",
-            {"session_id": session_id, "field_path": field_path, "value": value},
+        status, _, body = _tool_call(
+            "update_cv_field",
+            session_id=session_id,
+            params={"field_path": field_path, "value": value},
         )
-        _require(status == 200, f"update-cv-field({field_path}) expected 200, got {status}: {body}")
+        _require(status == 200, f"update_cv_field({field_path}) expected 200, got {status}: {body}")
 
     print("OK: auto-fixed constraints (work/edu/profile + optional clamps)")
 
-    # 5) Generate PDF (optional strictness)
-    status, _, body = _http_json(
+    # 5) Generate PDF (dispatcher returns application/pdf)
+    status, headers, raw = _http(
         "POST",
-        f"{BASE_URL}/generate-cv-from-session",
-        {"session_id": session_id, "language": "en"},
+        f"{BASE_URL}/cv-tool-call-handler",
+        {"tool_name": "generate_cv_from_session", "session_id": session_id, "params": {"language": "en"}},
     )
     if status != 200:
-        print(f"PDF generation did not return 200 (status={status}). Body:\n{body}", file=sys.stderr)
+        try:
+            txt = raw.decode("utf-8", errors="replace")
+        except Exception:
+            txt = str(raw[:2000])
+        print(f"PDF generation did not return 200 (status={status}). Body:\n{txt}", file=sys.stderr)
         return 3
-    if not isinstance(body, dict) or not body.get("success"):
-        print(f"PDF generation returned unexpected payload:\n{body}", file=sys.stderr)
-        return 3
-    pdf_b64 = body.get("pdf_base64") or ""
-    _require(isinstance(pdf_b64, str) and len(pdf_b64) > 1000, "pdf_base64 missing/too small")
-    pdf_bytes = base64.b64decode(pdf_b64)
+    content_type = str(headers.get("Content-Type") or headers.get("content-type") or "")
+    _require("application/pdf" in content_type.lower(), f"expected application/pdf, got {content_type}")
+    pdf_bytes = raw
     _require(pdf_bytes.startswith(b"%PDF"), "output does not look like a PDF")
     out_dir = ROOT / "tmp"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -205,7 +247,7 @@ def main() -> int:
         ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
         out = out_dir / f"local_smoke_{ts}.pdf"
         out.write_bytes(pdf_bytes)
-    print(f"OK: generate-cv-from-session wrote {out} bytes={len(pdf_bytes)}")
+    print(f"OK: generate_cv_from_session wrote {out} bytes={len(pdf_bytes)}")
 
     try:
         from PyPDF2 import PdfReader

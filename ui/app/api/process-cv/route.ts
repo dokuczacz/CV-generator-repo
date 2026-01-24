@@ -26,7 +26,11 @@ function clampStr(v: any, max: number): string {
 async function autoFixForTwoPages(sessionId: string, language: string) {
   // Deterministic safety net: when PDF generation fails due to 2-page DoD, clamp content to known limits.
   // This avoids a model/tool thrash loop and keeps the product reliable.
-  const sessionResp = await callAzureFunction('/get-cv-session', { session_id: sessionId });
+  const sessionResp = await callAzureFunction('/cv-tool-call-handler', {
+    tool_name: 'get_cv_session',
+    session_id: sessionId,
+    params: {},
+  });
   const cv = sessionResp?.cv_data || {};
 
   const fixedWork = (Array.isArray(cv.work_experience) ? cv.work_experience : []).slice(0, 5).map((j: any) => {
@@ -88,14 +92,22 @@ async function autoFixForTwoPages(sessionId: string, language: string) {
   ];
 
   for (const u of updates) {
-    await callAzureFunction('/update-cv-field', { session_id: sessionId, field_path: u.field_path, value: u.value });
+    await callAzureFunction('/cv-tool-call-handler', {
+      tool_name: 'update_cv_field',
+      session_id: sessionId,
+      params: { field_path: u.field_path, value: u.value },
+    });
   }
 }
 
 async function autoSqueezeForTwoPages(sessionId: string, language: string) {
   // More aggressive deterministic clamp for stubborn 3-page overflows.
   // This keeps entry counts (work/education) but reduces per-entry verbosity.
-  const sessionResp = await callAzureFunction('/get-cv-session', { session_id: sessionId });
+  const sessionResp = await callAzureFunction('/cv-tool-call-handler', {
+    tool_name: 'get_cv_session',
+    session_id: sessionId,
+    params: {},
+  });
   const cv = sessionResp?.cv_data || {};
 
   const fixedWork = (Array.isArray(cv.work_experience) ? cv.work_experience : []).slice(0, 5).map((j: any) => {
@@ -144,7 +156,11 @@ async function autoSqueezeForTwoPages(sessionId: string, language: string) {
   ];
 
   for (const u of updates) {
-    await callAzureFunction('/update-cv-field', { session_id: sessionId, field_path: u.field_path, value: u.value });
+    await callAzureFunction('/cv-tool-call-handler', {
+      tool_name: 'update_cv_field',
+      session_id: sessionId,
+      params: { field_path: u.field_path, value: u.value },
+    });
   }
 }
 
@@ -351,45 +367,6 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
       ? toolInput.client_context
       : undefined;
     switch (toolName) {
-      case 'extract_and_store_cv': {
-        const result = await callAzureFunction('/extract-and-store-cv', {
-          docx_base64: toolInput.docx_base64,
-          language: toolInput.language,
-          extract_photo: toolInput.extract_photo,
-          job_posting_url: toolInput.job_posting_url,
-          job_posting_text: toolInput.job_posting_text,
-        });
-        return JSON.stringify(result);
-      }
-
-      case 'get_cv_session': {
-        const result = await callAzureFunction('/get-cv-session', {
-          session_id: toolInput.session_id,
-          ...(client_context ? { client_context } : {}),
-        });
-        return JSON.stringify(result);
-      }
-
-      case 'update_cv_field': {
-        const result = await callAzureFunction('/update-cv-field', {
-          session_id: toolInput.session_id,
-          field_path: toolInput.field_path,
-          value: toolInput.value,
-          edits: toolInput.edits,
-          ...(client_context ? { client_context } : {}),
-        });
-        return JSON.stringify(result);
-      }
-
-      case 'generate_cv_from_session': {
-        const result = await callAzureFunction('/generate-cv-from-session', {
-          session_id: toolInput.session_id,
-          language: toolInput.language,
-          ...(client_context ? { client_context } : {}),
-        });
-        return JSON.stringify(result);
-      }
-
       case 'fetch_job_posting_text': {
         const url = typeof toolInput?.url === 'string' ? toolInput.url.trim() : '';
         if (!url) {
@@ -403,21 +380,20 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
         });
       }
 
-      case 'cv_session_search': {
-        const result = await callAzureFunction('/cv-tool-call-handler', {
-          tool_name: 'cv_session_search',
-          session_id: toolInput.session_id,
-          params: {
-            q: toolInput.q,
-            section: toolInput.section,
-            limit: toolInput.limit,
-          },
-        });
-        return JSON.stringify(result);
-      }
-
       default:
-        return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+        // All backend tools are routed through the single dispatcher.
+        // This keeps the UI thin and reduces public endpoint surface.
+        {
+          const params: any = { ...toolInput };
+          // The dispatcher receives session_id separately (if present).
+          delete params.session_id;
+          const result = await callAzureFunction('/cv-tool-call-handler', {
+            tool_name: toolName,
+            ...(toolInput?.session_id ? { session_id: toolInput.session_id } : {}),
+            params,
+          });
+          return JSON.stringify(result);
+        }
     }
   } catch (error) {
     return JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' });
@@ -728,11 +704,14 @@ async function chatWithCV(
       // Determine phase from stage for V2 context pack
       const phase = determineCurrentPhase(stage);
       console.log(`📦 Fetching ContextPackV2 (phase=${phase}) for session ${sessionId.slice(0, 8)}...`);
-      const packResp = await callAzureFunction('/generate-context-pack-v2', {
-        phase,
+      const packResp = await callAzureFunction('/cv-tool-call-handler', {
+        tool_name: 'generate_context_pack_v2',
         session_id: sessionId,
-        job_posting_text: jobText || undefined,
-        max_pack_chars: 12000,
+        params: {
+          phase,
+          job_posting_text: jobText || undefined,
+          max_pack_chars: 12000,
+        },
       });
       contextPack = packResp;
       console.log(`📦 ContextPackV2 received (phase=${phase}); schema: ${packResp?.schema_version || 'unknown'}`);
@@ -762,7 +741,11 @@ async function chatWithCV(
   let sessionSnapshot: string | null = null;
   if (hasSession) {
     try {
-      const sessionResp = await callAzureFunction('/get-cv-session', { session_id: sessionId });
+      const sessionResp = await callAzureFunction('/cv-tool-call-handler', {
+        tool_name: 'get_cv_session',
+        session_id: sessionId,
+        params: {},
+      });
       sessionSnapshot = sanitizeToolOutputForModel('get_cv_session', JSON.stringify(sessionResp));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

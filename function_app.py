@@ -163,6 +163,254 @@ def _render_html_for_tool(cv_data: dict, *, inline_css: bool = True) -> dict:
     return {"html": html_content, "html_length": len(html_content or "")}
 
 
+def _tool_generate_context_pack_v2(*, session_id: str, phase: str, job_posting_text: str | None, max_pack_chars: int) -> tuple[int, dict]:
+    if phase not in ["preparation", "confirmation", "execution"]:
+        return 400, {"error": "Invalid phase. Must be 'preparation', 'confirmation', or 'execution'"}
+
+    try:
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+    except Exception as e:
+        return 500, {"error": "Failed to retrieve session", "details": str(e)}
+
+    if not session:
+        return 404, {"error": "Session not found or expired"}
+
+    cv_data = session.get("cv_data") or {}
+    metadata = session.get("metadata") or {}
+    if isinstance(metadata, dict):
+        metadata = dict(metadata)
+        metadata["session_id"] = session_id
+
+    from src.context_pack import build_context_pack_v2
+
+    pack = build_context_pack_v2(
+        phase=phase,
+        cv_data=cv_data,
+        job_posting_text=job_posting_text,
+        session_metadata=metadata,
+        max_pack_chars=max_pack_chars,
+    )
+    return 200, pack
+
+
+def _tool_extract_and_store_cv(*, docx_base64: str, language: str, extract_photo_flag: bool, job_posting_url: str | None, job_posting_text: str | None) -> tuple[int, dict]:
+    if not docx_base64:
+        return 400, {"error": "docx_base64 is required"}
+
+    try:
+        docx_bytes = base64.b64decode(docx_base64)
+    except Exception as e:
+        return 400, {"error": "Invalid base64 encoding", "details": str(e)}
+
+    # Default: start-fresh semantics to avoid stale merges.
+    try:
+        store = CVSessionStore()
+        deleted_sessions = store.delete_all_sessions()
+        blob_store = CVBlobStore()
+        deleted_blobs = blob_store.purge_all()
+        logging.info(f"Reset requested: deleted_sessions={deleted_sessions}, deleted_blobs={deleted_blobs}")
+    except Exception as e:
+        logging.warning(f"Purge/reset failed (continuing): {e}")
+        store = CVSessionStore()
+
+    extracted_photo = None
+    photo_extracted = False
+    photo_storage = "none"
+    photo_omitted_reason = None
+    if extract_photo_flag:
+        try:
+            extracted_photo = extract_first_photo_from_docx_bytes(docx_bytes)
+            photo_extracted = bool(extracted_photo)
+            logging.info(f"Photo extraction: {'success' if extracted_photo else 'no photo found'}")
+        except Exception as e:
+            photo_omitted_reason = f"photo_extraction_failed: {e}"
+            logging.warning(f"Photo extraction failed: {e}")
+
+    prefill = prefill_cv_from_docx_bytes(docx_bytes)
+
+    cv_data = {
+        "full_name": "",
+        "email": "",
+        "phone": "",
+        "address_lines": [],
+        "photo_url": "",
+        "profile": "",
+        "work_experience": [],
+        "education": [],
+        "further_experience": [],
+        "languages": [],
+        "it_ai_skills": [],
+        "interests": "",
+        "references": "",
+    }
+
+    prefill_summary = {
+        "has_name": bool(prefill.get("full_name")),
+        "has_email": bool(prefill.get("email")),
+        "has_phone": bool(prefill.get("phone")),
+        "work_experience_count": len(prefill.get("work_experience", []) or []),
+        "education_count": len(prefill.get("education", []) or []),
+        "languages_count": len(prefill.get("languages", []) or []),
+        "it_ai_skills_count": len(prefill.get("it_ai_skills", []) or []),
+        "interests_chars": len(str(prefill.get("interests", "") or "")),
+    }
+
+    metadata = {
+        "language": (language or "en"),
+        "created_from": "docx",
+        "prefill_summary": prefill_summary,
+        "docx_prefill_unconfirmed": prefill,
+        "confirmed_flags": {
+            "contact_confirmed": False,
+            "education_confirmed": False,
+            "confirmed_at": None,
+        },
+    }
+    if job_posting_url:
+        metadata["job_posting_url"] = job_posting_url
+    if job_posting_text:
+        metadata["job_posting_text"] = str(job_posting_text)[:20000]
+
+    try:
+        session_id = store.create_session(cv_data, metadata)
+        logging.info(f"Session created: {session_id}")
+    except Exception as e:
+        logging.error(f"Session creation failed: {e}")
+        return 500, {"error": "Failed to create session", "details": str(e)}
+
+    if photo_extracted and extracted_photo:
+        try:
+            blob_store = CVBlobStore()
+            ptr = blob_store.upload_photo_bytes(extracted_photo)
+            try:
+                session = store.get_session(session_id)
+                if session:
+                    meta2 = session.get("metadata") or {}
+                    if isinstance(meta2, dict):
+                        meta2 = dict(meta2)
+                        meta2["photo_blob"] = {
+                            "container": ptr.container,
+                            "blob_name": ptr.blob_name,
+                            "content_type": ptr.content_type,
+                        }
+                        store.update_session(session_id, cv_data, meta2)
+                        photo_storage = "blob"
+            except Exception:
+                pass
+        except Exception as e:
+            logging.warning(f"Photo blob storage failed: {e}")
+    elif extract_photo_flag and not photo_extracted:
+        photo_omitted_reason = photo_omitted_reason or "no_photo_found_in_docx"
+
+    summary = {
+        "has_photo": photo_extracted,
+        "fields_populated": [k for k, v in cv_data.items() if v],
+        "fields_empty": [k for k, v in cv_data.items() if not v],
+    }
+
+    session = store.get_session(session_id)
+    return 200, {
+        "success": True,
+        "session_id": session_id,
+        "cv_data_summary": summary,
+        "photo_extracted": photo_extracted,
+        "photo_storage": photo_storage,
+        "photo_omitted_reason": photo_omitted_reason,
+        "expires_at": session["expires_at"] if session else None,
+    }
+
+
+def _tool_generate_cv_from_session(*, session_id: str, language: str | None, client_context: dict | None) -> tuple[int, dict | bytes, str]:
+    """
+    Returns (status, payload, content_type).
+    payload is bytes when content_type is application/pdf.
+    """
+    if not session_id:
+        return 400, {"error": "session_id is required"}, "application/json"
+
+    try:
+        store = CVSessionStore()
+        session = store.get_session(session_id)
+    except Exception as e:
+        logging.error(f"Session retrieval failed: {e}")
+        return 500, {"error": "Failed to retrieve session", "details": str(e)}, "application/json"
+
+    if not session:
+        return 404, {"error": "Session not found or expired"}, "application/json"
+
+    cv_data = session["cv_data"]
+    meta = session.get("metadata") or {}
+    lang = language or (meta.get("language") if isinstance(meta, dict) else None) or "en"
+
+    readiness = _compute_readiness(cv_data, meta if isinstance(meta, dict) else {})
+    run_summary = {
+        "stage": "generate_pdf",
+        "can_generate": readiness.get("can_generate"),
+        "required_present": readiness.get("required_present"),
+        "confirmed_flags": readiness.get("confirmed_flags"),
+    }
+    if not readiness.get("can_generate"):
+        return (
+            400,
+            {
+                "error": "readiness_not_met",
+                "message": "Cannot generate until required fields are present and confirmed.",
+                "readiness": readiness,
+                "run_summary": run_summary,
+            },
+            "application/json",
+        )
+
+    try:
+        store.append_event(
+            session_id,
+            {
+                "type": "generate_cv_from_session_attempt",
+                "language": lang,
+                "client_context": client_context if isinstance(client_context, dict) else None,
+            },
+        )
+    except Exception:
+        pass
+
+    # If photo stored in Blob, inject it into cv_data as data URI at render time.
+    try:
+        photo_blob = meta.get("photo_blob") if isinstance(meta, dict) else None
+        if photo_blob and not cv_data.get("photo_url"):
+            ptr = BlobPointer(
+                container=photo_blob.get("container", ""),
+                blob_name=photo_blob.get("blob_name", ""),
+                content_type=photo_blob.get("content_type", "application/octet-stream"),
+            )
+            if ptr.container and ptr.blob_name:
+                data = CVBlobStore(container=ptr.container).download_bytes(ptr)
+                b64 = base64.b64encode(data).decode("ascii")
+                cv_data = dict(cv_data)
+                cv_data["photo_url"] = f"data:{ptr.content_type};base64,{b64}"
+    except Exception as e:
+        logging.warning(f"Failed to inject photo from blob for session {session_id}: {e}")
+
+    is_valid, errors = validate_canonical_schema(cv_data, strict=True)
+    if not is_valid:
+        return 400, {"error": "CV data validation failed", "validation_errors": errors, "run_summary": run_summary}, "application/json"
+
+    cv_data = normalize_cv_data(cv_data)
+    validation_result = validate_cv(cv_data)
+    if not validation_result.is_valid:
+        return (
+            400,
+            {"error": "Validation failed", "validation": _serialize_validation_result(validation_result), "run_summary": run_summary},
+            "application/json",
+        )
+
+    try:
+        pdf_bytes = render_pdf(cv_data, enforce_two_pages=True)
+        logging.info(f"PDF generated from session {session_id}: {len(pdf_bytes)} bytes")
+        return 200, pdf_bytes, "application/pdf"
+    except Exception as e:
+        logging.error(f"PDF generation failed: {e}")
+        return 500, {"error": "PDF generation failed", "details": str(e), "run_summary": run_summary}, "application/json"
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -209,6 +457,23 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=500,
             )
 
+    # Core tool: session_id not required.
+    if tool_name == "extract_and_store_cv":
+        language = str(params.get("language") or "en")
+        extract_photo_flag = bool(params.get("extract_photo", True))
+        job_posting_url = (str(params.get("job_posting_url") or "").strip() or None)
+        job_posting_text = (str(params.get("job_posting_text") or "").strip() or None)
+        docx_base64 = str(params.get("docx_base64") or "")
+
+        status, payload = _tool_extract_and_store_cv(
+            docx_base64=docx_base64,
+            language=language,
+            extract_photo_flag=extract_photo_flag,
+            job_posting_url=job_posting_url,
+            job_posting_text=job_posting_text,
+        )
+        return func.HttpResponse(json.dumps(payload, ensure_ascii=False), mimetype="application/json; charset=utf-8", status_code=status)
+
     if not session_id:
         return func.HttpResponse(json.dumps({"error": "session_id is required"}), mimetype="application/json", status_code=400)
 
@@ -224,6 +489,39 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     if not session:
         return func.HttpResponse(json.dumps({"error": "Session not found or expired"}), mimetype="application/json", status_code=404)
+
+    if tool_name == "get_cv_session":
+        client_context = params.get("client_context")
+        try:
+            store.append_event(
+                session_id,
+                {"type": "get_cv_session", "client_context": client_context if isinstance(client_context, dict) else None},
+            )
+        except Exception:
+            pass
+
+        cv_data = session.get("cv_data") or {}
+        readiness = _compute_readiness(cv_data, session.get("metadata") or {})
+        payload = {
+            "success": True,
+            "session_id": session_id,
+            "cv_data": cv_data,
+            "metadata": session.get("metadata"),
+            "expires_at": session.get("expires_at"),
+            "readiness": readiness,
+            "_metadata": {
+                "version": session.get("version"),
+                "created_at": session.get("created_at"),
+                "updated_at": session.get("updated_at"),
+                "content_signature": {
+                    "work_exp_count": len(cv_data.get("work_experience", [])) if isinstance(cv_data, dict) else 0,
+                    "education_count": len(cv_data.get("education", [])) if isinstance(cv_data, dict) else 0,
+                    "profile_length": len(str(cv_data.get("profile", ""))) if isinstance(cv_data, dict) else 0,
+                    "skills_count": len(cv_data.get("it_ai_skills", [])) if isinstance(cv_data, dict) else 0,
+                },
+            },
+        }
+        return func.HttpResponse(json.dumps(payload, ensure_ascii=False), mimetype="application/json; charset=utf-8", status_code=200)
 
     if tool_name == "cv_session_search":
         q = str(params.get("q") or "")
@@ -246,6 +544,118 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=200,
         )
+
+    if tool_name == "generate_context_pack_v2":
+        phase = str(params.get("phase") or "")
+        job_posting_text = params.get("job_posting_text")
+        try:
+            max_pack_chars = int(params.get("max_pack_chars") or 12000)
+        except Exception:
+            max_pack_chars = 12000
+
+        status, payload = _tool_generate_context_pack_v2(
+            session_id=session_id,
+            phase=phase,
+            job_posting_text=str(job_posting_text) if isinstance(job_posting_text, str) else None,
+            max_pack_chars=max_pack_chars,
+        )
+        return func.HttpResponse(json.dumps(payload, ensure_ascii=False), mimetype="application/json; charset=utf-8", status_code=status)
+
+    if tool_name == "update_cv_field":
+        # Reuse the same request shape as the old endpoint (but tunneled via params).
+        req_body = dict(params)
+        req_body["session_id"] = session_id
+        try:
+            applied = 0
+            client_context = req_body.get("client_context")
+            edits = req_body.get("edits")
+            field_path = req_body.get("field_path")
+            value = req_body.get("value")
+            cv_patch = req_body.get("cv_patch")
+            confirm_flags = req_body.get("confirm")
+
+            is_batch = isinstance(edits, list) and len(edits) > 0
+            is_patch = isinstance(cv_patch, dict) and len(cv_patch.keys()) > 0
+            if not is_batch and not field_path and not is_patch and not confirm_flags:
+                return func.HttpResponse(
+                    json.dumps({"error": "field_path/value or edits[] or cv_patch or confirm is required"}),
+                    mimetype="application/json",
+                    status_code=400,
+                )
+
+            if isinstance(confirm_flags, dict) and confirm_flags:
+                try:
+                    meta = session.get("metadata") or {}
+                    if isinstance(meta, dict):
+                        meta = dict(meta)
+                        cf = meta.get("confirmed_flags") or {}
+                        if not isinstance(cf, dict):
+                            cf = {}
+                        cf = dict(cf)
+                        for k in ("contact_confirmed", "education_confirmed"):
+                            if k in confirm_flags:
+                                cf[k] = bool(confirm_flags.get(k))
+                        if cf.get("contact_confirmed") and cf.get("education_confirmed") and not cf.get("confirmed_at"):
+                            cf["confirmed_at"] = _now_iso()
+                        meta["confirmed_flags"] = cf
+                        store.update_session(session_id, (session.get("cv_data") or {}), meta)
+                except Exception:
+                    pass
+
+            if is_batch:
+                for e in edits:
+                    fp = e.get("field_path")
+                    if not fp:
+                        continue
+                    store.update_field(session_id, fp, e.get("value"), client_context=client_context)
+                    applied += 1
+
+            if field_path:
+                store.update_field(session_id, field_path, value, client_context=client_context)
+                applied += 1
+
+            if is_patch:
+                for k, v in cv_patch.items():
+                    store.update_field(session_id, k, v, client_context=client_context)
+                    applied += 1
+
+            updated_session = store.get_session(session_id)
+            if updated_session:
+                return func.HttpResponse(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "session_id": session_id,
+                            **({"field_updated": field_path} if (field_path and not is_batch) else {}),
+                            **({"edits_applied": applied} if is_batch else {}),
+                            "updated_version": updated_session.get("version"),
+                            "updated_at": updated_session.get("updated_at"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    mimetype="application/json; charset=utf-8",
+                    status_code=200,
+                )
+            return func.HttpResponse(json.dumps({"success": True, "session_id": session_id, "edits_applied": applied}, ensure_ascii=False), mimetype="application/json; charset=utf-8", status_code=200)
+        except Exception as e:
+            return func.HttpResponse(json.dumps({"error": "Failed to update field", "details": str(e)}), mimetype="application/json", status_code=500)
+
+    if tool_name == "generate_cv_from_session":
+        # We re-use the existing generate endpoint logic by keeping it in-place for now.
+        # This branch mirrors its behavior but returns PDF bytes directly.
+        try:
+            client_context = params.get("client_context")
+        except Exception:
+            client_context = None
+        language = str(params.get("language") or "").strip() or None
+        status, payload, content_type = _tool_generate_cv_from_session(
+            session_id=session_id,
+            language=language,
+            client_context=client_context if isinstance(client_context, dict) else None,
+        )
+        if content_type == "application/pdf" and isinstance(payload, (bytes, bytearray)):
+            return func.HttpResponse(body=payload, mimetype="application/pdf", status_code=status)
+        return func.HttpResponse(json.dumps(payload, ensure_ascii=False), mimetype="application/json; charset=utf-8", status_code=status)
 
     if tool_name == "validate_cv":
         cv_data = (session or {}).get("cv_data") or {}
@@ -314,8 +724,8 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 # - validate-cv (tool_name="validate_cv")
 
 
-@app.route(route="generate-context-pack-v2", methods=["POST"])
-def generate_context_pack_v2(req: func.HttpRequest) -> func.HttpResponse:
+# Public endpoint removed (use /api/cv-tool-call-handler tool_name="generate_context_pack_v2")
+def _legacy_generate_context_pack_v2(req: func.HttpRequest) -> func.HttpResponse:
     """
     Build ContextPackV2 (phase-specific) from session data.
     Returns JSON with phase-appropriate context.
@@ -421,8 +831,8 @@ def generate_context_pack_v2(req: func.HttpRequest) -> func.HttpResponse:
 # PHASE 2: SESSION-BASED ENDPOINTS
 # ============================================================================
 
-@app.route(route="extract-and-store-cv", methods=["POST"])
-def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
+# Public endpoint removed (use /api/cv-tool-call-handler tool_name="extract_and_store_cv")
+def _legacy_extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
     """
     Extract CV data from DOCX and store in session
     
@@ -645,8 +1055,8 @@ def extract_and_store_cv(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="get-cv-session", methods=["GET", "POST"])
-def get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
+# Public endpoint removed (use /api/cv-tool-call-handler tool_name="get_cv_session")
+def _legacy_get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
     """
     Retrieve CV data from session
     
@@ -735,8 +1145,8 @@ def get_cv_session(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="update-cv-field", methods=["POST"])
-def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
+# Public endpoint removed (use /api/cv-tool-call-handler tool_name="update_cv_field")
+def _legacy_update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
     """
     Update CV session fields (single, batch edits[], or a single-section cv_patch).
 
@@ -966,8 +1376,8 @@ def update_cv_field(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="generate-cv-from-session", methods=["POST"])
-def generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
+# Public endpoint removed (use /api/cv-tool-call-handler tool_name="generate_cv_from_session")
+def _legacy_generate_cv_from_session(req: func.HttpRequest) -> func.HttpResponse:
     """
     Generate PDF from session data
     
