@@ -8,6 +8,7 @@ import {
   buildResponsesRequest,
   buildUserContent,
   determineCurrentPhase,
+  maxOutputTokensForStage,
   roughInputChars,
   sanitizeToolOutputForModel,
 } from '@/lib/capsule';
@@ -17,10 +18,18 @@ const openai = new OpenAI({
 });
 
 const DEBUG_TOKENS = process.env.CV_DEBUG_TOKENS === '1';
+const CONTINUE_ON_TOKEN_CAP = process.env.CV_CONTINUE_ON_TOKEN_CAP !== '0';
 
 function clampStr(v: any, max: number): string {
   const s = typeof v === 'string' ? v : v == null ? '' : String(v);
   return s.length <= max ? s : s.slice(0, max);
+}
+
+function looksTruncated(text: string): boolean {
+  const t = (text || '').trimEnd();
+  if (!t) return false;
+  // Heuristic: incomplete last line (no sentence-ending punctuation) often indicates token-cap truncation.
+  return !/[.!?…]\s*$/.test(t);
 }
 
 async function autoFixForTwoPages(sessionId: string, language: string) {
@@ -1180,7 +1189,46 @@ async function chatWithCV(
     }
   }
 
-  const finalText = (response as any).output_text || '';
+  let finalText = (response as any).output_text || '';
+
+  // If the model hit the max_output_tokens cap, do a single "continue" call and append.
+  // This avoids UI-side "looks truncated" complaints when the response is cut mid-thought.
+  if (CONTINUE_ON_TOKEN_CAP) {
+    try {
+      const usage = getResponseUsageSummary(response);
+      const cap = maxOutputTokensForStage(stage);
+      const outTok = usage?.output_tokens ?? 0;
+      const nearCap = outTok > 0 && cap > 0 && outTok >= Math.floor(cap * 0.98);
+      if (nearCap && looksTruncated(finalText) && stage !== 'generate_pdf' && stage !== 'final') {
+        console.warn(`↩️ Output near token cap (${outTok}/${cap}); requesting one continuation.`);
+        const contInput = [
+          ...inputList,
+          { role: 'user', content: 'Continue from where you stopped. Do not repeat previous text.' },
+        ];
+        const contResp = await openai.responses.create(
+          buildResponsesRequest({
+            promptId,
+            modelOverride,
+            stage,
+            stageSeq: stageSeq + 1,
+            systemPrompt: systemPromptToSend,
+            stagePrompt: CV_STAGE_PROMPT(stage),
+            inputList: contInput,
+            tools: [], // no tools for continuation
+          })
+        );
+        const contText = (contResp as any).output_text || '';
+        if (contText) {
+          finalText = `${finalText.trimEnd()}\n\n${contText.trimStart()}`;
+          response = contResp;
+          stageSeq += 1;
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`↩️ Continuation attempt failed (ignored): ${msg}`);
+    }
+  }
   return {
     response: finalText || 'Processing completed',
     pdf_base64: pdfBase64,
