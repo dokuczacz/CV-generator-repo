@@ -407,6 +407,10 @@ export default function CVGenerator() {
             const isExpanded = !!expandedMessages[idx];
             const toggleExpand = () =>
               setExpandedMessages((prev) => ({ ...prev, [idx]: !isExpanded }));
+            const displayContent =
+              isCollapsible && !isExpanded
+                ? `${msg.content.slice(0, collapseThreshold)}\n...[truncated ${len - collapseThreshold} chars]`
+                : msg.content;
 
             return (
               <div
@@ -420,7 +424,7 @@ export default function CVGenerator() {
                       : 'bg-white text-gray-900 border border-gray-200'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <p className="whitespace-pre-wrap break-words">{displayContent}</p>
                   {isCollapsible && (
                     <button
                       onClick={toggleExpand}
