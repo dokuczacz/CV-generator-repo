@@ -215,6 +215,16 @@ export default function CVGenerator() {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Response error:', errorText);
+        // If the session is missing/expired, clear local session state so the user can re-upload cleanly.
+        if (errorText.includes('Session not found or expired')) {
+          setSessionId(null);
+          try {
+            window.localStorage.removeItem(SESSION_ID_KEY);
+            window.localStorage.removeItem(SESSION_TIMESTAMP_KEY);
+          } catch {
+            // ignore
+          }
+        }
         throw new Error(`Server error: ${response.status} - ${errorText.substring(0, 200)}`);
       }
 

@@ -688,6 +688,21 @@ async function chatWithCV(
   }
 
   const hasSession = !!resolvedSessionId;
+  // If the user is trying to continue/generate but the session is missing, bail out early with a clear message.
+  if (!hasSession && !hasDocx && sessionId) {
+    return {
+      response:
+        'Your previous session is no longer available (expired or storage was reset). Please re-upload your CV DOCX to start a new session.',
+      pdf_base64: '',
+      last_response_id: null,
+      session_id: null,
+      stage: 'bootstrap' as CVStage,
+      stage_seq: 0,
+      stage_updates: [],
+      job_posting_url: jobPostingUrlFromClient || null,
+      job_posting_text: jobPostingTextFromClient || null,
+    };
+  }
   // Determine initial stage for phase-aware context (must be set before any short-circuit logic).
   let stage: CVStage = hasSession ? (userRequestedGenerate ? 'generate_pdf' : 'review_session') : 'bootstrap';
 
