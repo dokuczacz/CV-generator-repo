@@ -412,7 +412,7 @@ export default function CVGenerator() {
           {messages.map((msg, idx) => {
             const len = msg.content?.length || 0;
             // Keep user messages collapsible for very long pastes; show assistant messages fully unless extreme.
-            const collapseThreshold = msg.role === 'assistant' ? 8000 : 1800;
+            const collapseThreshold = msg.role === 'assistant' ? 30000 : 8000;
             const isCollapsible = len > collapseThreshold;
             const isExpanded = !!expandedMessages[idx];
             const toggleExpand = () =>
