@@ -367,19 +367,6 @@ async function processToolCall(toolName: string, toolInput: any): Promise<string
       ? toolInput.client_context
       : undefined;
     switch (toolName) {
-      case 'fetch_job_posting_text': {
-        const url = typeof toolInput?.url === 'string' ? toolInput.url.trim() : '';
-        if (!url) {
-          return JSON.stringify({ success: false, error: 'url is required' });
-        }
-        const text = await fetchJobPostingText(url);
-        return JSON.stringify({
-          success: !!(text && text.trim()),
-          url,
-          job_posting_text: text || '',
-        });
-      }
-
       default:
         // All backend tools are routed through the single dispatcher.
         // This keeps the UI thin and reduces public endpoint surface.
@@ -742,21 +729,6 @@ async function chatWithCV(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn(`⚠️ Failed to fetch ContextPackV2 for session; falling back to session snapshot`, msg);
-      contextPack = null;
-    }
-  } else if (!hasSession && process.env.CV_USE_CONTEXT_PACK === '1' && hasDocx && boundedCvText) {
-    // Legacy: V1 context pack for bootstrap/extract phases (no session yet)
-    try {
-      console.log('🧩 CV_USE_CONTEXT_PACK enabled — requesting ContextPackV1 from backend');
-      const packResp = await callAzureFunction('/generate-context-pack', {
-        cv_data: { profile: boundedCvText },
-        job_posting_text: jobText,
-      });
-      contextPack = packResp;
-      console.log('🧩 ContextPackV1 received; keys:', Object.keys(contextPack || {}));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn('⚠️ Failed to build ContextPackV1; falling back to injected CV text', msg);
       contextPack = null;
     }
   }

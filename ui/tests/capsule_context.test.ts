@@ -202,22 +202,6 @@ test('capsule: sanitizeToolOutputForModel(generate_cv_from_session) strips pdf_b
   assert.equal(parsed.pdf_base64, undefined);
 });
 
-test('capsule: sanitizeToolOutputForModel(fetch_job_posting_text) clamps job text to 6k', () => {
-  const toolOutput = JSON.stringify({
-    success: true,
-    url: 'https://example.com/job',
-    job_posting_text: 'A'.repeat(25000),
-  });
-
-  const sanitized = capsule.sanitizeToolOutputForModel('fetch_job_posting_text', toolOutput);
-  const parsed = JSON.parse(sanitized);
-
-  assert.equal(parsed.ok, true);
-  assert.equal(parsed.url, 'https://example.com/job');
-  assert.equal(parsed.job_posting_text_length, 25000);
-  assert.equal(parsed.job_posting_text.length, 6000);
-});
-
 test('capsule: roughInputChars accounts for message sizes (smoke)', () => {
   const input = [
     { role: 'system', content: 'a'.repeat(10) },

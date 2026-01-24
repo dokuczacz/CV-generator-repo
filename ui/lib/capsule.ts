@@ -241,19 +241,6 @@ export function sanitizeToolOutputForModel(toolName: string, toolOutput: string)
     });
   }
 
-  if (toolName === 'fetch_job_posting_text') {
-    const text = typeof parsed.job_posting_text === 'string' ? parsed.job_posting_text : '';
-    const bounded = text.length > JOB_TEXT_MAX_CHARS ? text.slice(0, JOB_TEXT_MAX_CHARS) : text;
-    return JSON.stringify({
-      ok: parsed.success !== false && !!bounded,
-      success: parsed.success,
-      url: parsed.url,
-      job_posting_text_length: text.length || undefined,
-      job_posting_text: bounded || '',
-      error: parsed.error,
-    });
-  }
-
   // Generic sanitizer: drop known huge fields and clamp long strings.
   const out: Record<string, any> = { ...parsed };
   for (const key of ['photo_data_uri', 'pdf_base64', 'docx_base64', 'source_docx_base64']) {

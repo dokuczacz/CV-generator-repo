@@ -17,7 +17,7 @@ Professional CV generator with chat interface and OpenAI prompt integration. Tra
 │  OpenAI Prompt  │ ← Configured in dashboard with tools
 │  + Tool Calling │
 └────────┬────────┘
-         │ Tool calls (extract_photo, validate_cv, generate_cv_action)
+         │ Tool calls (extract_and_store_cv, get_cv_session, update_cv_field, validate_cv, generate_cv_from_session, ...)
          ▼
 ┌─────────────────┐
 │  Backend (Node) │ ← Routes tool calls to Azure Functions
@@ -34,8 +34,8 @@ Professional CV generator with chat interface and OpenAI prompt integration. Tra
 **Flow:**
 1. User uploads CV → UI converts to base64
 2. UI sends to `/api/process-cv` with message
-3. Backend calls OpenAI with `store: true` (uses prompt from dashboard)
-4. OpenAI decides which tools to call (extract_photo → validate_cv → generate_cv_action)
+3. Backend calls OpenAI with `store: false` by default (uses prompt from dashboard via `OPENAI_PROMPT_ID`)
+4. OpenAI decides which tools to call (session workflow; PDF generation is gated by readiness + confirmations)
 5. Backend executes tool calls via Azure Functions
 6. Returns results to OpenAI, continues conversation
 7. Final PDF returned to user
@@ -62,7 +62,7 @@ cv-generator-repo/
 │   ├── CV_template_2pages_2025.spec.md
 │   └── html/                   # HTML/CSS for rendering
 │
-├── TOOLS_CONFIG.md             # Tools JSON for OpenAI dashboard
+├── TOOLS_CONFIG.md             # (legacy/lab) Tools JSON for OpenAI dashboard
 ├── SYSTEM_PROMPT.md            # System prompt for dashboard
 ├── PROMPT_INSTRUCTIONS.md      # Knowledge file (upload to dashboard)
 └── README.md                   # This file
@@ -106,13 +106,9 @@ https://platform.openai.com/assistants
 - Paste content from `SYSTEM_PROMPT.md` into "System Prompt" field
 - Upload `PROMPT_INSTRUCTIONS.md` as knowledge file
 
-**c) Add Tools:**
-Open `TOOLS_CONFIG.md` and add 3 tools:
-1. Copy JSON for `extract_photo`
-2. Copy JSON for `validate_cv`
-3. Copy JSON for `generate_cv_action`
-
-Paste each into dashboard "Add Tool" → "Function"
+ **c) Add Tools:**
+ - Use the dispatcher schema from `schemas/openai_cv_tool_call_handler_schema.json` (single function tool).
+ - Enable built-in `web_search` if you want web lookups.
 
 **d) Model Settings:**
 - Model: gpt-4 or higher
@@ -160,22 +156,17 @@ curl -X POST https://cv-generator-6695.azurewebsites.net/api/cv-tool-call-handle
 
 ---
 
-## Tools
-
-### extract_photo
-**Purpose:** Extract photo from DOCX CV  
-**Input:** `{ docx_base64: string }`  
-**Output:** `{ photo_data_uri: string }`
-
-### validate_cv
-**Purpose:** Validate CV data before rendering  
-**Input:** CV data object (full_name, email, phone, etc.)  
-**Output:** `{ is_valid: boolean, errors: [], warnings: [] }`
-
-### generate_cv_action
-**Purpose:** Generate final 2-page PDF  
-**Input:** CV data + language (en/de/pl) + optional photo  
-**Output:** `{ success: true, pdf_base64: string }`
+## Tools (MVP)
+The OpenAI prompt uses a session-based workflow and calls backend tools through the dispatcher.
+- `extract_and_store_cv` → create a new session from an uploaded DOCX
+- `get_cv_session` → retrieve current session data + readiness
+- `update_cv_field` → apply edits (supports batching via `edits[]` + `confirm`)
+- `validate_cv` → deterministic schema + DoD checks (no PDF render)
+- `generate_cv_from_session` → generate the final PDF (requires readiness + confirmations)
+Additional debug tools:
+- `generate_context_pack_v2` (capsule builder)
+- `cv_session_search` (bounded search across session + docx snapshot)
+- `preview_html` (debug HTML)
 
 ---
 

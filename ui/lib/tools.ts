@@ -123,7 +123,7 @@ export const CV_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'generate_cv_from_session',
-      description: 'Generates a PDF from CV data stored in the session (replaces generate_cv_action).',
+      description: 'Generates a PDF from CV data stored in the session.',
       parameters: {
         type: 'object' as const,
         properties: {
@@ -288,7 +288,7 @@ export const CV_TOOLS_RESPONSES = [
   {
     type: 'function' as const,
     name: 'generate_cv_from_session',
-    description: 'Generates a PDF from CV data stored in the session (replaces generate_cv_action).',
+    description: 'Generates a PDF from CV data stored in the session.',
     strict: false,
     parameters: {
       type: 'object' as const,
