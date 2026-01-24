@@ -125,6 +125,13 @@ def main() -> int:
     _require(status == 200, f"update_cv_field(expected 200) got {status}: {body}")
     print("OK: hydrated required fields + confirmed contact/education")
 
+    # Refresh session snapshot after hydration.
+    status, _, body = _tool_call("get_cv_session", session_id=session_id, params={})
+    _require(status == 200, f"get_cv_session(refresh) expected 200, got {status}: {body}")
+    _require(isinstance(body, dict) and body.get("success") is True, f"get_cv_session(refresh) failed: {body}")
+    cv = body.get("cv_data") or {}
+    _require(isinstance(cv, dict), f"cv_data(refresh) is not a dict: {type(cv)}")
+
     # 3b) Auto-fix common validator constraints so PDF generation can succeed without manual edits.
     # This is a smoke test for the backend pipeline (not the LLM quality).
     def _clamp(s: str, n: int) -> str:
@@ -141,7 +148,7 @@ def main() -> int:
             continue
         bullets = job.get("bullets") if isinstance(job.get("bullets"), list) else []
         # Be more conservative than the validator to help satisfy the strict 2-page DoD.
-        fixed_bullets = [_clamp(str(b or ""), 90) for b in bullets[:3]]
+        fixed_bullets = [_clamp(str(b or ""), 90) for b in bullets[:4]]
         fixed_job = dict(job)
         fixed_job["bullets"] = fixed_bullets
         fixed_job["employer"] = _clamp(str(fixed_job.get("employer", "")), 60)
@@ -150,8 +157,8 @@ def main() -> int:
         fixed_job["date_range"] = _clamp(str(fixed_job.get("date_range", "")), 25)
         fixed_work.append(fixed_job)
 
-    # Keep only the most recent entries to reduce the chance of a 3-page spill.
-    fixed_work = fixed_work[:4]
+    # Respect validator max_entries (keep content density to help hit exactly 2 pages).
+    fixed_work = fixed_work[:5]
 
     edu = cv.get("education") if isinstance(cv.get("education"), list) else []
     fixed_edu = []

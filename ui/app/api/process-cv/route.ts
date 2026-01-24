@@ -649,19 +649,11 @@ async function chatWithCV(
   console.log('\n🤖 Starting chatWithCV');
 
   const hasDocx = !!docx_base64;
-  const hasSession = !!sessionId;
+  let resolvedSessionId: string | undefined = sessionId;
   const skipPhoto = wantsSkipPhoto(userMessage);
   // Default language: stay with EN unless the user explicitly asks to switch.
   const language = detectLanguage(userMessage, 'en');
   const userRequestedGenerate = wantsGenerate(userMessage);
-  // Determine initial stage for phase-aware context (must be set before any short-circuit logic).
-  let stage: CVStage = hasSession
-    ? userRequestedGenerate
-      ? 'generate_pdf'
-      : 'review_session'
-    : hasDocx
-    ? 'extract'
-    : 'bootstrap';
   const extractedUrl = extractFirstUrl(userMessage);
   const url = extractedUrl || jobPostingUrlFromClient || null;
   const jobText =
@@ -671,6 +663,38 @@ async function chatWithCV(
       ? await fetchJobPostingText(url)
       : null;
 
+  // Deterministic extraction: if DOCX is uploaded and no session exists, create the session before the model runs.
+  if (!resolvedSessionId && hasDocx && docx_base64) {
+    const createdRaw = await processToolCall('extract_and_store_cv', {
+      docx_base64,
+      language,
+      extract_photo: !skipPhoto,
+      job_posting_url: url,
+      job_posting_text: jobText,
+    });
+    const created = JSON.parse(createdRaw);
+    if (created?.error) {
+      return {
+        response: `Failed to create session: ${created.error}`,
+        pdf_base64: '',
+        last_response_id: null,
+        session_id: null,
+        stage: 'bootstrap' as CVStage,
+        stage_seq: 0,
+        stage_updates: [],
+        job_posting_url: url,
+        job_posting_text: jobText,
+      };
+    }
+    if (typeof created?.session_id === 'string' && created.session_id.length > 10) {
+      resolvedSessionId = created.session_id;
+    }
+  }
+
+  const hasSession = !!resolvedSessionId;
+  // Determine initial stage for phase-aware context (must be set before any short-circuit logic).
+  let stage: CVStage = hasSession ? (userRequestedGenerate ? 'generate_pdf' : 'review_session') : 'bootstrap';
+
   // If we have no job text and we are not in execution, return a minimal ask instead of running OpenAI.
   if (!jobText && stage !== 'generate_pdf' && stage !== 'final') {
     return {
@@ -678,7 +702,7 @@ async function chatWithCV(
         'I could not fetch the job posting. Please paste the full job description (responsibilities + requirements + job title/company). I will not summarize or generate until I have it.',
       pdf_base64: '',
       last_response_id: null,
-      session_id: sessionId || null,
+      session_id: resolvedSessionId || null,
       stage,
       stage_seq: 0,
       stage_updates: [],
@@ -699,14 +723,14 @@ async function chatWithCV(
   // If session is present, fetch phase-specific ContextPackV2
   // Otherwise, use legacy V1 context pack (or skip for bootstrap/extract)
   let contextPack: any = null;
-  if (hasSession && sessionId) {
+  if (hasSession && resolvedSessionId) {
     try {
       // Determine phase from stage for V2 context pack
       const phase = determineCurrentPhase(stage);
-      console.log(`📦 Fetching ContextPackV2 (phase=${phase}) for session ${sessionId.slice(0, 8)}...`);
+      console.log(`📦 Fetching ContextPackV2 (phase=${phase}) for session ${resolvedSessionId.slice(0, 8)}...`);
       const packResp = await callAzureFunction('/cv-tool-call-handler', {
         tool_name: 'generate_context_pack_v2',
-        session_id: sessionId,
+        session_id: resolvedSessionId,
         params: {
           phase,
           job_posting_text: jobText || undefined,
@@ -743,7 +767,7 @@ async function chatWithCV(
     try {
       const sessionResp = await callAzureFunction('/cv-tool-call-handler', {
         tool_name: 'get_cv_session',
-        session_id: sessionId,
+        session_id: resolvedSessionId,
         params: {},
       });
       sessionSnapshot = sanitizeToolOutputForModel('get_cv_session', JSON.stringify(sessionResp));
@@ -758,7 +782,7 @@ async function chatWithCV(
     userMessage,
     hasDocx,
     hasSession,
-    sessionId: sessionId || null,
+    sessionId: resolvedSessionId || null,
     skipPhoto,
     sessionSnapshot,
     contextPack,
@@ -867,7 +891,7 @@ async function chatWithCV(
   console.log('✅ OpenAI response received in', Date.now() - apiStartTime, 'ms');
 
   let pdfBase64 = '';
-  let currentSessionId: string | null = sessionId || null;
+  let currentSessionId: string | null = resolvedSessionId || null;
   let iteration = 0;
   const maxIterations = 10;
   let extractToolCalls = 0;

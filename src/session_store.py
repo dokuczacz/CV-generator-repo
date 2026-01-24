@@ -134,7 +134,13 @@ class CVSessionStore:
         logging.info(f"Updated session {session_id}, version {entity['version']}")
         return True
     
-    def update_field(self, session_id: str, field_path: str, value: Any) -> bool:
+    def update_field(
+        self,
+        session_id: str,
+        field_path: str,
+        value: Any,
+        client_context: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """
         Update specific field in CV data (supports nested paths)
 
@@ -155,9 +161,17 @@ class CVSessionStore:
         if not isinstance(metadata, dict):
             metadata = {}
 
-        # Log what we're updating for debugging
-        value_preview = str(value)[:100] if value else "(empty)"
-        logging.info(f"update_field: path={field_path}, value_type={type(value).__name__}, value_preview={value_preview}")
+        # Keep logs minimal (avoid dumping personal data).
+        value_preview = "(empty)"
+        if isinstance(value, str):
+            value_preview = f"<str:{len(value)}>"
+        elif isinstance(value, list):
+            value_preview = f"<list:{len(value)}>"
+        elif isinstance(value, dict):
+            value_preview = f"<dict:{len(value)}>"
+        else:
+            value_preview = f"<{type(value).__name__}>"
+        logging.debug(f"update_field: path={field_path}, value={value_preview}")
 
         # Parse field path and update
         parts = field_path.replace("[", ".").replace("]", "").split(".")
@@ -195,10 +209,16 @@ class CVSessionStore:
         else:
             current[last_key] = value
 
-        # Log the updated cv_data signature (to verify actual changes)
-        work_exp_count = len(cv_data.get("work_experience", []))
-        profile_len = len(str(cv_data.get("profile", "")))
-        logging.info(f"update_field: after update - work_exp_count={work_exp_count}, profile_len={profile_len}")
+        # Log the updated cv_data signature (debug-only).
+        try:
+            work_exp_count = len(cv_data.get("work_experience", []))
+            edu_count = len(cv_data.get("education", []))
+            profile_len = len(str(cv_data.get("profile", "")))
+            logging.debug(
+                f"update_field: after update - work_exp_count={work_exp_count}, edu_count={edu_count}, profile_len={profile_len}"
+            )
+        except Exception:
+            pass
 
         # Append a bounded event log entry (helps stateless agent keep continuity across turns).
         try:
@@ -212,15 +232,17 @@ class CVSessionStore:
             elif isinstance(value, dict):
                 preview = f"{{dict with {len(value)} keys}}"
 
-            event_log.append(
-                {
-                    "ts": datetime.utcnow().isoformat(),
-                    "type": "update_cv_field",
-                    "field_path": field_path,
-                    "value_type": type(value).__name__,
-                    "preview": preview,
-                }
-            )
+            evt: Dict[str, Any] = {
+                "ts": datetime.utcnow().isoformat(),
+                "type": "update_cv_field",
+                "field_path": field_path,
+                "value_type": type(value).__name__,
+                "preview": preview,
+            }
+            if isinstance(client_context, dict) and client_context:
+                # Keep only a bounded, non-sensitive context summary.
+                evt["client_context_keys"] = list(client_context.keys())[:20]
+            event_log.append(evt)
 
             # Keep only last N events to cap Table Storage size.
             metadata["event_log"] = event_log[-50:]
