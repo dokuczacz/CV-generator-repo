@@ -19,21 +19,10 @@ File: `ui/app/api/process-cv/route.ts`
 
 High level:
 1. Parse request (`message`, optional `docx_base64`, optional `session_id`, optional `job_posting_url/text`).
-2. Best-effort fetch of `job_posting_text` (UI-side). If missing and not generating, short-circuit asking user to paste the posting.
-3. **Deterministic extraction**: if `docx_base64` is provided and `session_id` is missing, the UI first calls the backend tool `extract_and_store_cv` via the dispatcher to obtain a new `session_id`.
-4. Determine stage:
-   - Session present + user asked to generate → `generate_pdf`
-   - Session present otherwise → `review_session`
-   - No session → `bootstrap`
-5. Fetch `ContextPackV2` via dispatcher tool `generate_context_pack_v2` (only when session exists).
-6. Prefetch a compact session snapshot via dispatcher tool `get_cv_session` (only when session exists) and inject it into the model input.
-7. Call OpenAI Responses API and iterate:
-   - Read tool calls from model output
-   - Execute each via `processToolCall()` which routes to `/cv-tool-call-handler`
-   - Append tool outputs back into the next model input
-8. Tool gating:
-   - `generate_cv_from_session` is only allowed in execution stage and only once per request.
-   - Non-2xx backend responses are logged with HTTP status + body snippet so failures are visible immediately.
+2. UI forwards everything to the backend dispatcher (single call) as:
+   - `tool_name: "process_cv_orchestrated"`
+   - `params: { message, session_id, docx_base64, job_posting_url/text, language, extract_photo }`
+3. UI renders backend `assistant_text` and optionally offers a PDF download if `pdf_base64` is present.
 
 ## 3) Dispatcher contract (single backend endpoint)
 
@@ -60,6 +49,7 @@ OpenAI tool schema for the dispatcher (copy/paste for dashboard if you want the 
 Implementation: `function_app.py`
 
 Tools currently supported:
+- `process_cv_orchestrated` (no session) → backend-owned OpenAI call + tool-loop + optional PDF
 - `cleanup_expired_sessions` (no session)
 - `extract_and_store_cv` (no session) → returns `session_id`
 - `get_cv_session` → returns `cv_data`, `metadata`, and `readiness`
@@ -97,21 +87,20 @@ Key properties:
 - Includes `<docx_prefill_unconfirmed>` in preparation so the model can recover Education/Contact without asking again
 - Enforces a bounded size (default 12k chars); compaction affects only the capsule, not stored session data
 
-## 7) OpenAI request payload (what the UI sends)
+## 7) OpenAI request payload (what the backend sends)
 
-Builder: `ui/lib/capsule.ts`
+Builder: `function_app.py` (`_run_responses_tool_loop_v2`)
 
-The UI uses:
-- Dashboard prompt mode when `OPENAI_PROMPT_ID` is set (system instructions come from OpenAI dashboard)
-- Repo fallback system prompt only when `OPENAI_PROMPT_ID` is missing (`ui/lib/prompts.ts`)
+The backend uses:
+- Dashboard prompt when `OPENAI_PROMPT_ID` is set.
+- `OPENAI_MODEL` is required by the Responses API (fallback is `gpt-5-mini`).
 
 `store` default:
-- `store: false` by default (ZDR; no CV data retention on OpenAI side)
-- Set `OPENAI_STORE=1` only for debugging dashboard logs
+- `OPENAI_STORE=1` by default (tool-loop follow-up calls require persisted response items).
+- If `OPENAI_STORE=0`, only single-call responses work (any tool-loop followups will fail).
 
 ## 8) What is NOT used in MVP
 
 - Legacy endpoints for direct tool calls (removed from public surface)
 - Legacy V1 “generate-context-pack” endpoint (removed from UI code path)
 - Lab-only tool names like `generate_cv_action` / `extract_photo` as standalone tools
-
