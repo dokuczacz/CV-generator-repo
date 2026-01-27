@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -37,8 +38,28 @@ class ValidationState:
 
 
 def detect_edit_intent(user_message: str) -> bool:
+    """Detect edit intent using word boundaries to avoid false positives (e.g., "don't change")"""
     text = (user_message or "").lower()
-    return any(k in text for k in (*EDIT_INTENT_KEYWORDS_PL, *EDIT_INTENT_KEYWORDS_EN))
+    
+    # Check for negative patterns first (user saying NOT to change)
+    negation_patterns = [
+        r'\bdon\'?t\s+(change|edit|update|modify)',
+        r'\bno\s+(change|edit|update|modify)',
+        r'\bkeep\s+(it|this|that)',
+        r'\bleave\s+(it|this|that)',
+        r'\bwithout\s+(chang|edit|updat|modif)',
+    ]
+    for pattern in negation_patterns:
+        if re.search(pattern, text):
+            return False  # User explicitly said NOT to change
+    
+    # Now check for edit keywords with word boundaries
+    for keyword in (*EDIT_INTENT_KEYWORDS_PL, *EDIT_INTENT_KEYWORDS_EN):
+        # Use word boundary \b to match whole words only
+        if re.search(rf'\b{re.escape(keyword)}\b', text):
+            return True
+    
+    return False
 
 
 def resolve_stage(
