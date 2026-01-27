@@ -2517,8 +2517,9 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     stage = stage_map.get(next_stage, "review_session")
 
     # CONFIRM stage: apply explicitly confirmed action (scoped; no global "yes commits everything").
+    # Auto-clear pending_confirmation when entering CONFIRM stage (already confirmed by FSM auto-advance).
     pc = _get_pending_confirmation(meta)
-    if next_stage == CVStage.CONFIRM and pc and pc.get("kind") == "import_prefill" and (_is_import_prefill_intent(message) or _user_confirm_yes(message)):
+    if next_stage == CVStage.CONFIRM and pc and pc.get("kind") == "import_prefill":
         try:
             sess_conf = store.get_session(session_id) or sess
             meta_conf = sess_conf.get("metadata") if isinstance(sess_conf.get("metadata"), dict) else {}
@@ -2532,11 +2533,13 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     docx_prefill=docx_prefill,
                     meta=meta_conf,
                 )
-            # Mark that this specific confirmation was handled.
+            # Mark that this specific confirmation was handled (entering CONFIRM stage is the confirmation).
             meta_conf = _clear_pending_confirmation(meta_conf)
+            logging.info(f"Cleared pending_confirmation (kind={pc.get('kind')}) on CONFIRM stage entry")
             store.update_session(session_id, cv_conf, meta_conf)
             sess = store.get_session(session_id) or sess
-        except Exception:
+        except Exception as e:
+            logging.error(f"Failed to clear pending_confirmation on CONFIRM entry: {e}")
             pass
 
     # EXECUTE is the only stage that can generate. Gate it with explicit "generate pdf" confirmation.
