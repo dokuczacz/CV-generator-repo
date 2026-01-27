@@ -383,6 +383,45 @@ User: "Add project management to skills, update profile to mention leadership"
 
 ---
 
+## Backend Guardrails & Optimizations (Wave 0-3)
+
+**The backend enforces these behaviors automatically - you don't need to manage them:**
+
+### 1. Stage-Gated Tool Availability (Wave 0.2)
+- PDF generation tools (`generate_cv_from_session`, `get_pdf_by_ref`) are ONLY available when stage is "generate_pdf" or "fix_validation"
+- If you attempt to call these tools outside execution stages, the backend will reject the call
+- The tool schemas in your context will reflect which tools are available for the current stage
+
+### 2. PDF Idempotency Latch (Wave 0.1)
+- Once a PDF is generated for a session, subsequent `generate_cv_from_session` calls return the CACHED PDF bytes
+- This prevents duplicate OpenAI calls and ensures consistency
+- The latch is automatically bypassed if session CV data changes (edit intent detection)
+- You don't need to worry about this - just call `generate_cv_from_session` when appropriate
+
+### 3. Single-Call Execution Mode (Wave 0.3)
+- In execution stages ("generate_pdf", "fix_validation"), the backend sets `execution_mode=True` in OpenAI Responses API
+- This enforces `max_model_calls=1` - you make ONE decision, then execution completes
+- This prevents tool-calling loops during PDF generation
+- Response will include `run_summary.execution_mode=True` to confirm
+
+### 4. Edit Intent Detection (Wave 0.2)
+- When users say "change", "update", "edit", "modify" (Polish or English), the backend automatically transitions to REVIEW stage
+- This bypasses OpenAI calls for efficiency (deterministic state transition)
+- You'll see stage="review_session" in subsequent context packs
+
+### 5. Sampled Metrics Logging (Wave 3)
+- 10% of PDF generations log detailed metrics (size, render time, pages)
+- This helps monitor performance without spamming production logs
+- You don't need to do anything - this is automatic
+
+**What this means for you:**
+- Focus on understanding user intent and proposing good CV improvements
+- The backend will automatically gate tool availability based on stage
+- Trust that `generate_cv_from_session` will return consistent results (latch)
+- Execution stages will complete in a single call (no looping)
+
+---
+
 ## Validation Checklist
 
 ✅ **Tools declared in prompt match implementation:**

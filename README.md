@@ -197,11 +197,17 @@ Additional debug tools:
 
 ## Configuration Files
 
-- `TOOLS_CONFIG.md` - Complete JSON for 3 tools (copy-paste to dashboard)
-- `SYSTEM_PROMPT.md` - System prompt text for dashboard
-- `PROMPT_INSTRUCTIONS.md` - Detailed workflow guide (upload as knowledge)
-- `ui/lib/prompts.ts` - CV_SYSTEM_PROMPT (can be used locally or in dashboard)
+## Configuration Files
+
+- [PROMPT_SYSTEM_REVISED.md](PROMPT_SYSTEM_REVISED.md) - **Current system prompt** with phase-aware workflow + Wave 0-3 guardrails
+- [local.settings.template.json](local.settings.template.json) - Environment variables template (OpenAI keys, feature flags)
+- `ui/lib/prompts.ts` - CV_SYSTEM_PROMPT (reference, can be used locally)
 - `ui/lib/tools.ts` - Tool definitions (reference, not used in code)
+
+**For OpenAI Dashboard:**
+1. Copy system prompt from [PROMPT_SYSTEM_REVISED.md](PROMPT_SYSTEM_REVISED.md)
+2. Configure tools in dashboard (extract_and_store_cv, get_cv_session, update_cv_field, generate_cv_from_session, etc.)
+3. Set `OPENAI_PROMPT_ID` in environment
 
 ---
 
