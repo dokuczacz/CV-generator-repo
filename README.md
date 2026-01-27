@@ -2,6 +2,21 @@
 
 Professional CV generator with chat interface and OpenAI prompt integration. Transforms CVs into ATS-compliant, 2-page PDFs following Swiss/European standards.
 
+## 🎯 Production Status
+
+**Version:** 1.0 (Production-Ready)  
+**Test Coverage:** 14/14 golden suite tests passing (100%)  
+**Performance:** ~10.5s avg response time, 110KB 2-page PDFs  
+**Stability:** Latch idempotency ✓, Single-call execution ✓, FSM gating ✓
+
+### Recent Milestones (Waves 0-3)
+- ✅ **Wave 0:** Critical correctness fixes (PDF latch, FSM gating, single-call enforcement)
+- ✅ **Wave 1:** Stability enhancements (retry wrapper, blob download verification)
+- ✅ **Wave 2:** Resilience improvements (download validation, error logging)
+- ✅ **Wave 3:** Observability (sampled metrics, stress testing)
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment guide.
+
 ---
 
 ## Architecture
@@ -107,7 +122,7 @@ https://platform.openai.com/assistants
 - Upload `PROMPT_INSTRUCTIONS.md` as knowledge file
 
  **c) Add Tools:**
- - Use the dispatcher schema from `schemas/openai_cv_tool_call_handler_schema.json` (single function tool).
+ - Tools are exposed directly via OpenAI Responses API in backend orchestration (`_tool_schemas_for_responses()`).
  - Enable built-in `web_search` if you want web lookups.
 
 **d) Model Settings:**
@@ -200,6 +215,71 @@ Additional debug tools:
 ✅ **Multi-language** - EN/DE/PL support  
 ✅ **ATS-Compliant** - Parseable by recruitment systems  
 ✅ **2-Page Limit** - Professional Swiss template  
+
+---
+
+## Testing
+
+### Local Testing (Development)
+
+**Golden Suite (14 comprehensive tests):**
+```bash
+# Prerequisite: Start local Azure Functions
+func start
+
+# Run full test suite
+python tests/test_golden_suite.py
+```
+
+Expected results: 14/14 passed (100%), ~46s execution time
+
+**Wave-Specific Tests:**
+```bash
+# Wave 0 integration tests (real DOCX sample)
+python tests/test_wave0_real_docx.py
+
+# Wave 3 stress tests (5 rapid-fire requests)
+python tests/test_wave3_stress.py
+```
+
+### Production Testing
+
+**Smoke Test (3 critical paths):**
+```bash
+python tests/test_smoke_production.py --endpoint https://cv-generator-api.azurewebsites.net
+```
+
+Tests:
+1. Health check
+2. Cleanup expired sessions
+3. End-to-end PDF generation
+
+### Performance Benchmarks
+
+| Metric | Expected Value |
+|--------|---------------|
+| First PDF generation | ~17s |
+| Cached PDF (latch) | ~7-12s |
+| Average response time | 10.56s |
+| PDF size (2-page) | 110KB |
+| Latch stability | 100% (identical PDFs) |
+| Single-call execution | 100% (execution_mode=True) |
+
+---
+
+## Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete production deployment guide including:
+- Azure resource provisioning
+- Environment variables configuration
+- CI/CD setup recommendations
+- Monitoring & alerting setup
+- Rollback procedures
+
+**Quick deploy:**
+```bash
+func azure functionapp publish cv-generator-api --python
+```
 
 ---
 

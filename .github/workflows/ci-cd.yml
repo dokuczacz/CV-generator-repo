@@ -1,0 +1,228 @@
+name: CV Generator CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # Backend tests (Azure Functions Python)
+  test-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache Python dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Install Azurite
+      run: npm install -g azurite
+    
+    - name: Start Azurite
+      run: |
+        azurite --silent --location .azurite &
+        sleep 5
+    
+    - name: Install Azure Functions Core Tools
+      run: |
+        wget -q https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install -y azure-functions-core-tools-4
+    
+    - name: Set up local.settings.json
+      run: |
+        cp local.settings.template.json local.settings.json
+        # Inject secrets from GitHub secrets
+        sed -i 's/your-openai-api-key-here/${{ secrets.OPENAI_API_KEY }}/g' local.settings.json
+        sed -i 's/your-prompt-id-here/${{ secrets.OPENAI_PROMPT_ID }}/g' local.settings.json
+    
+    - name: Start Azure Functions
+      run: |
+        func start &
+        sleep 15
+    
+    - name: Run Golden Suite
+      run: python tests/test_golden_suite.py
+      timeout-minutes: 5
+    
+    - name: Run Wave 0 Tests
+      run: python tests/test_wave0_real_docx.py
+      timeout-minutes: 3
+    
+    - name: Run Wave 3 Stress Tests
+      run: python tests/test_wave3_stress.py
+      timeout-minutes: 3
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: backend-test-results
+        path: |
+          test-results/
+          playwright-report/
+
+  # Frontend tests (Next.js)
+  test-frontend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ./ui
+      run: npm ci
+    
+    - name: Run linter
+      working-directory: ./ui
+      run: npm run lint
+    
+    - name: Build frontend
+      working-directory: ./ui
+      run: npm run build
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: frontend-build
+        path: ui/.next/
+
+  # E2E tests (Playwright)
+  test-e2e:
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Python dependencies
+      run: pip install -r requirements.txt
+    
+    - name: Install Azurite
+      run: npm install -g azurite
+    
+    - name: Start Azurite
+      run: |
+        azurite --silent --location .azurite &
+        sleep 5
+    
+    - name: Install Azure Functions Core Tools
+      run: |
+        wget -q https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install -y azure-functions-core-tools-4
+    
+    - name: Set up local.settings.json
+      run: |
+        cp local.settings.template.json local.settings.json
+        sed -i 's/your-openai-api-key-here/${{ secrets.OPENAI_API_KEY }}/g' local.settings.json
+        sed -i 's/your-prompt-id-here/${{ secrets.OPENAI_PROMPT_ID }}/g' local.settings.json
+    
+    - name: Start Azure Functions
+      run: |
+        func start &
+        sleep 15
+    
+    - name: Install frontend dependencies
+      working-directory: ./ui
+      run: npm ci
+    
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+    
+    - name: Start Next.js dev server
+      working-directory: ./ui
+      run: |
+        npm run dev &
+        sleep 10
+    
+    - name: Run Playwright tests
+      run: npx playwright test
+      env:
+        BASE_URL: http://localhost:3000
+        AZURE_FUNCTIONS_URL: http://localhost:7071
+    
+    - name: Upload Playwright report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: playwright-report
+        path: playwright-report/
+
+  # Deploy to Azure (only on main branch)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend, test-e2e]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+    
+    - name: Install Azure Functions Core Tools
+      run: |
+        wget -q https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install -y azure-functions-core-tools-4
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Deploy to Azure Functions
+      run: |
+        func azure functionapp publish cv-generator-api --python
+    
+    - name: Run production smoke test
+      run: |
+        python tests/test_smoke_production.py --endpoint https://cv-generator-api.azurewebsites.net
+      timeout-minutes: 5
