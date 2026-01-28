@@ -1,0 +1,5 @@
+stage=work_experience
+ui_kind=edit_form
+ui_title=Stage 4/6 — Work experience
+fields=role_index
+actions=WORK_EXPERIENCE_OPEN_ROLE,WORK_EXPERIENCE_CANCEL_SELECT

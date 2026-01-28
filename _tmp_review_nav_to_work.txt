@@ -1,0 +1,4 @@
+stage=work_experience
+ui_stage=WORK_EXPERIENCE
+ui_title=Stage 4/6 — Work experience
+actions=WORK_EXPERIENCE_SELECT_ROLE,WORK_EXPERIENCE_CONFIRM_STAGE,WORK_EXPERIENCE_BACK

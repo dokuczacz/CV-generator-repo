@@ -1,0 +1,5 @@
+sid=0f56e089-f102-41c8-afd7-995696600d34
+stage=review_session
+ui_kind=confirm
+ui_title=Import DOCX data?
+actions=CONFIRM_IMPORT_PREFILL_YES,CONFIRM_IMPORT_PREFILL_NO

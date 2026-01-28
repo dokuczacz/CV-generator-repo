@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
+
+
+_SPECIALIZATION_LINE_RE = re.compile(
+    r"(?i)^\s*(specialization|major|focus|concentration|schwerpunkt|fachrichtung|vertiefung)\s*:\s*(.+?)\s*$"
+)
 
 
 def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,14 +93,59 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
                 field = edu.get("field", "")
                 title = f"{degree} {field}".strip() if degree or field else ""
 
+                specialization = ""
+                for k in ("specialization", "major", "focus", "concentration"):
+                    v = edu.get(k)
+                    if isinstance(v, str) and v.strip():
+                        specialization = v.strip()
+                        break
+
                 transformed = {
                     "date_range": date_range,
                     "institution": edu.get("school", ""),
                     "title": title,
                     "details": [],
                 }
+                if specialization:
+                    transformed["specialization"] = specialization
                 transformed_edu.append(transformed)
             normalized["education"] = transformed_edu
+
+    # Normalize education specialization presentation:
+    # - If `details` contains a "Specialization: X" line, lift it into `specialization`
+    #   and remove it from details to avoid duplication.
+    education2 = normalized.get("education", [])
+    if education2 and isinstance(education2, list):
+        out_edu: list[dict[str, Any]] = []
+        for edu in education2:
+            if not isinstance(edu, dict):
+                continue
+            edu2 = dict(edu)
+            if not isinstance(edu2.get("details"), list):
+                edu2["details"] = []
+
+            if not (isinstance(edu2.get("specialization"), str) and edu2["specialization"].strip()):
+                details: list[Any] = edu2.get("details") or []
+                specialization_val = ""
+                new_details: list[Any] = []
+                for d in details:
+                    if specialization_val:
+                        new_details.append(d)
+                        continue
+                    if not isinstance(d, str):
+                        new_details.append(d)
+                        continue
+                    m = _SPECIALIZATION_LINE_RE.match(d)
+                    if m:
+                        specialization_val = m.group(2).strip()
+                        continue
+                    new_details.append(d)
+                if specialization_val:
+                    edu2["specialization"] = specialization_val
+                    edu2["details"] = new_details
+
+            out_edu.append(edu2)
+        normalized["education"] = out_edu
 
     # Ensure further_experience exists (can be empty)
     if "further_experience" not in normalized:

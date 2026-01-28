@@ -14,7 +14,85 @@ def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-DEFAULT_MAX_PACK_CHARS = 12000
+def _compute_section_hash(section_data: Any) -> str:
+    """Compute stable hash for a CV section.
+    
+    Args:
+        section_data: Any CV section data (list, dict, string, or None)
+    
+    Returns:
+        Short hash (16 chars) for delta detection
+    """
+    if section_data is None:
+        return "null"
+    if isinstance(section_data, (list, dict)):
+        canonical = json.dumps(section_data, ensure_ascii=False, sort_keys=True)
+        return _sha256_hex(canonical)[:16]  # Short hash (64 bits)
+    return _sha256_hex(str(section_data))[:16]
+
+
+def compute_cv_section_hashes(cv_data: Dict[str, Any]) -> Dict[str, str]:
+    """Compute hashes for all major CV sections.
+    
+    Args:
+        cv_data: Complete CV data dictionary
+    
+    Returns:
+        Dict mapping section names to their hashes
+    """
+    sections = [
+        'work_experience',
+        'education',
+        'languages',
+        'it_ai_skills',
+        'interests',
+        'profile',
+        'further_experience'
+    ]
+    hashes = {}
+    
+    # Special case: contact is composite of multiple top-level fields
+    contact_blob = {
+        'full_name': cv_data.get('full_name'),
+        'email': cv_data.get('email'),
+        'phone': cv_data.get('phone'),
+        'address_lines': cv_data.get('address_lines'),
+    }
+    hashes['contact'] = _compute_section_hash(contact_blob)
+    
+    # Hash each major section independently
+    for section in sections:
+        hashes[section] = _compute_section_hash(cv_data.get(section))
+    
+    return hashes
+
+
+def detect_section_changes(
+    current_hashes: Dict[str, str],
+    previous_hashes: Optional[Dict[str, str]]
+) -> Dict[str, bool]:
+    """Return {section_name: changed} for all sections.
+    
+    Args:
+        current_hashes: Current section hashes
+        previous_hashes: Previous section hashes (None on first run)
+    
+    Returns:
+        Dict mapping section names to True (changed) or False (unchanged)
+    """
+    if not previous_hashes:
+        # First run: all sections are "new" (treat as changed)
+        return {k: True for k in current_hashes.keys()}
+    
+    changes = {}
+    for section, curr_hash in current_hashes.items():
+        prev_hash = previous_hashes.get(section)
+        changes[section] = (curr_hash != prev_hash)
+    
+    return changes
+
+
+DEFAULT_MAX_PACK_CHARS = 8000  # Reduced from 12000 to target ~2.5k tokens instead of ~4k
 
 
 TEMPLATE_SPEC_V1 = {
@@ -183,7 +261,9 @@ def build_context_pack_v2(
     phase: PhaseType,
     cv_data: Dict[str, Any],
     job_posting_text: Optional[str] = None,
+    job_reference: Optional[Dict[str, Any]] = None,
     session_metadata: Optional[Dict[str, Any]] = None,
+    pack_mode: str = "full",
     max_pack_chars: int = DEFAULT_MAX_PACK_CHARS,
 ) -> Dict[str, Any]:
     """Build phase-specific context pack (ContextPackV2).
@@ -229,6 +309,10 @@ def build_context_pack_v2(
             out["client_context"] = {"stage": cc.get("stage"), "stage_seq": cc.get("stage_seq")}
         return out
 
+    pack_mode = (pack_mode or "full").strip().lower()
+    if pack_mode not in ("full", "mini"):
+        pack_mode = "full"
+
     pack: Dict[str, Any] = {
         'schema_version': 'cvgen.context_pack.v2',
         'phase': phase,
@@ -240,20 +324,26 @@ def build_context_pack_v2(
             "version": session_metadata.get("version") if isinstance(session_metadata, dict) else None,
             "updated_at": session_metadata.get("updated_at") if isinstance(session_metadata, dict) else None,
         },
-        'recent_events': [_compact_event(e) for e in event_log[-15:]],
+        'recent_events': [_compact_event(e) for e in event_log[-(5 if pack_mode == "mini" else 15):]],
     }
+
+    jr = job_reference
+    if jr is None and isinstance(session_metadata, dict):
+        jr = session_metadata.get("job_reference")
+    if not isinstance(jr, dict):
+        jr = None
 
     if phase == 'preparation':
         pack['preparation'] = _build_preparation_context(
-            normalized, job_posting_text, session_metadata
+            normalized, job_posting_text, jr, session_metadata, pack_mode=pack_mode
         )
     elif phase == 'confirmation':
         pack['confirmation'] = _build_confirmation_context(
-            normalized, session_metadata
+            normalized, session_metadata, pack_mode=pack_mode
         )
     elif phase == 'execution':
         pack['execution'] = _build_execution_context(
-            normalized, session_metadata
+            normalized, session_metadata, pack_mode=pack_mode
         )
 
     # Add completeness + next_missing_section
@@ -273,48 +363,215 @@ def build_context_pack_v2(
     return pack
 
 
+def build_context_pack_v2_delta(
+    phase: PhaseType,
+    cv_data: Dict[str, Any],
+    session_metadata: Optional[Dict[str, Any]] = None,
+    job_posting_text: Optional[str] = None,
+    job_reference: Optional[Dict[str, Any]] = None,
+    max_pack_chars: int = DEFAULT_MAX_PACK_CHARS,
+) -> Dict[str, Any]:
+    """Build delta-aware context pack (only changed sections get full data).
+    
+    Args:
+        phase: Current workflow phase
+        cv_data: Current CV data
+        session_metadata: Session metadata (must contain section_hashes_prev for delta)
+        job_posting_text: Job posting text
+        max_pack_chars: Size limit
+    
+    Returns:
+        ContextPackV2Delta with section_changes markers
+    """
+    normalized = normalize_cv_data(cv_data)
+    normalized_json = json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+    fingerprint = "sha256:" + _sha256_hex(normalized_json)
+    
+    # Compute delta
+    current_hashes = compute_cv_section_hashes(normalized)
+    previous_hashes = session_metadata.get("section_hashes_prev") if session_metadata else None
+    section_changes = detect_section_changes(current_hashes, previous_hashes)
+    
+    session_id = session_metadata.get('session_id') if session_metadata else None
+    language = normalized.get('language', 'en')
+    event_log = session_metadata.get("event_log") if isinstance(session_metadata, dict) else None
+    if not isinstance(event_log, list):
+        event_log = []
+    
+    def _compact_event(e: Any) -> Dict[str, Any]:
+        if not isinstance(e, dict):
+            return {}
+        out: Dict[str, Any] = {"ts": e.get("ts"), "type": e.get("type")}
+        if "field_path" in e:
+            out["field_path"] = e.get("field_path")
+        if "preview" in e:
+            p = e.get("preview")
+            if isinstance(p, str) and len(p) > 160:
+                p = p[:160] + "…"
+            out["preview"] = p
+        return out
+    
+    pack: Dict[str, Any] = {
+        'schema_version': 'cvgen.context_pack.v2_delta',
+        'phase': phase,
+        'language': language,
+        'session_id': session_id,
+        'cv_fingerprint': fingerprint,
+        'template': TEMPLATE_SPEC_V1,
+        'section_changes': section_changes,
+        'section_hashes': current_hashes,
+        'session_freshness': {
+            "version": session_metadata.get("version") if isinstance(session_metadata, dict) else None,
+            "updated_at": session_metadata.get("updated_at") if isinstance(session_metadata, dict) else None,
+        },
+        'recent_events': [_compact_event(e) for e in event_log[-5:]],
+    }
+
+    jr = job_reference
+    if jr is None and isinstance(session_metadata, dict):
+        jr = session_metadata.get("job_reference")
+    if not isinstance(jr, dict):
+        jr = None
+    
+    # Build section-specific packs (changed=full, unchanged=summary)
+    def _pack_section_delta(section_name: str, section_data: Any) -> Dict[str, Any]:
+        is_changed = section_changes.get(section_name, True)
+        section_hash = current_hashes.get(section_name, "unknown")
+        
+        if is_changed:
+            # CHANGED: send full data
+            return {
+                'status': 'changed',
+                'hash': section_hash,
+                'data': section_data
+            }
+        else:
+            # UNCHANGED: send summary only
+            if isinstance(section_data, list):
+                preview = section_data[0] if section_data else None
+                return {
+                    'status': 'unchanged',
+                    'hash': section_hash,
+                    'count': len(section_data),
+                    'preview': preview
+                }
+            elif isinstance(section_data, str):
+                return {
+                    'status': 'unchanged',
+                    'hash': section_hash,
+                    'preview': section_data[:200] if section_data else None
+                }
+            else:
+                return {
+                    'status': 'unchanged',
+                    'hash': section_hash,
+                    'data': section_data  # Small primitives: just send it
+                }
+    
+    # Pack all major sections
+    pack['work_experience'] = _pack_section_delta('work_experience', normalized.get('work_experience'))
+    pack['education'] = _pack_section_delta('education', normalized.get('education'))
+    pack['languages'] = _pack_section_delta('languages', normalized.get('languages'))
+    pack['it_ai_skills'] = _pack_section_delta('it_ai_skills', normalized.get('it_ai_skills'))
+    pack['interests'] = _pack_section_delta('interests', normalized.get('interests'))
+    pack['profile'] = _pack_section_delta('profile', normalized.get('profile'))
+    pack['further_experience'] = _pack_section_delta('further_experience', normalized.get('further_experience'))
+    
+    # Contact: always send if changed (critical)
+    if section_changes.get('contact'):
+        pack['contact'] = {
+            'status': 'changed',
+            'hash': current_hashes['contact'],
+            'full_name': normalized.get('full_name'),
+            'email': normalized.get('email'),
+            'phone': normalized.get('phone'),
+            'address_lines': normalized.get('address_lines'),
+        }
+    else:
+        pack['contact'] = {
+            'status': 'unchanged',
+            'hash': current_hashes['contact'],
+            'has_data': bool(normalized.get('full_name') or normalized.get('email'))
+        }
+    
+    # Job reference: prefer structured object; do not embed raw offer text once normalized.
+    if jr:
+        pack['job_reference'] = jr
+    elif job_posting_text:
+        pack['job_posting'] = {'text': job_posting_text[:2000]}  # Cap at 2k chars
+    
+    # Add readiness
+    completeness = _compute_completeness(normalized)
+    confirmation_state = _compute_confirmation_state(normalized, session_metadata)
+    pack['confirmation_state'] = confirmation_state
+    pack['readiness'] = {
+        "can_generate": confirmation_state.get("can_generate"),
+        "missing": confirmation_state.get("missing"),
+        "required_present": completeness.get("required_present"),
+    }
+    pack['completeness'] = completeness
+    
+    # Apply size limits (lighter trimming since we already sent summaries)
+    pack = _apply_size_limits_v2(pack, max_pack_chars)
+    
+    return pack
+
+
 def _build_preparation_context(
     cv_data: Dict[str, Any],
     job_posting_text: Optional[str],
-    session_metadata: Optional[Dict[str, Any]]
+    job_reference: Optional[Dict[str, Any]],
+    session_metadata: Optional[Dict[str, Any]],
+    *,
+    pack_mode: str = "full",
 ) -> Dict[str, Any]:
     """Build context for Phase 1 (Preparation)."""
     context: Dict[str, Any] = {}
 
-    # Job analysis (if job posting available)
-    if job_posting_text:
-        # Bound to 6000 chars to fit within budget
+    # Job reference: prefer structured object; do not embed raw offer text once normalized.
+    if isinstance(job_reference, dict) and job_reference:
+        # Keep compact: the analyzer already normalized content.
+        context["job_reference"] = job_reference
+    elif job_posting_text:
+        # Legacy fallback (should not be persisted long-term).
+        max_chars = 1200 if pack_mode == "mini" else 6000
         context['job_analysis'] = {
-            'text_snippet': job_posting_text[:6000],
-            'has_full_text': len(job_posting_text) <= 6000,
+            'text_snippet': job_posting_text[:max_chars],
+            'has_full_text': len(job_posting_text) <= max_chars,
             'note': 'Analyze deeply: extract explicit/implicit requirements, must-have vs nice-to-have, ambiguities, culture signals.'
         }
 
-    # CV structured data (for mapping) - compact version
-    context['cv_data'] = _extract_cv_structured_compact(cv_data)
+    # CV structured data (for mapping)
+    context['cv_data'] = _extract_cv_structured_mini(cv_data) if pack_mode == "mini" else _extract_cv_structured_compact(cv_data)
 
     # Unconfirmed DOCX extraction snapshot (reference only).
     # Sessions now start empty; this helps the agent re-populate required fields quickly and explicitly.
     if isinstance(session_metadata, dict) and session_metadata.get("docx_prefill_unconfirmed"):
-        context["docx_prefill_unconfirmed"] = session_metadata.get("docx_prefill_unconfirmed")
+        if pack_mode == "mini":
+            context["docx_prefill_summary"] = _summarize_docx_prefill(session_metadata.get("docx_prefill_unconfirmed"))
+        else:
+            context["docx_prefill_unconfirmed"] = session_metadata.get("docx_prefill_unconfirmed")
 
     # Proposal history (from session metadata) - keep last 3 only
     if session_metadata and 'proposal_history' in session_metadata:
-        proposals = session_metadata['proposal_history']
-        context['proposal_history'] = _trim_proposal_history(proposals, max_turns=3)
+        if pack_mode != "mini":
+            proposals = session_metadata['proposal_history']
+            context['proposal_history'] = _trim_proposal_history(proposals, max_turns=3)
 
     return context
 
 
 def _build_confirmation_context(
     cv_data: Dict[str, Any],
-    session_metadata: Optional[Dict[str, Any]]
+    session_metadata: Optional[Dict[str, Any]],
+    *,
+    pack_mode: str = "full",
 ) -> Dict[str, Any]:
     """Build context for Phase 2 (Confirmation)."""
     context: Dict[str, Any] = {}
 
     # Original CV summary (from session metadata)
-    if session_metadata and 'original_cv_data' in session_metadata:
+    if pack_mode != "mini" and session_metadata and 'original_cv_data' in session_metadata:
         context['original_cv_summary'] = _summarize_cv(
             session_metadata['original_cv_data']
         )
@@ -330,7 +587,7 @@ def _build_confirmation_context(
         )
 
     # Phase 1 analysis summary (from session metadata)
-    if session_metadata and 'phase1_analysis' in session_metadata:
+    if pack_mode != "mini" and session_metadata and 'phase1_analysis' in session_metadata:
         context['phase1_analysis_summary'] = session_metadata['phase1_analysis']
 
     return context
@@ -338,7 +595,9 @@ def _build_confirmation_context(
 
 def _build_execution_context(
     cv_data: Dict[str, Any],
-    session_metadata: Optional[Dict[str, Any]]
+    session_metadata: Optional[Dict[str, Any]],
+    *,
+    pack_mode: str = "full",
 ) -> Dict[str, Any]:
     """Build context for Phase 3 (Execution)."""
     context: Dict[str, Any] = {}
@@ -360,9 +619,122 @@ def _build_execution_context(
     }
 
     # Self-validation checklist (pre-computed checks)
-    context['self_validation_checklist'] = _build_validation_checklist(cv_data)
+    if pack_mode != "mini":
+        context['self_validation_checklist'] = _build_validation_checklist(cv_data)
 
     return context
+
+
+def _extract_cv_structured_mini(cv_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract a smaller CV structure for prompt budgets (outline + top roles)."""
+    compact = _extract_cv_structured_compact(cv_data)
+
+    out: Dict[str, Any] = {}
+    for k in ("full_name", "email", "phone", "address_lines"):
+        if compact.get(k):
+            out[k] = compact.get(k)
+
+    profile = compact.get("profile")
+    if isinstance(profile, str) and profile.strip():
+        out["profile"] = profile.strip()[:320]
+
+    # Work experience: keep at most 3 roles, at most 2 bullets each
+    we = compact.get("work_experience")
+    if isinstance(we, list) and we:
+        trimmed = []
+        for role in we[:3]:
+            if not isinstance(role, dict):
+                continue
+            r = {k: role.get(k) for k in ("date_range", "employer", "location", "title") if role.get(k)}
+            bullets = role.get("bullets")
+            if isinstance(bullets, list) and bullets:
+                rb = []
+                for b in bullets[:2]:
+                    if not isinstance(b, str):
+                        continue
+                    rb.append(b.strip()[:120])
+                if rb:
+                    r["bullets"] = rb
+            trimmed.append(r)
+        if trimmed:
+            out["work_experience_outline"] = trimmed
+
+    edu = compact.get("education")
+    if isinstance(edu, list) and edu:
+        trimmed = []
+        for e in edu[:2]:
+            if not isinstance(e, dict):
+                continue
+            r = {k: e.get(k) for k in ("date_range", "institution", "title") if e.get(k)}
+            trimmed.append(r)
+        if trimmed:
+            out["education_outline"] = trimmed
+
+    langs = compact.get("languages")
+    if isinstance(langs, list) and langs:
+        out["languages"] = [str(x)[:60] for x in langs[:5]]
+
+    skills = compact.get("it_ai_skills")
+    if isinstance(skills, list) and skills:
+        out["it_ai_skills"] = [str(x)[:80] for x in skills[:8]]
+
+    interests = compact.get("interests")
+    if isinstance(interests, str) and interests.strip():
+        out["interests"] = interests.strip()[:240]
+
+    return out
+
+
+def _summarize_docx_prefill(prefill: Any) -> Dict[str, Any]:
+    """Summarize a DOCX prefill snapshot to keep prompt budgets small."""
+    if not isinstance(prefill, dict):
+        return {}
+    out: Dict[str, Any] = {}
+
+    for k in ("full_name", "email", "phone", "address_lines"):
+        v = prefill.get(k)
+        if v:
+            out[k] = v
+
+    edu = prefill.get("education")
+    if isinstance(edu, list) and edu:
+        trimmed = []
+        for e in edu[:2]:
+            if not isinstance(e, dict):
+                continue
+            trimmed.append({k: e.get(k) for k in ("date_range", "institution", "title") if e.get(k)})
+        if trimmed:
+            out["education_outline"] = trimmed
+
+    we = prefill.get("work_experience")
+    if isinstance(we, list) and we:
+        trimmed = []
+        for role in we[:5]:
+            if not isinstance(role, dict):
+                continue
+            r = {k: role.get(k) for k in ("date_range", "employer", "location", "title") if role.get(k)}
+            bullets = role.get("bullets")
+            if isinstance(bullets, list) and bullets:
+                rb = []
+                for b in bullets[:2]:
+                    if not isinstance(b, str):
+                        continue
+                    rb.append(b.strip()[:120])
+                if rb:
+                    r["bullets"] = rb
+            trimmed.append(r)
+        if trimmed:
+            out["work_experience_outline"] = trimmed
+
+    langs = prefill.get("languages")
+    if isinstance(langs, list) and langs:
+        out["languages"] = [str(x)[:60] for x in langs[:5]]
+
+    skills = prefill.get("it_ai_skills")
+    if isinstance(skills, list) and skills:
+        out["it_ai_skills"] = [str(x)[:80] for x in skills[:8]]
+
+    return out
 
 
 def _compute_completeness(cv_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -611,14 +983,16 @@ def _apply_size_limits_v2(pack: Dict[str, Any], max_chars: int) -> Dict[str, Any
         limits["truncated_fields"] = truncated_fields
         return pack
 
-    # 2) Drop job snippet early (it is also included in the UI capsule separately).
+    # 2) Drop job snippet early *only if it is large* (it is also included in the UI capsule separately).
     size = _size(pack)
     try:
         if phase == "preparation" and isinstance(pack.get("preparation"), dict):
             prep = pack["preparation"]
-            if isinstance(prep.get("job_analysis"), dict) and prep["job_analysis"].get("text_snippet"):
-                prep["job_analysis"]["text_snippet"] = ""
-                truncated_fields.append("preparation.job_analysis.text_snippet")
+            if isinstance(prep.get("job_analysis"), dict):
+                snippet = prep["job_analysis"].get("text_snippet")
+                if isinstance(snippet, str) and len(snippet) > 2000:
+                    prep["job_analysis"]["text_snippet"] = ""
+                    truncated_fields.append("preparation.job_analysis.text_snippet")
     except Exception:
         pass
 
@@ -811,6 +1185,10 @@ def format_context_pack_with_delimiters(pack: Dict[str, Any]) -> str:
             lines.append('')
 
         # Unconfirmed DOCX snapshot (reference-only): used to hydrate empty sessions quickly.
+        if 'docx_prefill_summary' in prep:
+            lines.append('<docx_prefill_summary>')
+            lines.append(json.dumps(prep['docx_prefill_summary'], ensure_ascii=False, indent=2))
+            lines.append('</docx_prefill_summary>')
         if 'docx_prefill_unconfirmed' in prep:
             lines.append('<docx_prefill_unconfirmed>')
             lines.append(json.dumps(prep['docx_prefill_unconfirmed'], ensure_ascii=False, indent=2))

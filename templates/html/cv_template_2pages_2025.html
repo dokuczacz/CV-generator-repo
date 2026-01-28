@@ -59,7 +59,14 @@
       <div class="entry">
         <div class="entry-head">
           <span class="entry-date">{{ edu.date_range }}</span>
-          <span class="entry-title">{{ edu.institution }}{% if edu.title %}, {{ edu.title }}{% endif %}</span>
+          <div class="entry-title">
+            {% set inst = (edu.institution or "")|trim %}
+            {% if inst %}
+              <div class="edu-inst">{{ inst }}{% if not inst.endswith(",") %},{% endif %}</div>
+            {% endif %}
+            {% if edu.title %}<div class="edu-degree">{{ edu.title }}</div>{% endif %}
+            {% if edu.specialization %}<div class="edu-spec">specialization: {{ edu.specialization }}</div>{% endif %}
+          </div>
         </div>
         {% if edu.details %}
           <div class="entry-body">

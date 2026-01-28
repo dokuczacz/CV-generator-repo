@@ -1,0 +1,36 @@
+policy_lint:
+  required:
+    - backend_owns_stage: true
+    - model_never_sets_stage: true
+    - edit_intent_override_enabled: true
+    - review_stage_present: true
+    - confirm_stage_present: true
+    - execute_requires_readiness: true
+
+  checks:
+    - name: "No stage inferred from LLM output"
+      assert: "stage is computed exclusively in backend"
+
+    - name: "Edit intent override"
+      assert: "user_edit_intent forces REVIEW from any state"
+
+    - name: "Confirmation gate"
+      assert: "EXECUTE only reachable after CONFIRM + validation_passed"
+
+    - name: "Readiness gate"
+      assert: "EXECUTE blocked if any readiness flag is false"
+
+    - name: "No silent mutation"
+      assert: "canonical cv_data changes require confirmation"
+
+    - name: "No auto-retry on execute"
+      assert: "EXECUTE failure routes to REVIEW"
+
+    - name: "DONE is not terminal"
+      assert: "edit from DONE routes to REVIEW"
+
+  forbidden:
+    - "expected_next_stage in model schema"
+    - "auto_generate_pdf without readiness"
+    - "persist_canonical_cv in INGEST or PREPARE"
+

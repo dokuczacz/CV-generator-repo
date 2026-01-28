@@ -1,0 +1,4 @@
+stage=review_final
+ui_stage=
+ui_title=Stage 6/6 — Generate
+actions=REQUEST_GENERATE_PDF,JOB_POSTING_OPEN,WORK_EXPERIENCE_OPEN,CONTACT_EDIT,EDUCATION_EDIT_JSON

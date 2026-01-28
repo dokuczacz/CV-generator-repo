@@ -36,6 +36,11 @@ def _count_pdf_pages(pdf_bytes: bytes) -> int:
     return len(reader.pages)
 
 
+def count_pdf_pages(pdf_bytes: bytes) -> int:
+    """Public helper for counting pages in an already-rendered PDF."""
+    return _count_pdf_pages(pdf_bytes)
+
+
 # Module-level singleton for template environment (optimization: pre-compile templates)
 _jinja_env = None
 
@@ -301,7 +306,7 @@ def render_pdf(cv: Dict[str, Any], *, enforce_two_pages: bool = True, use_cache:
 
     if enforce_two_pages:
         # DoD: PDF must have exactly 2 pages
-        pages = _count_pdf_pages(pdf)
+        pages = count_pdf_pages(pdf)
         if pages != 2:
             raise RenderError(f"DoD violation: pages != 2 (got {pages}).")
 

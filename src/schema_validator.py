@@ -94,6 +94,20 @@ def validate_canonical_schema(cv_data: Dict[str, Any], strict: bool = False) -> 
             errors.append("education must be an array")
         elif len(cv_data["education"]) == 0 and strict:
             errors.append("education must contain at least one entry")
+        else:
+            # Validate per-entry required fields
+            for i, edu in enumerate(cv_data["education"]):
+                if not isinstance(edu, dict):
+                    errors.append(f"education[{i}] must be an object")
+                    continue
+                # institution is required and must be non-empty
+                inst = edu.get("institution", "")
+                if not isinstance(inst, str) or not inst.strip():
+                    errors.append(f"education[{i}].institution is required and must be non-empty")
+                # title is required and must be non-empty
+                title = edu.get("title", "")
+                if not isinstance(title, str) or not title.strip():
+                    errors.append(f"education[{i}].title is required and must be non-empty")
     
     if "languages" in cv_data:
         if not isinstance(cv_data["languages"], list):

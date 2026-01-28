@@ -1,0 +1,3 @@
+stage=work_experience
+resp=Role 0: review, edit, then lock.
+actions=WORK_ROLE_EDIT_JSON,WORK_ROLE_AI_SUGGEST,WORK_ROLE_REVERT_ORIGINAL,WORK_ROLE_LOCK,WORK_ROLE_BACK_TO_LIST

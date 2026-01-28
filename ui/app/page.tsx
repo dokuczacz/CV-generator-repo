@@ -10,6 +10,29 @@ interface Message {
   pdfBase64?: string;
 }
 
+interface UIActionButton {
+  id: string;
+  label: string;
+  style?: 'primary' | 'secondary' | 'tertiary';
+}
+
+interface UIActionField {
+  key: string;
+  label: string;
+  value: string;
+  type?: 'text' | 'textarea';
+}
+
+interface UIAction {
+  kind: string;
+  stage?: string;
+  title?: string;
+  text?: string;
+  actions?: UIActionButton[];
+  fields?: UIActionField[];
+  disable_free_text?: boolean;
+}
+
 const SESSION_ID_KEY = 'cvgen:session_id';
 const JOB_URL_KEY = 'cvgen:job_posting_url';
 const JOB_TEXT_KEY = 'cvgen:job_posting_text';
@@ -30,9 +53,25 @@ export default function CVGenerator() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [jobPostingUrl, setJobPostingUrl] = useState<string | null>(null);
   const [jobPostingText, setJobPostingText] = useState<string | null>(null);
+  const [uiAction, setUiAction] = useState<UIAction | null>(null);
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [pendingSession, setPendingSession] = useState<{ id: string; timestamp: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const clearLocalSession = () => {
+    setSessionId(null);
+    setJobPostingUrl(null);
+    setJobPostingText(null);
+    setUiAction(null);
+    try {
+      window.localStorage.removeItem(SESSION_ID_KEY);
+      window.localStorage.removeItem(JOB_URL_KEY);
+      window.localStorage.removeItem(JOB_TEXT_KEY);
+      window.localStorage.removeItem(SESSION_TIMESTAMP_KEY);
+    } catch {
+      // ignore
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,17 +125,7 @@ export default function CVGenerator() {
 
   const handleStartFresh = () => {
     // Clear all stored session data
-    try {
-      window.localStorage.removeItem(SESSION_ID_KEY);
-      window.localStorage.removeItem(JOB_URL_KEY);
-      window.localStorage.removeItem(JOB_TEXT_KEY);
-      window.localStorage.removeItem(SESSION_TIMESTAMP_KEY);
-    } catch {
-      // ignore
-    }
-    setSessionId(null);
-    setJobPostingUrl(null);
-    setJobPostingText(null);
+    clearLocalSession();
     setShowSessionDialog(false);
     setPendingSession(null);
   };
@@ -147,11 +176,13 @@ export default function CVGenerator() {
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
+    if (uiAction?.disable_free_text) return;
 
     const userMessage = inputValue;
     setInputValue('');
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
+    setUiAction(null);
 
     try {
       let docx_base64: string | undefined;
@@ -215,15 +246,29 @@ export default function CVGenerator() {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Response error:', errorText);
-        // If the session is missing/expired, clear local session state so the user can re-upload cleanly.
-        if (errorText.includes('Session not found or expired')) {
-          setSessionId(null);
+
+        // Handle deterministic "start fresh" errors (409 session incompatible) without throwing.
+        if (response.status === 409) {
+          let errJson: any = null;
           try {
-            window.localStorage.removeItem(SESSION_ID_KEY);
-            window.localStorage.removeItem(SESSION_TIMESTAMP_KEY);
+            errJson = JSON.parse(errorText || '{}');
           } catch {
             // ignore
           }
+          clearLocalSession();
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: (errJson?.response as string) || (errJson?.error as string) || 'Session incompatible. Please start a new session.',
+            },
+          ]);
+          return;
+        }
+
+        // If the session is missing/expired, clear local session state so the user can re-upload cleanly.
+        if (errorText.includes('Session not found or expired')) {
+          clearLocalSession();
         }
         throw new Error(`Server error: ${response.status} - ${errorText.substring(0, 200)}`);
       }
@@ -249,6 +294,12 @@ export default function CVGenerator() {
         } catch {
           // ignore
         }
+      }
+
+      if (result?.ui_action) {
+        setUiAction(result.ui_action as UIAction);
+      } else {
+        setUiAction(null);
       }
       if (typeof result?.job_posting_url === 'string' && result.job_posting_url.trim()) {
         setJobPostingUrl(result.job_posting_url);
@@ -308,6 +359,159 @@ export default function CVGenerator() {
       setIsLoading(false);
     }
   };
+
+  const handleJobUrlChange = (value: string) => {
+    const v = value.trim();
+    setJobPostingUrl(v || null);
+    try {
+      if (v) {
+        window.localStorage.setItem(JOB_URL_KEY, v);
+      } else {
+        window.localStorage.removeItem(JOB_URL_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSendUserAction = async (actionId: string, actionPayload?: Record<string, any>) => {
+    if (!actionId.trim()) return;
+    if (!sessionId) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Please upload a CV first (new session required).',
+        },
+      ]);
+      return;
+    }
+
+    setIsLoading(true);
+    setMessages((prev) => [...prev, { role: 'user', content: `[Action] ${actionId}` }]);
+
+    try {
+      const requestBody = {
+        message: '',
+        session_id: sessionId,
+        job_posting_url: jobPostingUrl,
+        job_posting_text: jobPostingText,
+        user_action: actionPayload ? { id: actionId, payload: actionPayload } : { id: actionId },
+      };
+
+      const response = await fetch('/api/process-cv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        if (response.status === 409) {
+          let errJson: any = null;
+          try {
+            errJson = JSON.parse(text || '{}');
+          } catch {
+            // ignore
+          }
+          clearLocalSession();
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: (errJson?.response as string) || (errJson?.error as string) || 'Session incompatible. Please start a new session.',
+            },
+          ]);
+          return;
+        }
+        throw new Error(`Server error: ${response.status} - ${text.substring(0, 200)}`);
+      }
+
+      const result = JSON.parse(text || '{}');
+
+      if (result?.ui_action) {
+        setUiAction(result.ui_action as UIAction);
+      } else {
+        setUiAction(null);
+      }
+
+      if (result?.session_id) {
+        setSessionId(result.session_id);
+        try {
+          window.localStorage.setItem(SESSION_ID_KEY, result.session_id);
+          window.localStorage.setItem(SESSION_TIMESTAMP_KEY, new Date().toISOString());
+        } catch {
+          // ignore
+        }
+      }
+
+      if (typeof result?.job_posting_url === 'string' && result.job_posting_url.trim()) {
+        setJobPostingUrl(result.job_posting_url);
+        try {
+          window.localStorage.setItem(JOB_URL_KEY, result.job_posting_url);
+        } catch {
+          // ignore
+        }
+      }
+      if (typeof result?.job_posting_text === 'string' && result.job_posting_text.trim()) {
+        setJobPostingText(result.job_posting_text);
+        try {
+          window.localStorage.setItem(JOB_TEXT_KEY, result.job_posting_text);
+        } catch {
+          // ignore
+        }
+      }
+
+      if (result.success) {
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content:
+            DEBUG_STAGE && result.stage
+              ? `[stage=${result.stage}]\n\n${result.response || 'Processing completed'}`
+              : result.response || 'Processing completed',
+        };
+        if (result.pdf_base64) {
+          assistantMsg.pdfBase64 = result.pdf_base64;
+        }
+        setMessages((prev) => [...prev, assistantMsg]);
+        if (result.pdf_base64) {
+          downloadPDF(result.pdf_base64, `CV_${Date.now()}.pdf`);
+        }
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: `❌ Error: ${result.error}`,
+          },
+        ]);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `❌ Error: ${errorMessage}`,
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const [formDraft, setFormDraft] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    // When backend sends an edit_form, seed local form state from fields.
+    if (uiAction?.kind === 'edit_form' && Array.isArray(uiAction.fields)) {
+      const next: Record<string, string> = {};
+      uiAction.fields.forEach((f) => {
+        if (f && typeof f.key === 'string') next[f.key] = String(f.value ?? '');
+      });
+      setFormDraft(next);
+    }
+  }, [uiAction?.kind, uiAction?.fields]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -395,6 +599,20 @@ export default function CVGenerator() {
           )}
         </div>
 
+        <div className="mt-4">
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Job offer link (optional)</label>
+          <input
+            value={jobPostingUrl || ''}
+            onChange={(e) => handleJobUrlChange(e.target.value)}
+            placeholder="https://..."
+            disabled={isLoading}
+            className="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100"
+          />
+          <div className="text-[11px] text-gray-600 mt-1">
+            If provided, the backend will analyze it in background.
+          </div>
+        </div>
+
         <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-600">
           <p className="font-semibold mb-2">Instructions:</p>
           <ul className="space-y-1">
@@ -468,11 +686,132 @@ export default function CVGenerator() {
 
         {/* Input Area */}
         <div className="border-t border-gray-200 bg-white p-4 space-y-3">
+          {uiAction?.kind === 'review_form' && Array.isArray(uiAction.fields) ? (
+            <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+              {uiAction.title ? <div className="font-semibold text-gray-900 mb-1">{uiAction.title}</div> : null}
+              {uiAction.text ? <div className="text-sm text-gray-700 whitespace-pre-wrap mb-3">{uiAction.text}</div> : null}
+              <div className="space-y-2 mb-3">
+                {uiAction.fields.map((f) => (
+                  <div key={f.key} className="bg-white border border-gray-200 rounded p-2">
+                    <div className="text-xs font-semibold text-gray-600 mb-1">{f.label}</div>
+                    <div className="text-sm text-gray-900 whitespace-pre-wrap break-words">{f.value || ''}</div>
+                  </div>
+                ))}
+              </div>
+              {uiAction.actions?.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {uiAction.actions.map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={() => handleSendUserAction(a.id)}
+                      disabled={isLoading}
+                      className={
+                        a.style === 'secondary'
+                          ? 'px-3 py-2 rounded bg-white border border-gray-300 text-gray-900 hover:bg-gray-100 disabled:bg-gray-200'
+                          : 'px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300'
+                      }
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {uiAction.disable_free_text ? (
+                <div className="text-xs text-gray-600 mt-2">Free-text input is disabled for this stage.</div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {uiAction?.kind === 'edit_form' && Array.isArray(uiAction.fields) ? (
+            <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+              {uiAction.title ? <div className="font-semibold text-gray-900 mb-1">{uiAction.title}</div> : null}
+              {uiAction.text ? <div className="text-sm text-gray-700 whitespace-pre-wrap mb-3">{uiAction.text}</div> : null}
+
+              <div className="space-y-3 mb-3">
+                {uiAction.fields.map((f) => (
+                  <div key={f.key}>
+                    <div className="text-xs font-semibold text-gray-600 mb-1">{f.label}</div>
+                    {f.type === 'textarea' ? (
+                      <textarea
+                        value={formDraft[f.key] ?? ''}
+                        onChange={(e) => setFormDraft((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                        disabled={isLoading}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y disabled:bg-gray-100"
+                        rows={8}
+                      />
+                    ) : (
+                      <input
+                        value={formDraft[f.key] ?? ''}
+                        onChange={(e) => setFormDraft((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                        disabled={isLoading}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {uiAction.actions?.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {uiAction.actions.map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={() => {
+                        // Most edit_form actions expect the current form fields (e.g. ANALYZE).
+                        // Send formDraft by default unless this is clearly a navigation-only action.
+                        const isNavOnly = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK') || a.id.endsWith('_CONTINUE');
+                        handleSendUserAction(a.id, isNavOnly ? undefined : formDraft);
+                      }}
+                      disabled={isLoading}
+                      className={
+                        a.style === 'secondary'
+                          ? 'px-3 py-2 rounded bg-white border border-gray-300 text-gray-900 hover:bg-gray-100 disabled:bg-gray-200'
+                          : 'px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300'
+                      }
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {uiAction.disable_free_text ? (
+                <div className="text-xs text-gray-600 mt-2">Free-text input is disabled for this stage.</div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {uiAction?.kind !== 'review_form' && uiAction?.kind !== 'edit_form' && uiAction?.actions?.length ? (
+            <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+              {uiAction.title ? <div className="font-semibold text-gray-900 mb-1">{uiAction.title}</div> : null}
+              {uiAction.text ? <div className="text-sm text-gray-700 whitespace-pre-wrap mb-3">{uiAction.text}</div> : null}
+              <div className="flex flex-wrap gap-2">
+                {uiAction.actions.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => handleSendUserAction(a.id)}
+                    disabled={isLoading}
+                    className={
+                      a.style === 'secondary'
+                        ? 'px-3 py-2 rounded bg-white border border-gray-300 text-gray-900 hover:bg-gray-100 disabled:bg-gray-200'
+                        : 'px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300'
+                    }
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+              {uiAction.disable_free_text ? (
+                <div className="text-xs text-gray-600 mt-2">Free-text input is disabled for this decision.</div>
+              ) : null}
+            </div>
+          ) : null}
+
           <textarea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            disabled={isLoading}
+            disabled={isLoading || !!uiAction?.disable_free_text}
             placeholder="Type your message... (Shift+Enter for new line)"
             className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:bg-gray-100"
             rows={3}
@@ -480,9 +819,9 @@ export default function CVGenerator() {
 
           <button
             onClick={handleSendMessage}
-            disabled={isLoading || !inputValue.trim()}
+            disabled={isLoading || !inputValue.trim() || !!uiAction?.disable_free_text}
             className={`w-full py-3 rounded-lg font-semibold transition ${
-              isLoading || !inputValue.trim()
+              isLoading || !inputValue.trim() || !!uiAction?.disable_free_text
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'
             }`}

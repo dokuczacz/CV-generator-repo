@@ -11,6 +11,12 @@ from typing import Optional, Dict, Any
 from azure.data.tables import TableServiceClient, TableEntity
 from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 import os
+import threading
+
+
+_CLIENT_CACHE_LOCK = threading.Lock()
+_CLIENT_CACHE: dict[str, tuple[TableServiceClient, Any]] = {}
+_TABLE_READY: set[str] = set()
 
 
 class CVSessionStore:
@@ -18,23 +24,37 @@ class CVSessionStore:
     
     TABLE_NAME = "cvsessions"
     DEFAULT_TTL_HOURS = 24
+    EVENT_LOG_MAX_ITEMS = 20
     
     def __init__(self, connection_string: Optional[str] = None):
         """Initialize session store with Azure Table Storage"""
         conn_str = connection_string or os.environ.get("STORAGE_CONNECTION_STRING") or os.environ.get("AzureWebJobsStorage")
         if not conn_str:
             raise ValueError("STORAGE_CONNECTION_STRING or AzureWebJobsStorage not configured")
-        
-        self.service_client = TableServiceClient.from_connection_string(conn_str)
-        self._ensure_table_exists()
+
+        # Cache per-process to avoid repeated "create table" probes + connection setup.
+        with _CLIENT_CACHE_LOCK:
+            cached = _CLIENT_CACHE.get(conn_str)
+            if cached is None:
+                service_client = TableServiceClient.from_connection_string(conn_str)
+                table_client = service_client.get_table_client(self.TABLE_NAME)
+                cached = (service_client, table_client)
+                _CLIENT_CACHE[conn_str] = cached
+
+        self.service_client, self.table_client = cached
+        self._ensure_table_exists_once(conn_str)
     
-    def _ensure_table_exists(self):
-        """Create table if it doesn't exist"""
+    def _ensure_table_exists_once(self, conn_str: str):
+        """Create table if it doesn't exist (once per process + connection string)."""
+        if conn_str in _TABLE_READY:
+            return
         try:
             self.service_client.create_table(self.TABLE_NAME)
             logging.info(f"Created table: {self.TABLE_NAME}")
         except ResourceExistsError:
             logging.debug(f"Table {self.TABLE_NAME} already exists")
+        with _CLIENT_CACHE_LOCK:
+            _TABLE_READY.add(conn_str)
     
     def create_session(self, cv_data: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> str:
         """
@@ -61,9 +81,8 @@ class CVSessionStore:
             "expires_at": expires_at.isoformat(),
             "version": 1
         }
-        
-        table_client = self.service_client.get_table_client(self.TABLE_NAME)
-        table_client.create_entity(entity)
+
+        self.table_client.create_entity(entity)
         
         logging.info(f"Created session {session_id}, expires at {expires_at.isoformat()}")
         return session_id
@@ -78,10 +97,8 @@ class CVSessionStore:
         Returns:
             Dictionary with cv_data and metadata, or None if not found/expired
         """
-        table_client = self.service_client.get_table_client(self.TABLE_NAME)
-        
         try:
-            entity = table_client.get_entity(partition_key="cv", row_key=session_id)
+            entity = self.table_client.get_entity(partition_key="cv", row_key=session_id)
         except ResourceNotFoundError:
             logging.warning(f"Session {session_id} not found")
             return None
@@ -115,10 +132,8 @@ class CVSessionStore:
         Returns:
             True if updated, False if session not found
         """
-        table_client = self.service_client.get_table_client(self.TABLE_NAME)
-        
         try:
-            entity = table_client.get_entity(partition_key="cv", row_key=session_id)
+            entity = self.table_client.get_entity(partition_key="cv", row_key=session_id)
         except ResourceNotFoundError:
             logging.warning(f"Session {session_id} not found for update")
             return False
@@ -130,7 +145,7 @@ class CVSessionStore:
         entity["updated_at"] = datetime.utcnow().isoformat()
         entity["version"] = entity.get("version", 1) + 1
         
-        table_client.update_entity(entity, mode="replace")
+        self.table_client.update_entity(entity, mode="replace")
         logging.info(f"Updated session {session_id}, version {entity['version']}")
         return True
     
@@ -245,7 +260,7 @@ class CVSessionStore:
             event_log.append(evt)
 
             # Keep only last N events to cap Table Storage size.
-            metadata["event_log"] = event_log[-50:]
+            metadata["event_log"] = event_log[-self.EVENT_LOG_MAX_ITEMS :]
         except Exception as e:
             logging.warning(f"update_field: failed to append event_log for session {session_id}: {e}")
 
@@ -270,7 +285,7 @@ class CVSessionStore:
             out = dict(event or {})
             out.setdefault("ts", datetime.utcnow().isoformat())
             event_log.append(out)
-            metadata["event_log"] = event_log[-50:]
+            metadata["event_log"] = event_log[-self.EVENT_LOG_MAX_ITEMS :]
         except Exception as e:
             logging.warning(f"append_event: failed to append event_log for session {session_id}: {e}")
             return False
@@ -287,10 +302,8 @@ class CVSessionStore:
         Returns:
             True if deleted, False if not found
         """
-        table_client = self.service_client.get_table_client(self.TABLE_NAME)
-        
         try:
-            table_client.delete_entity(partition_key="cv", row_key=session_id)
+            self.table_client.delete_entity(partition_key="cv", row_key=session_id)
             logging.info(f"Deleted session {session_id}")
             return True
         except ResourceNotFoundError:
@@ -304,15 +317,14 @@ class CVSessionStore:
         Returns:
             Number of sessions deleted
         """
-        table_client = self.service_client.get_table_client(self.TABLE_NAME)
         now = datetime.utcnow()
         deleted = 0
         
         query = f"PartitionKey eq 'cv' and expires_at lt datetime'{now.isoformat()}'"
-        entities = table_client.query_entities(query)
+        entities = self.table_client.query_entities(query)
         
         for entity in entities:
-            table_client.delete_entity(partition_key=entity["PartitionKey"], row_key=entity["RowKey"])
+            self.table_client.delete_entity(partition_key=entity["PartitionKey"], row_key=entity["RowKey"])
             deleted += 1
         
         if deleted > 0:
@@ -325,11 +337,10 @@ class CVSessionStore:
         Danger zone: delete all CV sessions (used for explicit reset).
         Returns number of deleted sessions.
         """
-        table_client = self.service_client.get_table_client(self.TABLE_NAME)
         deleted = 0
-        for entity in table_client.list_entities():
+        for entity in self.table_client.list_entities():
             if entity.get("PartitionKey") == "cv":
-                table_client.delete_entity(partition_key=entity["PartitionKey"], row_key=entity["RowKey"])
+                self.table_client.delete_entity(partition_key=entity["PartitionKey"], row_key=entity["RowKey"])
                 deleted += 1
         logging.info(f"Deleted {deleted} session(s) via delete_all_sessions()")
         return deleted

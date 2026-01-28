@@ -1,0 +1,52 @@
+{
+  "fsm_version": "1.0",
+  "domain": "cv_generator",
+  "states": ["INGEST", "PREPARE", "REVIEW", "CONFIRM", "EXECUTE", "DONE"],
+  "initial_state": "INGEST",
+  "terminal_state": null,
+  "events": [
+    "session_created",
+    "confirmation_required",
+    "user_edit_intent",
+    "user_confirm_yes",
+    "user_confirm_no",
+    "validation_passed",
+    "validation_failed",
+    "generate_requested",
+    "pdf_generated",
+    "pdf_failed"
+  ],
+  "guards": {
+    "edit_intent_detected": {
+      "keywords": ["zmień", "popraw", "cofnij", "dodaj", "usuń", "jednak", "nie tak", "inaczej"]
+    },
+    "readiness_ok": [
+      "work_experience_present",
+      "education_present",
+      "contact_confirmed",
+      "page_estimate_lte_2",
+      "pending_edits_eq_0"
+    ]
+  },
+  "transitions": [
+    { "from": "INGEST", "event": "session_created", "to": "PREPARE" },
+    { "from": "PREPARE", "event": "confirmation_required", "to": "REVIEW" },
+    { "from": "*", "event": "user_edit_intent", "to": "REVIEW", "override": true },
+    { "from": "REVIEW", "event": "user_confirm_yes", "to": "CONFIRM" },
+    { "from": "CONFIRM", "event": "validation_passed", "to": "EXECUTE" },
+    { "from": "CONFIRM", "event": "user_confirm_no", "to": "REVIEW" },
+    { "from": "CONFIRM", "event": "validation_failed", "to": "REVIEW" },
+    { "from": "EXECUTE", "event": "pdf_generated", "to": "DONE" },
+    { "from": "EXECUTE", "event": "pdf_failed", "to": "REVIEW" },
+    { "from": "DONE", "event": "user_edit_intent", "to": "REVIEW" }
+  ],
+  "forbidden_actions_by_state": {
+    "INGEST": ["persist_canonical_cv", "generate_pdf"],
+    "PREPARE": ["persist_canonical_cv", "generate_pdf"],
+    "REVIEW": ["generate_pdf"],
+    "CONFIRM": ["generate_pdf_without_validation"],
+    "EXECUTE": ["ask_questions", "auto_retry"],
+    "DONE": ["persist_canonical_cv"]
+  }
+}
+

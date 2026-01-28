@@ -247,7 +247,7 @@ a {
 
 .entry-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   font-weight: 400;
   /* Prefer keeping the entry header with at least the next line/bullets */
   break-after: avoid;
@@ -267,6 +267,15 @@ a {
 .entry-title {
   font-weight: 700;
   font-size: inherit;
+}
+
+.edu-inst,
+.edu-degree {
+  font-weight: 700;
+}
+
+.edu-spec {
+  font-weight: 400;
 }
 
 .further-exp-title {

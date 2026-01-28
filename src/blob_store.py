@@ -59,6 +59,23 @@ class CVBlobStore:
         )
         return BlobPointer(container=self.container, blob_name=blob_name, content_type=content_type)
 
+    def upload_photo_bytes(self, extracted_image) -> BlobPointer:
+        """Upload an ExtractedImage (from docx_photo) to blob storage.
+
+        Args:
+            extracted_image: ExtractedImage with .mime and .data attributes
+
+        Returns:
+            BlobPointer to the uploaded photo
+        """
+        import uuid
+        blob_name = f"photos/{uuid.uuid4()}.{extracted_image.mime.split('/')[-1]}"
+        return self.upload_bytes(
+            blob_name=blob_name,
+            data=extracted_image.data,
+            content_type=extracted_image.mime,
+        )
+
     def download_bytes(self, pointer: BlobPointer) -> bytes:
         blob = self.client.get_blob_client(container=pointer.container, blob=pointer.blob_name)
         try:

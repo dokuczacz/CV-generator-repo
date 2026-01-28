@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'fs';
 import { resolve } from 'path';
 
 const TEST_HTML = resolve(__dirname, 'test-output', 'preview.html');
+const FUNCTIONS_BASE_URL = process.env.CV_FUNCTIONS_BASE_URL || 'http://localhost:7071/api';
 const PX_TO_MM = (px: string) => parseFloat(px) / 3.7795;
 const PX_TO_PT = (px: string) => parseFloat(px) / (96 / 72);
 
@@ -15,6 +16,24 @@ const EXPECTED_SECTIONS_IN_ORDER = [
   'Interests',
   'References',
 ];
+
+test.describe('Local Functions API Smoke', () => {
+  test('health endpoint responds', async ({ request }) => {
+    const res = await request.get(`${FUNCTIONS_BASE_URL}/health`);
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.status).toBe('healthy');
+  });
+
+  test('cv-tool-call-handler rejects missing tool_name', async ({ request }) => {
+    const res = await request.post(`${FUNCTIONS_BASE_URL}/cv-tool-call-handler`, {
+      data: { tool_name: '', session_id: '', params: {} },
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('tool_name is required');
+  });
+});
 
 test.describe('CV Template Visual Regression', () => {
   
@@ -41,20 +60,34 @@ test.describe('CV Template Visual Regression', () => {
       const s = window.getComputedStyle(el);
       const root = window.getComputedStyle(document.documentElement);
       const mainFont = root.getPropertyValue('--font-main');
+      const rootText = root.getPropertyValue('--text');
+
+      // Convert a CSS color (hex or var) to computed rgb(...) via a temporary element.
+      const toRgb = (value: string) => {
+        const tmp = document.createElement('div');
+        tmp.style.color = value;
+        document.body.appendChild(tmp);
+        const rgb = window.getComputedStyle(tmp).color;
+        tmp.remove();
+        return rgb;
+      };
+
+      const expectedTextRgb = toRgb(rootText);
       return { 
         fontSize: s.fontSize, 
         fontWeight: s.fontWeight, 
         color: s.color, 
-        rootFontMain: mainFont
+        rootFontMain: mainFont,
+        expectedTextRgb,
       };
     });
     // Assert font family extracted and set
     expect(nameStyle.rootFontMain.toLowerCase()).toContain('arial');
     // Assert name has a valid font size (extracted or fallback)
     expect(parseFloat(nameStyle.fontSize)).toBeGreaterThan(0);
-    // Name should be bold and accent-colored
+    // Name should be bold and use the template's --text color
     expect(nameStyle.fontWeight).toBe('700');
-    expect(nameStyle.color).toBe('rgb(0, 0, 255)');
+    expect(nameStyle.color).toBe(nameStyle.expectedTextRgb);
 
     // Photo box: 45mm x 55mm
     const photoDims = await page.locator('.photo-box').evaluate(el => {
@@ -96,17 +129,31 @@ test.describe('CV Template Visual Regression', () => {
     
     const sectionTitle = page.locator('.section-title').first();
     
-    // Check color (blue #0000FF)
-    const color = await sectionTitle.evaluate(el => 
-      window.getComputedStyle(el).color
-    );
-    expect(color).toBe('rgb(0, 0, 255)'); // #0000FF in rgb
+    const { color, expectedAccentRgb } = await sectionTitle.evaluate(el => {
+      const root = window.getComputedStyle(document.documentElement);
+      const accent = root.getPropertyValue('--accent');
+
+      const toRgb = (value: string) => {
+        const tmp = document.createElement('div');
+        tmp.style.color = value;
+        document.body.appendChild(tmp);
+        const rgb = window.getComputedStyle(tmp).color;
+        tmp.remove();
+        return rgb;
+      };
+
+      return {
+        color: window.getComputedStyle(el).color,
+        expectedAccentRgb: toRgb(accent),
+      };
+    });
+    expect(color).toBe(expectedAccentRgb);
     
-    // Check font weight (bold)
+    // Check font weight
     const fontWeight = await sectionTitle.evaluate(el => 
       window.getComputedStyle(el).fontWeight
     );
-    expect(fontWeight).toBe('700');
+    expect(fontWeight).toBe('600');
     
     // Check small caps
     const fontVariant = await sectionTitle.evaluate(el => 

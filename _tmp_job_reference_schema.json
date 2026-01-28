@@ -1,0 +1,111 @@
+{
+  "name": "job_reference",
+  "strict": true,
+  "schema": {
+    "description": "Normalized job reference extracted from a job offer.",
+    "properties": {
+      "role_title": {
+        "description": "Target role title",
+        "title": "Role Title",
+        "type": "string"
+      },
+      "company": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Company name, if explicitly present",
+        "title": "Company"
+      },
+      "location": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Job location, if explicitly present",
+        "title": "Location"
+      },
+      "seniority": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Seniority level (e.g. junior/mid/senior), if present",
+        "title": "Seniority"
+      },
+      "employment_type": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Employment type (e.g. full-time/contract), if present",
+        "title": "Employment Type"
+      },
+      "responsibilities": {
+        "description": "Key responsibilities",
+        "items": {
+          "type": "string"
+        },
+        "title": "Responsibilities",
+        "type": "array"
+      },
+      "must_haves": {
+        "description": "Must-have requirements",
+        "items": {
+          "type": "string"
+        },
+        "title": "Must Haves",
+        "type": "array"
+      },
+      "nice_to_haves": {
+        "description": "Nice-to-have requirements",
+        "items": {
+          "type": "string"
+        },
+        "title": "Nice To Haves",
+        "type": "array"
+      },
+      "tools_tech": {
+        "description": "Tools/technologies mentioned",
+        "items": {
+          "type": "string"
+        },
+        "title": "Tools Tech",
+        "type": "array"
+      },
+      "keywords": {
+        "description": "ATS keywords and phrases",
+        "items": {
+          "type": "string"
+        },
+        "title": "Keywords",
+        "type": "array"
+      }
+    },
+    "required": [
+      "role_title"
+    ],
+    "title": "JobReference",
+    "type": "object"
+  }
+}

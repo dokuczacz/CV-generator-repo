@@ -41,9 +41,6 @@ Response:
 - JSON for most tools (`application/json`)
 - Raw PDF bytes for `generate_cv_from_session` (`application/pdf`)
 
-OpenAI tool schema for the dispatcher (copy/paste for dashboard if you want the model to call the dispatcher directly):
-- `schemas/openai_cv_tool_call_handler_schema.json`
-
 ## 4) Backend tools (via dispatcher)
 
 Implementation: `function_app.py`

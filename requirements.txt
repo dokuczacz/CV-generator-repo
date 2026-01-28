@@ -1,6 +1,7 @@
 azure-functions>=1.18.0
 azure-data-tables>=12.4.0
 azure-storage-blob>=12.20.0
+azure-storage-queue>=12.10.0
 cffi>=1.16.0
 jinja2>=3.1.0
 weasyprint>=62.0

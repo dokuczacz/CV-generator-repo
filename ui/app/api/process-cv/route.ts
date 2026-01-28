@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const AZURE_FUNCTIONS_BASE_URL = process.env.AZURE_FUNCTIONS_BASE_URL || 'http://127.0.0.1:7071/api';
 
-async function callAzureFunction(path: string, body: any): Promise<any> {
+async function callAzureFunction(path: string, body: any): Promise<{ status: number; payload: any }> {
   const url = `${AZURE_FUNCTIONS_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -13,37 +13,38 @@ async function callAzureFunction(path: string, body: any): Promise<any> {
   const contentType = (response.headers.get('content-type') || '').toLowerCase();
   const text = await response.text();
 
+  let payload: any = { raw: text };
+  if (contentType.includes('application/json')) {
+    try {
+      payload = JSON.parse(text || '{}');
+    } catch {
+      payload = { success: false, error: 'Invalid JSON from Azure Function', raw: text.slice(0, 1200) };
+    }
+  }
+
   if (!response.ok) {
     const snippet = text ? text.slice(0, 1200) : '';
     console.error(
       `❌ Azure Function call failed: ${url} status=${response.status} ${response.statusText} ` +
         (snippet ? `body=${snippet}` : '')
     );
-    throw new Error(
-      `Azure Function error: ${response.status} ${response.statusText}${snippet ? ` - ${snippet}` : ''}`
-    );
   }
 
-  if (contentType.includes('application/json')) {
-    try {
-      return JSON.parse(text || '{}');
-    } catch {
-      return { success: false, error: 'Invalid JSON from Azure Function', raw: text.slice(0, 1200) };
-    }
-  }
-
-  return { success: true, raw: text };
+  return { status: response.status, payload };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const message = typeof body?.message === 'string' ? body.message : '';
-    if (!message.trim()) {
-      return NextResponse.json({ success: false, error: 'message is required' }, { status: 400 });
+
+    const userAction = typeof body?.user_action === 'object' && body?.user_action ? body.user_action : undefined;
+    const userActionId = typeof userAction?.id === 'string' ? userAction.id : '';
+    if (!message.trim() && !userActionId.trim()) {
+      return NextResponse.json({ success: false, error: 'message is required (or provide user_action)' }, { status: 400 });
     }
 
-    const payload = await callAzureFunction('/cv-tool-call-handler', {
+    const { status, payload } = await callAzureFunction('/cv-tool-call-handler', {
       tool_name: 'process_cv_orchestrated',
       params: {
         message,
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
         language: typeof body?.language === 'string' ? body.language : 'en',
         extract_photo: body?.extract_photo !== false,
         client_context: typeof body?.client_context === 'object' ? body.client_context : undefined,
+        user_action: userAction,
       },
     });
 
@@ -67,8 +69,11 @@ export async function POST(req: NextRequest) {
         stage: payload?.stage || null,
         run_summary: payload?.run_summary || null,
         turn_trace: payload?.turn_trace || null,
+        ui_action: payload?.ui_action || null,
+        job_posting_url: payload?.job_posting_url || '',
+        job_posting_text: payload?.job_posting_text || '',
       },
-      { status: 200 }
+      { status: status || 200 }
     );
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

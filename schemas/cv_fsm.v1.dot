@@ -1,0 +1,21 @@
+digraph CV_FSM {
+  rankdir=LR;
+  node [shape=box];
+
+  INGEST -> PREPARE [label="session_created"];
+  PREPARE -> REVIEW [label="confirmation_required"];
+
+  INGEST -> REVIEW [label="user_edit_intent", style=dashed];
+  PREPARE -> REVIEW [label="user_edit_intent", style=dashed];
+  CONFIRM -> REVIEW [label="user_edit_intent", style=dashed];
+  EXECUTE -> REVIEW [label="user_edit_intent", style=dashed];
+  DONE -> REVIEW [label="user_edit_intent", style=dashed];
+
+  REVIEW -> CONFIRM [label="user_confirm_yes"];
+  CONFIRM -> EXECUTE [label="validation_passed"];
+  CONFIRM -> REVIEW [label="validation_failed / user_confirm_no"];
+
+  EXECUTE -> DONE [label="pdf_generated"];
+  EXECUTE -> REVIEW [label="pdf_failed"];
+}
+

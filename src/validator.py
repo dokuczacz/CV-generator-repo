@@ -206,25 +206,27 @@ class CVValidator:
         estimated_pages = estimated_height / PAGE_HEIGHT_MM
 
         # Template-specific layout rule: hard page break after Work experience.
-        # If either page exceeds the physical A4 height, WeasyPrint will spill to a 3rd page.
+        # If either page's CONTENT exceeds the available content area (297 - 40 = 257mm), WeasyPrint will spill to a 3rd page.
+        # page1/page2 contain only content heights (margins are page-level, not added per-page).
         page1_height = height_details.get("page1_estimated_height_mm")
         page2_height = height_details.get("page2_estimated_height_mm")
-        if page1_height and page1_height > PAGE_HEIGHT_MM:
+        available_height = PAGE_HEIGHT_MM - MARGINS_HEIGHT_MM  # 297 - 40 = 257mm
+        if page1_height and page1_height > available_height:
             errors.append(ValidationError(
                 field="_page1_overflow",
                 current_value=page1_height,
-                limit=PAGE_HEIGHT_MM,
-                excess=page1_height - PAGE_HEIGHT_MM,
-                message="Page 1 content exceeds A4 height (template forces a page break)",
+                limit=available_height,
+                excess=page1_height - available_height,
+                message="Page 1 content exceeds available height (after 40mm margins)",
                 suggestion="Reduce Education/Work Experience content (fewer entries/bullets or shorter text)."
             ))
-        if page2_height and page2_height > PAGE_HEIGHT_MM:
+        if page2_height and page2_height > available_height:
             errors.append(ValidationError(
                 field="_page2_overflow",
                 current_value=page2_height,
-                limit=PAGE_HEIGHT_MM,
-                excess=page2_height - PAGE_HEIGHT_MM,
-                message="Page 2 content exceeds A4 height (will spill to a 3rd page)",
+                limit=available_height,
+                excess=page2_height - available_height,
+                message="Page 2 content exceeds available height (after 40mm margins)",
                 suggestion="Reduce Further Experience / Languages / Skills / Interests / References content."
             ))
         
@@ -393,13 +395,36 @@ class CVValidator:
         """Validate education entries"""
         errors = []
         limits = self.limits["education"]
-        
+
         if len(entries) > limits["max_entries"]:
             warnings.append(f"education: {len(entries)} entries (recommended max {limits['max_entries']})")
-        
+
         for i, entry in enumerate(entries):
+            # Required field validation: institution and title must be non-empty
+            inst = entry.get("institution", "")
+            if not isinstance(inst, str) or not inst.strip():
+                errors.append(ValidationError(
+                    field=f"education[{i}].institution",
+                    current_value=inst,
+                    limit="non-empty string",
+                    excess=None,
+                    message=f"Education entry {i} is missing required field 'institution'",
+                    suggestion="Provide the university/school name for this education entry."
+                ))
+
+            title = entry.get("title", "")
+            if not isinstance(title, str) or not title.strip():
+                errors.append(ValidationError(
+                    field=f"education[{i}].title",
+                    current_value=title,
+                    limit="non-empty string",
+                    excess=None,
+                    message=f"Education entry {i} is missing required field 'title'",
+                    suggestion="Provide the degree/title (e.g., 'BSc Computer Science') for this education entry."
+                ))
+
             per_entry = limits["per_entry"]
-            
+
             for field, field_limits in per_entry.items():
                 if field == "details":
                     # Details can be a list
@@ -601,9 +626,10 @@ class CVValidator:
         details["margins"] = MARGINS_HEIGHT_MM
 
         # Template page split: Page 1 = header + education + work; Page 2 = rest.
-        # Include margins per page to catch spillover realistically.
-        page1 = header_height + edu_height + work_height + MARGINS_HEIGHT_MM
-        page2 = further_exp_height + lang_height + skill_height + interests_height + references_height + MARGINS_HEIGHT_MM
+        # Margins are page-level (not per-page), so compare content height against available space (297 - 40 = 257mm).
+        # The comparison in validate() checks if content fits within PAGE_HEIGHT_MM - MARGINS_HEIGHT_MM.
+        page1 = header_height + edu_height + work_height
+        page2 = further_exp_height + lang_height + skill_height + interests_height + references_height
         details["page1_estimated_height_mm"] = round(page1, 1)
         details["page2_estimated_height_mm"] = round(page2, 1)
         

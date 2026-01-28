@@ -71,6 +71,14 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
+def _sha256_text(s: str) -> str:
+    """Compute SHA256 hash of text for idempotency detection."""
+    try:
+        return hashlib.sha256((s or "").encode("utf-8", errors="ignore")).hexdigest()
+    except Exception:
+        return ""
+
+
 def _update_section_hashes_in_metadata(session_id: str, cv_data: dict) -> None:
     """Update section_hashes in session metadata after CV changes.
     

@@ -3,11 +3,16 @@ Enhanced E2E testing with validation and comparison.
 Tests both direct Azure endpoint and through UI route.
 """
 
+from __future__ import annotations
+
+import os
 import requests
 import json
 import base64
 from pathlib import Path
 import sys
+
+import pytest
 
 # Test endpoints
 AZURE_ENDPOINT = "https://cv-generator-6695.azurewebsites.net/api/generate-cv-action"
@@ -110,13 +115,39 @@ def validate_pdf(pdf_base64):
         return [f"PDF validation error: {str(e)}"]
 
 
+AZURE_PAYLOADS = [
+    ("correct_wrapped", {"cv_data": SAMPLE_CV_DATA}),
+    ("double_wrapped", {"cv_data": {"cv_data": SAMPLE_CV_DATA}}),
+    ("flat_format", SAMPLE_CV_DATA),
+    (
+        "minimal_valid",
+        {
+            "cv_data": {
+                "full_name": "Test User",
+                "email": "test@example.com",
+                "phone": "+1 111 111 1111",
+                "address_lines": ["Test St"],
+                "profile": "Test profile",
+                "work_experience": [{"date_range": "2020-2024", "employer": "Test", "title": "Engineer", "bullets": ["test"]}],
+                "education": [{"date_range": "2016-2020", "institution": "Uni", "title": "Degree", "details": []}],
+                "languages": ["English"],
+                "language": "en",
+            }
+        },
+    ),
+    ("missing_work_exp", {"cv_data": {**SAMPLE_CV_DATA, "work_experience": None}}),
+]
+
+
+@pytest.mark.skipif(os.environ.get("RUN_AZURE_E2E") != "1", reason="Set RUN_AZURE_E2E=1 to run live Azure E2E tests")
+@pytest.mark.parametrize("payload_name,payload", AZURE_PAYLOADS)
 def test_direct_azure(payload_name, payload):
     """Test direct Azure endpoint."""
     print(f"\n{'='*60}")
     print(f"TEST: {payload_name}")
     print(f"{'='*60}")
     
-    print(f"\n📤 Sending to Azure endpoint...")
+    print("\nSending to Azure endpoint...")
     print(f"   Payload keys: {list(payload.keys())}")
     if "cv_data" in payload:
         print(f"   cv_data keys: {list(payload['cv_data'].keys())}")
@@ -132,27 +163,32 @@ def test_direct_azure(payload_name, payload):
             # Validate
             issues = validate_pdf(pdf_base64)
             if issues:
-                print(f"   ❌ PDF Issues:")
+                print("   PDF Issues:")
                 for issue in issues:
                     print(f"      - {issue}")
             else:
-                print(f"   ✅ PDF valid ({len(pdf_base64)} chars base64, ~{len(base64.b64decode(pdf_base64))} bytes)")
+                print(f"   PDF valid ({len(pdf_base64)} chars base64, ~{len(base64.b64decode(pdf_base64))} bytes)")
             
             # Save
             output_path = Path(f"tmp/test_{payload_name}.pdf")
             output_path.parent.mkdir(exist_ok=True)
             pdf_bytes = base64.b64decode(pdf_base64)
             output_path.write_bytes(pdf_bytes)
-            print(f"   📁 Saved: {output_path}")
+            print(f"   Saved: {output_path}")
             
-            return {"status": 200, "issues": issues}
+            assert not issues, f"PDF validation failed: {issues}"
+            return
         else:
             error = response.json().get("error", response.text)
-            print(f"   ❌ Error: {error[:200]}")
-            return {"status": response.status_code, "error": error}
+            print(f"   Error: {error[:200]}")
+            # Flat format should be rejected; others should succeed.
+            if payload_name == "flat_format":
+                assert response.status_code == 400
+            else:
+                assert response.status_code == 200, error
+            return
     except Exception as e:
-        print(f"   ❌ Exception: {str(e)}")
-        return {"status": None, "error": str(e)}
+        pytest.fail(str(e))
 
 
 def run_tests():
@@ -178,8 +214,7 @@ def run_tests():
         "flat_format",
         SAMPLE_CV_DATA  # No cv_data wrapper
     )
-    if result["status"] != 400:
-        print(f"   ⚠️ WARNING: Expected 400 for flat format, got {result['status']}")
+    print("Note: In pytest mode, flat_format is asserted to return 400.")
     
     # Scenario 4: Minimal valid data
     minimal = {
@@ -204,7 +239,7 @@ def run_tests():
     print(f"\n{'='*60}")
     print("SUMMARY")
     print(f"{'='*60}")
-    print("✅ All direct Azure tests completed.")
+    print("All direct Azure tests completed.")
     print("📋 Check tmp/ for generated PDFs.")
     print("🔍 Compare differences between scenarios.")
 

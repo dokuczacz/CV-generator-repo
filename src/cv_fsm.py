@@ -13,6 +13,13 @@ class CVStage(str, Enum):
     EXECUTE = "EXECUTE"
     DONE = "DONE"
 
+    # Stage-guided wizard (backend-owned UI flow)
+    CONTACT = "CONTACT"
+    EDUCATION = "EDUCATION"
+    JOB_POSTING = "JOB_POSTING"
+    WORK_EXPERIENCE = "WORK_EXPERIENCE"
+    REVIEW_FINAL = "REVIEW_FINAL"
+
 
 EDIT_INTENT_KEYWORDS_PL = ("zmień", "popraw", "cofnij", "dodaj", "usuń", "jednak", "nie tak", "inaczej")
 EDIT_INTENT_KEYWORDS_EN = ("change", "edit", "update", "modify", "fix", "revise", "adjust")

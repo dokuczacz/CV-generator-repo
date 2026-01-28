@@ -1,0 +1,2 @@
+ui_text=This role is locked.
+lock_style=secondary

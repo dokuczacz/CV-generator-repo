@@ -1,0 +1,2 @@
+ui_text=Locked roles: 5/5. All roles locked; you can confirm the stage.
+actions=WORK_EXPERIENCE_SELECT_ROLE,WORK_EXPERIENCE_CONFIRM_STAGE,WORK_EXPERIENCE_BACK

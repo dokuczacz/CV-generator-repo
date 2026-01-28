@@ -1,0 +1,3 @@
+http=200
+len=731
+head={"success":true,"response":"Optional: add a job offer so later stages can tailor the CV. Raw text will not be stored.","pdf_base64":"","session_id":"b5207f16-a362-4dce-af51-8db2f08cb5d2","trace_id":"a98369c1-7b83-41ca-b30c-9e384e160e34","stage":"job_posting","run_summary":null,"turn_trace":null,"ui_action":{"kind":"review_form","stage":"JOB_POSTING","title":"Stage 3/6 — Job offer (optional)","text":"Add a job offer (optional). The backend will store only a structured reference.","fields":[{"key":"job_reference","label":"Job reference","value":"(none)"}],"actions":[{"id":"JOB_OFFER_PASTE","label":"Paste job offer text","style":"primary"},{"id":"JOB_OFFER_SKIP","label":"Skip","style":"secondary"}],"disable_free_text":true}}
