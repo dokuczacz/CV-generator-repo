@@ -27,7 +27,7 @@ def test_prefill_extracts_contact_and_required_sections():
     skills = cv.get("it_ai_skills")
     assert isinstance(skills, list) and len(skills) >= 1
     assert all(isinstance(x, str) for x in skills)
-    assert len(skills) <= 8
+    assert len(skills) <= 20
 
     interests = cv.get("interests")
     assert isinstance(interests, str)

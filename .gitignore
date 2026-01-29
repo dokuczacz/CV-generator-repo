@@ -25,6 +25,7 @@ MANIFEST
 venv/
 env/
 ENV/
+.venv/
 
 # Playwright
 test-results/
@@ -70,6 +71,13 @@ wzory/.~lock.*
 
 # Azure Functions local settings (never commit)
 local.settings.json
+
+# Azurite local emulation artifacts (never commit)
+__azurite_db_*.json
+__blobstorage__/
+
+# Local scratch notes in repo root
+_tmp_*.txt
 
 # Local transient artifacts
 tmp/

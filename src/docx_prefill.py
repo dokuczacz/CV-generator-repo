@@ -24,9 +24,22 @@ def _dejank(text: str) -> str:
 
 
 def _find_heading_index(lines: List[str], heading_variants: List[str]) -> Optional[int]:
-    variants = {h.strip().lower() for h in heading_variants}
+    def _norm_heading(s: str) -> str:
+        if s is None:
+            return ""
+        t = str(s).replace("\u00a0", " ")
+        t = t.strip()
+        # Remove common leading list markers (DOCX extraction sometimes keeps them).
+        t = re.sub(r"^[\s\-\*•\u2022\u2013\u2014]+", "", t).strip()
+        t = t.lower()
+        # Tolerate headings like "WEITERBILDUNGEN:", "SKILLS —", etc.
+        t = re.sub(r"[\s:;\-\u2013\u2014]+$", "", t).strip()
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    variants = {_norm_heading(h) for h in heading_variants if str(h or "").strip()}
     for i, l in enumerate(lines):
-        if l.strip().lower() in variants:
+        if _norm_heading(l) in variants:
             return i
     return None
 
@@ -250,19 +263,25 @@ def _parse_it_ai_skills(lines: List[str]) -> List[str]:
             continue
         if l.isupper() and len(l) <= 30:
             continue
-        # Split only on hard list separators; avoid commas because they commonly appear inside parentheses.
-        parts = [p.strip() for p in re.split(r"[;•\u2022]", l) if p.strip()]
+        
+        # Each line is a separate skill (common format in German CVs)
+        # Also split on hard list separators if present
+        parts = [p.strip() for p in re.split(r"[;•\u2022\n]", l) if p.strip()]
         if not parts:
-            continue
+            # Fallback: treat whole line as one skill
+            parts = [l]
+        
         for p in parts:
+            # Clean leading bullets/dashes
+            p = re.sub(r"^[\-\u2013\u2014\*•\u2022]+\s*", "", p).strip()
             p = p[:70].rstrip()
             if p:
                 items.append(p)
-            if len(items) >= 8:
+            if len(items) >= 20:  # Increased limit to capture more skills
                 break
-        if len(items) >= 8:
+        if len(items) >= 20:
             break
-    return items[:8]
+    return items[:20]
 
 
 _FURTHER_DATE_RE = re.compile(
@@ -294,9 +313,11 @@ def _parse_further_experience(lines: List[str]) -> List[Dict[str, Any]]:
                 "bullets": [],
             }
         )
-        if len(items) >= 4:
+        # Keep more items in prefill so Stage 5a can select the best subset.
+        # Canonical CV limits are enforced later by validator + tailoring stages.
+        if len(items) >= 10:
             break
-    return items[:4]
+    return items[:10]
 
 
 def _parse_interests(lines: List[str]) -> str:
@@ -350,6 +371,10 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
             "certificates",
             "further experience",
             "additional experience",
+            "selected technical projects",
+            "technical projects",
+            "projects",
+            "projekty",
             "commitment",
         ],
     )

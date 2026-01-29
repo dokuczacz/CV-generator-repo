@@ -116,6 +116,38 @@ class ResponseMetadata(BaseModel):
     validation_status: ValidationStatus = Field(..., description="Current CV validation state")
 
 
+class ToolName(str, Enum):
+    """Available tool names for system actions."""
+
+    UPDATE_CV_FIELD = "update_cv_field"
+    VALIDATE_CV = "validate_cv"
+    GENERATE_CV_FROM_SESSION = "generate_cv_from_session"
+    GET_CV_SESSION = "get_cv_session"
+    GET_PDF_BY_REF = "get_pdf_by_ref"
+    EXPORT_SESSION_DEBUG = "export_session_debug"
+
+
+class ToolCall(BaseModel):
+    """Tool call specification."""
+
+    tool_name: ToolName = Field(..., description="Name of tool to call")
+    parameters: dict = Field(..., description="Tool-specific parameters")
+    reason: str = Field(..., description="Why this tool is needed")
+
+
+class SystemActions(BaseModel):
+    """System actions for backend execution."""
+
+    tool_calls: List[ToolCall] = Field(default_factory=list, description="Tool calls to execute (max 4)")
+    confirmation_required: bool = Field(False, description="Whether user confirmation is required before executing")
+
+    @validator("tool_calls", pre=True)
+    def _coerce_tool_calls(cls, v):  # type: ignore
+        if v is None:
+            return []
+        return v
+
+
 class CVAssistantResponse(BaseModel):
     """
     Structured response from CV assistant with strict schema enforcement.
@@ -129,8 +161,16 @@ class CVAssistantResponse(BaseModel):
 
     response_type: ResponseType = Field(..., description="High-level category of response for UI routing")
     user_message: UserMessage = Field(..., description="Content displayed to user in chat interface")
+    system_actions: SystemActions = Field(default_factory=SystemActions, description="System actions for backend execution")
     metadata: ResponseMetadata = Field(..., description="Response metadata for tracking and debugging")
     refusal: Optional[str] = Field(None, description="Safety-based refusal message (null if no refusal)")
+
+    @validator("system_actions", pre=True, always=True)
+    def _ensure_system_actions(cls, v):  # type: ignore
+        """Ensure system_actions is always a valid SystemActions object, even if None."""
+        if v is None:
+            return SystemActions()
+        return v
 
 
 # JSON Schema export for OpenAI API

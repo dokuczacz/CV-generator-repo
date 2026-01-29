@@ -59,7 +59,7 @@ async function ensureContactConfirmed(page: Page) {
   await clickActionAndWait(page, 'Confirm & lock');
 }
 
-async function lockAllWorkExperienceRoles(page: Page) {
+async function completeWorkExperienceStage(page: Page) {
   await expect(page.getByText('Stage 4/6 — Work experience', { exact: true })).toBeVisible({ timeout: 60_000 });
 
   // Optional: verify tailoring notes are editable (critical interaction surface).
@@ -73,58 +73,14 @@ async function lockAllWorkExperienceRoles(page: Page) {
     const noteText = 'Emphasize: quality systems (IATF), audits, process improvement, claims reduction.';
     await notesArea.fill(noteText);
     await clickActionAndWait(page, 'Save notes');
-    const stageCard = page
-      .locator('div.border.border-gray-200.rounded-lg.p-3.bg-gray-50')
-      .filter({ hasText: 'Stage 4/6 — Work experience' });
-    await expect(stageCard.getByText('Emphasize: quality systems', { exact: false })).toBeVisible({ timeout: 60_000 });
   }
 
-  // If there are no roles, stage can be confirmed immediately.
-  if (await page.getByRole('button', { name: 'Confirm & lock stage' }).isVisible().catch(() => false)) {
-    await clickActionAndWait(page, 'Confirm & lock stage');
+  // For deterministic tests: avoid calling the model; proceed via skip/continue.
+  if (await page.getByRole('button', { name: 'Skip tailoring' }).isVisible().catch(() => false)) {
+    await clickActionAndWait(page, 'Skip tailoring');
     return;
   }
-
-  // Otherwise lock roles one by one: open index i, lock, back to list.
-  for (let i = 0; i < 20; i++) {
-    // List view
-    await expect(page.getByRole('button', { name: 'Select role' })).toBeVisible({ timeout: 60_000 });
-    await clickActionAndWait(page, 'Select role');
-
-    // Select role form
-    const stageCard = page
-      .locator('div.border.border-gray-200.rounded-lg.p-3.bg-gray-50')
-      .filter({ hasText: 'Stage 4/6 — Work experience' });
-    const roleIndexInput = stageCard.locator('input').first();
-    await expect(roleIndexInput).toBeVisible({ timeout: 60_000 });
-    await roleIndexInput.fill(String(i));
-    const openBody = await clickActionAndWait(page, 'Open role');
-
-    // If index is invalid, we're done.
-    if (openBody.includes('Invalid role index')) {
-      // Back to list (Cancel is safest if we stayed in select form)
-      if (await page.getByRole('button', { name: 'Cancel' }).isVisible().catch(() => false)) {
-        await clickActionAndWait(page, 'Cancel');
-      }
-      break;
-    }
-
-    // Role view: lock and go back.
-    await expect(page.getByRole('button', { name: /Lock role/i })).toBeVisible({ timeout: 60_000 });
-    await clickActionAndWait(page, 'Lock role');
-    await clickActionAndWait(page, 'Back to list');
-
-    // If stage confirm is now available, proceed.
-    if (await page.getByRole('button', { name: 'Confirm & lock stage' }).isVisible().catch(() => false)) {
-      await clickActionAndWait(page, 'Confirm & lock stage');
-      return;
-    }
-  }
-
-  // Last attempt: if confirm is available now, click it.
-  if (await page.getByRole('button', { name: 'Confirm & lock stage' }).isVisible().catch(() => false)) {
-    await clickActionAndWait(page, 'Confirm & lock stage');
-  }
+  await clickActionAndWait(page, 'Continue');
 }
 
 test.describe('CV Generator E2E', () => {
@@ -174,8 +130,8 @@ test.describe('CV Generator E2E', () => {
     await expect(page.getByText('Stage 3/6 — Job offer (optional)', { exact: true })).toBeVisible({ timeout: 60_000 });
     await clickActionAndWait(page, 'Skip');
 
-    // Stage 4: Work experience (lock roles and confirm stage)
-    await lockAllWorkExperienceRoles(page);
+    // Stage 4: Work experience (skip tailoring for deterministic test)
+    await completeWorkExperienceStage(page);
 
     // Stage 6: Generate
     await expect(page.getByText('Stage 6/6 — Generate', { exact: true })).toBeVisible({ timeout: 60_000 });

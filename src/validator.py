@@ -16,6 +16,7 @@ Golden Rule: REJECT if estimated pages > 2.0
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 import math
+import re
 
 
 @dataclass
@@ -141,6 +142,12 @@ CV_LIMITS = {
         "total_height_mm": 45,
         "reason": "Technical skills list"
     },
+    "technical_operational_skills": {
+        "max_items": 8,
+        "max_chars_per_item": 70,
+        "total_height_mm": 45,
+        "reason": "Technical/Operational skills list"
+    },
     "interests": {
         "max_chars": 350,
         "max_lines": 7,
@@ -196,6 +203,7 @@ class CVValidator:
         errors.extend(self._validate_list_field(cv_data, "address_lines", warnings))
         errors.extend(self._validate_list_field(cv_data, "languages", warnings))
         errors.extend(self._validate_list_field(cv_data, "it_ai_skills", warnings))
+        errors.extend(self._validate_list_field(cv_data, "technical_operational_skills", warnings))
 
         errors.extend(self._validate_work_experience(cv_data.get("work_experience", []), warnings))
         errors.extend(self._validate_education(cv_data.get("education", []), warnings))
@@ -328,12 +336,73 @@ class CVValidator:
         """Validate work experience entries"""
         errors = []
         limits = self.limits["work_experience"]
+
+        date_pat = limits.get("per_entry", {}).get("date_range", {}).get("pattern")
+        date_re = re.compile(date_pat) if isinstance(date_pat, str) and date_pat else None
         
         if len(entries) > limits["max_entries"]:
             warnings.append(f"work_experience: {len(entries)} entries (recommended max {limits['max_entries']})")
         
         for i, entry in enumerate(entries):
             per_entry = limits["per_entry"]
+
+            # Required field validation (template needs these to render correctly)
+            date_range = entry.get("date_range", "")
+            employer = entry.get("employer", "")
+            title = entry.get("title", "")
+            bullets = entry.get("bullets", [])
+
+            if not isinstance(date_range, str) or not date_range.strip():
+                errors.append(
+                    ValidationError(
+                        field=f"work_experience[{i}].date_range",
+                        current_value=date_range,
+                        limit="non-empty string",
+                        excess=None,
+                        message=f"Work experience entry {i} is missing required field 'date_range'",
+                        suggestion="Provide dates (e.g., '2020-01 – 2025-04' or '01/2020 – 04/2025').",
+                    )
+                )
+            elif date_re and not date_re.match(date_range.strip()):
+                warnings.append(
+                    f"work_experience[{i}].date_range: unexpected format '{date_range.strip()}' (expected YYYY-MM – YYYY-MM or MM/YYYY – MM/YYYY)"
+                )
+
+            if not isinstance(employer, str) or not employer.strip():
+                errors.append(
+                    ValidationError(
+                        field=f"work_experience[{i}].employer",
+                        current_value=employer,
+                        limit="non-empty string",
+                        excess=None,
+                        message=f"Work experience entry {i} is missing required field 'employer'",
+                        suggestion="Provide the company/employer name for this role.",
+                    )
+                )
+
+            if not isinstance(title, str) or not title.strip():
+                errors.append(
+                    ValidationError(
+                        field=f"work_experience[{i}].title",
+                        current_value=title,
+                        limit="non-empty string",
+                        excess=None,
+                        message=f"Work experience entry {i} is missing required field 'title'",
+                        suggestion="Provide the job title/position for this role.",
+                    )
+                )
+
+            if not isinstance(bullets, list) or len([b for b in bullets if str(b).strip()]) == 0:
+                errors.append(
+                    ValidationError(
+                        field=f"work_experience[{i}].bullets",
+                        current_value=bullets,
+                        limit="non-empty list",
+                        excess=None,
+                        message=f"Work experience entry {i} must contain at least one bullet",
+                        suggestion="Add 1–4 concise achievement bullets for this role.",
+                    )
+                )
             
             # Validate each field
             for field, field_limits in per_entry.items():
@@ -594,6 +663,12 @@ class CVValidator:
         total += skill_height
         details["it_ai_skills"] = skill_height
         
+        # Technical/Operational Skills
+        tech_ops_items = cv_data.get("technical_operational_skills", [])
+        tech_ops_height = SECTION_TITLE_HEIGHT_MM + (len(tech_ops_items) * 5)
+        total += tech_ops_height
+        details["technical_operational_skills"] = tech_ops_height
+        
         # Further Experience
         further_exp_items = cv_data.get("further_experience", [])
         fe_bullet_chars = self.limits["further_experience"]["per_entry"]["bullets"]["max_chars_per_bullet"]
@@ -629,7 +704,7 @@ class CVValidator:
         # Margins are page-level (not per-page), so compare content height against available space (297 - 40 = 257mm).
         # The comparison in validate() checks if content fits within PAGE_HEIGHT_MM - MARGINS_HEIGHT_MM.
         page1 = header_height + edu_height + work_height
-        page2 = further_exp_height + lang_height + skill_height + interests_height + references_height
+        page2 = further_exp_height + lang_height + skill_height + tech_ops_height + interests_height + references_height
         details["page1_estimated_height_mm"] = round(page1, 1)
         details["page2_estimated_height_mm"] = round(page2, 1)
         
