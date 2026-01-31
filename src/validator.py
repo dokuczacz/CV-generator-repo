@@ -142,12 +142,6 @@ CV_LIMITS = {
         "total_height_mm": 45,
         "reason": "Technical skills list"
     },
-    "technical_operational_skills": {
-        "max_items": 8,
-        "max_chars_per_item": 70,
-        "total_height_mm": 45,
-        "reason": "Technical/Operational skills list"
-    },
     "interests": {
         "max_chars": 350,
         "max_lines": 7,
@@ -192,6 +186,29 @@ class CVValidator:
         Returns:
             ValidationResult with errors and page estimation
         """
+        # Canonicalize legacy fields to avoid double-counting in validation.
+        if not isinstance(cv_data, dict):
+            cv_data = {}
+        cv_data = dict(cv_data)
+        legacy_skills = cv_data.get("technical_operational_skills")
+        if isinstance(legacy_skills, list) and legacy_skills:
+            base_skills = cv_data.get("it_ai_skills")
+            base_skills = base_skills if isinstance(base_skills, list) else []
+
+            seen_lower = set()
+            merged: list[str] = []
+            for s in list(base_skills) + list(legacy_skills):
+                s_str = str(s).strip()
+                if s_str and s_str.lower() not in seen_lower:
+                    seen_lower.add(s_str.lower())
+                    merged.append(s_str)
+
+            cv_data["it_ai_skills"] = merged
+            try:
+                del cv_data["technical_operational_skills"]
+            except Exception:
+                pass
+
         errors = []
         warnings = []
         height_details = {}
@@ -203,7 +220,6 @@ class CVValidator:
         errors.extend(self._validate_list_field(cv_data, "address_lines", warnings))
         errors.extend(self._validate_list_field(cv_data, "languages", warnings))
         errors.extend(self._validate_list_field(cv_data, "it_ai_skills", warnings))
-        errors.extend(self._validate_list_field(cv_data, "technical_operational_skills", warnings))
 
         errors.extend(self._validate_work_experience(cv_data.get("work_experience", []), warnings))
         errors.extend(self._validate_education(cv_data.get("education", []), warnings))
@@ -663,12 +679,6 @@ class CVValidator:
         total += skill_height
         details["it_ai_skills"] = skill_height
         
-        # Technical/Operational Skills
-        tech_ops_items = cv_data.get("technical_operational_skills", [])
-        tech_ops_height = SECTION_TITLE_HEIGHT_MM + (len(tech_ops_items) * 5)
-        total += tech_ops_height
-        details["technical_operational_skills"] = tech_ops_height
-        
         # Further Experience
         further_exp_items = cv_data.get("further_experience", [])
         fe_bullet_chars = self.limits["further_experience"]["per_entry"]["bullets"]["max_chars_per_bullet"]
@@ -704,7 +714,7 @@ class CVValidator:
         # Margins are page-level (not per-page), so compare content height against available space (297 - 40 = 257mm).
         # The comparison in validate() checks if content fits within PAGE_HEIGHT_MM - MARGINS_HEIGHT_MM.
         page1 = header_height + edu_height + work_height
-        page2 = further_exp_height + lang_height + skill_height + tech_ops_height + interests_height + references_height
+        page2 = further_exp_height + lang_height + skill_height + interests_height + references_height
         details["page1_estimated_height_mm"] = round(page1, 1)
         details["page2_estimated_height_mm"] = round(page2, 1)
         

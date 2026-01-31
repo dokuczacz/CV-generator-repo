@@ -6,6 +6,9 @@ description: Best practices for Playwright tests and visual regression in this r
 
 # Playwright Testing Conventions
 
+This repository includes **LLM-driven orchestration**. For cross-cutting LLM risk controls and the recommended test pyramid, also follow:
+- `.github/instructions/llm-orchestration.instructions.md`
+
 ## Test Structure
 
 - **Location:** `/tests/` directory at repo root.
@@ -116,6 +119,63 @@ npm run show-report
 ```
 
 ## Best Practices
+
+## LLM / Orchestration Testing Cookbook (portable)
+
+When workflows include an LLM, tests must be designed for **bounded nondeterminism**.
+
+### Recommended test pyramid
+
+1. **Tier 0 — Deterministic checks (fast, always-on)**
+  - Prompt builder smoke tests.
+  - Schema validation.
+  - Stage/state machine logic.
+
+2. **Tier 1 — Contract tests (no browser, no real LLM)**
+  - Call the orchestrator boundary directly (API route or backend function).
+  - Run with AI disabled/mocked.
+  - Assert JSON shape + stage transitions + error handling.
+
+3. **Tier 2 — Record/Replay E2E (deterministic)**
+  - Replay recorded successful outputs from fixtures.
+  - Assert contract invariants, not exact wording.
+
+4. **Tier 3 — Live LLM canaries (opt-in only)**
+  - Must be explicitly enabled via env vars.
+  - Run `--workers=1` to reduce rate-limit flakiness.
+  - Keep assertions coarse (no exact phrasing).
+
+### What to assert (LLM-safe)
+
+Prefer:
+- Response JSON validates against the expected schema.
+- Required fields present and types correct.
+- Stage/state is correct.
+- Output constraints met (e.g., “PDF produced”, “2 pages”, “no error banner”).
+
+Avoid:
+- Exact assistant text.
+- Exact bullet wording.
+- Exact ordering unless it is part of the contract.
+
+### Record/Replay fixtures
+
+Use fixtures to make orchestration tests deterministic.
+
+Guidelines:
+- Store fixtures as **inputs → outputs** at the orchestration boundary (API response JSON), not as DOM text.
+- Key fixtures by stable identifiers like `(scenario, stage, action_id, schema_version)`.
+- Keep fixtures small; avoid embedding full documents when not needed.
+- Redact secrets.
+
+This repo already uses stage fixtures under `tests/fixtures/` and a mocked E2E spec; treat that as the starting point for a reusable record/replay approach.
+
+### Live LLM tests (opt-in gating)
+
+Live LLM tests must be opt-in and isolated:
+- Require an explicit env flag (e.g., `RUN_OPENAI_E2E=1`) and the API key.
+- Keep the suite serial and low-worker.
+- Treat these tests as **canaries**, not default CI blockers.
 
 - **One test per scenario:** Don't test multiple things in one test.
 - **Clear assertions:** Use specific assertions, not just `expect(something).toBeTruthy()`.

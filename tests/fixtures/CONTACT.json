@@ -1,0 +1,53 @@
+{
+  "success": true,
+  "response": "Review your contact details below.",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "e8cad77e-1db5-4109-8131-ae4a35d36af1",
+  "stage": "contact",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "review_form",
+    "stage": "CONTACT",
+    "title": "Stage 1/6 — Contact",
+    "text": "Review contact details. Edit if needed, then Confirm & lock.",
+    "fields": [
+      {
+        "key": "full_name",
+        "label": "Full name",
+        "value": "Mariusz Horodecki"
+      },
+      {
+        "key": "email",
+        "label": "Email",
+        "value": "horodecki.mariusz@gmail.com"
+      },
+      {
+        "key": "phone",
+        "label": "Phone",
+        "value": "+41 77 952 24 37"
+      },
+      {
+        "key": "address",
+        "label": "Address (optional)",
+        "value": "Zer Chirchu 20\n3933 Staldenried"
+      }
+    ],
+    "actions": [
+      {
+        "id": "CONTACT_EDIT",
+        "label": "Edit",
+        "style": "secondary"
+      },
+      {
+        "id": "CONTACT_CONFIRM",
+        "label": "Confirm & lock",
+        "style": "primary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

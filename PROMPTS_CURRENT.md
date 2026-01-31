@@ -149,13 +149,15 @@ Output language: {target_language}.
 
 **Input:**
 - `[JOB_SUMMARY]` - extracted job reference
+- `[TAILORING_SUGGESTIONS]` - user's general tailoring notes (shared with work experience)
 - `[RANKING_NOTES]` - user's notes
-- `[CANDIDATE_IT_AI_SKILLS]` - list from canonical CV
+- `[CANDIDATE_IT_AI_SKILLS]` - combined list (canonical CV + DOCX prefill unconfirmed, if present)
 
 **Output:** SkillsProposal (skills[], notes)
 
 **Data Sources:**
 - cv_data.it_ai_skills
+- meta.docx_prefill_unconfirmed.it_ai_skills (if present)
 
 
 ---
@@ -184,13 +186,15 @@ Output language: {target_language}.
 
 **Input:**
 - `[JOB_SUMMARY]` - extracted job reference
+- `[TAILORING_SUGGESTIONS]` - user's general tailoring notes (shared with work experience)
 - `[RANKING_NOTES]` - user's notes
-- `[CANDIDATE_TECHNICAL_OPERATIONAL_SKILLS]` - list from canonical CV
+- `[CANDIDATE_TECHNICAL_OPERATIONAL_SKILLS]` - combined list (canonical CV + DOCX prefill unconfirmed, if present)
 
 **Output:** TechnicalOperationalSkillsProposal (skills[], notes)
 
 **Data Sources:**
 - cv_data.technical_operational_skills
+- meta.docx_prefill_unconfirmed.technical_operational_skills (if present)
 
 ---
 
@@ -238,11 +242,10 @@ All stages use: `reasoning: None` to prevent o1-style thinking from consuming ou
 - Optionally enforce via `REQUIRE_OPENAI_PROMPT_ID_PER_STAGE=1`.
 
 ### Data Merging Strategy
-Current behavior for tailoring/ranking stages uses canonical `cv_data` as the single source of truth.
+Tailoring/ranking stages use canonical `cv_data` as the base source of truth.
 
-- Tailoring/ranking stages (work experience, further experience, skills): use only confirmed `cv_data` inputs.
-- Unconfirmed extraction data (e.g., `docx_prefill_unconfirmed`) is not merged into tailoring/ranking inputs.
-- UI should not present “(X in CV + Y from upload)” for these stages.
+- Work experience tailoring uses `cv_data` plus user tailoring suggestions/feedback.
+- Skills ranking (5a/5b) can additionally include competences extracted from `docx_prefill_unconfirmed` (if present), but the model must still ONLY select from the provided candidate list and must not invent.
 
 ---
 

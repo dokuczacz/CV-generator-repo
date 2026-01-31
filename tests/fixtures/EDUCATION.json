@@ -1,0 +1,38 @@
+{
+  "success": true,
+  "response": "Review your education below.",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "6de9b653-78d5-4d36-91a7-432f455755de",
+  "stage": "education",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "review_form",
+    "stage": "EDUCATION",
+    "title": "Stage 2/6 — Education",
+    "text": "Review education entries. Edit if needed, then Confirm & lock.",
+    "fields": [
+      {
+        "key": "education_entries",
+        "label": "Education",
+        "value": "1. Master of Science in Electrical Engineering — Poznań University of Technology — 2012–2015\n2. Bachelor of Engineering in Electrical Engineering — Poznań University of Technology — 2008–2012"
+      }
+    ],
+    "actions": [
+      {
+        "id": "EDUCATION_EDIT_JSON",
+        "label": "Edit (JSON)",
+        "style": "secondary"
+      },
+      {
+        "id": "EDUCATION_CONFIRM",
+        "label": "Confirm & lock",
+        "style": "primary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

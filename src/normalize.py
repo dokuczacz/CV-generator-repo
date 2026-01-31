@@ -168,6 +168,19 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(skills, list):
             normalized["it_ai_skills"] = [str(x).strip() for x in skills if str(x).strip()]
 
+    # Technical & operational skills: template expects `technical_operational_skills` (list[str]).
+    # Support common alternates and string formatting.
+    if "technical_operational_skills" not in normalized:
+        for alt in ["tech_ops_skills", "tech_ops", "technical_skills", "operational_skills"]:
+            if alt in normalized:
+                normalized["technical_operational_skills"] = normalized.get(alt)
+                break
+
+    tech_ops = normalized.get("technical_operational_skills")
+    if isinstance(tech_ops, str):
+        parts = [p.strip() for p in re.split(r"[\n;•\u2022]", tech_ops) if p.strip()]
+        normalized["technical_operational_skills"] = parts
+
     # Support alternate privacy field name.
     if "data_privacy" not in normalized and "data_privacy_consent" in normalized:
         normalized["data_privacy"] = normalized.get("data_privacy_consent")

@@ -1,0 +1,38 @@
+{
+  "success": true,
+  "response": "Review your work experience roles below.",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "7633cb32-e637-4a97-a765-4f3c914bec57",
+  "stage": "work_experience",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "review_form",
+    "stage": "WORK_EXPERIENCE",
+    "title": "Stage 4/6 — Work experience",
+    "text": "Tailor your work experience to the job offer (recommended), or skip.",
+    "fields": [
+      {
+        "key": "roles_preview",
+        "label": "Work roles (5 total)",
+        "value": "1. Bauarbeiter | 2025-05\n2. Direktor | 2020-01 – 2025-04\n3. Leiter Qualität & Produktservice | 2018-11 – 2020-01\n4. Qualitätsmanager | 2016-08 – 2018-11\n5. Spezialist für Prozessverbesserung (global) | 2011-03 – 2016-07"
+      }
+    ],
+    "actions": [
+      {
+        "id": "WORK_ADD_TAILORING_NOTES",
+        "label": "Add tailoring notes",
+        "style": "secondary"
+      },
+      {
+        "id": "WORK_TAILOR_SKIP",
+        "label": "Continue",
+        "style": "primary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

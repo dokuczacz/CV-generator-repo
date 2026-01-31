@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "response": "Session created. Language selection required.",
+  "session_id": "test-session-001",
+  "stage": "language_select",
+  "ui_action": {
+    "id": "LANGUAGE_SELECT",
+    "type": "confirm",
+    "label": "Select language",
+    "choices": ["English", "German (Deutsch)", "Polish (Polski)"]
+  },
+  "schema_version": "1.0"
+}

@@ -1,0 +1,43 @@
+{
+  "success": true,
+  "response": "Skipped work tailoring. Moving to technical projects.",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "d235afef-c362-4987-af33-dcfcf54423ad",
+  "stage": "further_experience",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "review_form",
+    "stage": "FURTHER_EXPERIENCE",
+    "title": "Stage 5a/6 — Technical projects",
+    "text": "Tailor your technical projects to the job offer (recommended), or skip.",
+    "fields": [
+      {
+        "key": "projects_preview",
+        "label": "Technical projects (0 total)",
+        "value": "(no technical projects detected in CV)"
+      },
+      {
+        "key": "skills_preview",
+        "label": "Your skills (FÄHIGKEITEN & KOMPETENZEN)",
+        "value": "- Technisches Projektmanagement (CAPEX/OPEX)\n- Führung interdisziplinärer Teams\n- Ursachenanalysen & Prozessverbesserungen (FMEA, 5 Why, PDCA)\n- Baustellenmanagement (Strassenbau)\n- Standardisierung & Optimierung auf datenbasierter Grundlage\n- KI-gestützte Effizienz (GPT / Automatisierung / Reporting)"
+      }
+    ],
+    "actions": [
+      {
+        "id": "FURTHER_ADD_NOTES",
+        "label": "Add tailoring notes",
+        "style": "secondary"
+      },
+      {
+        "id": "FURTHER_TAILOR_SKIP",
+        "label": "Continue",
+        "style": "primary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

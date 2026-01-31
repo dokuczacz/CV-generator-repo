@@ -4,6 +4,10 @@ This repository is a Next.js 14 UI + Azure Functions (Python) backend that gener
 
 For agent behavior rules, see `AGENTS.md` (kept intentionally short).
 
+## LLM / Orchestration (read-first)
+
+Follow `.github/instructions/llm-orchestration.instructions.md` for risk controls (mocking/gating), JSON contracts, and the LLM test pyramid.
+
 ## Key Entry Points
 
 Frontend:

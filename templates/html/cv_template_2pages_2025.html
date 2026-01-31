@@ -54,6 +54,39 @@
     <main class="content">
 
     <section class="section">
+      <div class="section-title">Work experience</div>
+      {% for job in work_experience or [] %}
+      <div class="entry">
+        <div class="entry-head">
+          <span class="entry-date">{{ job.date_range }}</span>
+          <span class="entry-title">
+            {{ job.employer }}{% if job.location %}, {{ job.location }}{% endif %}{% if job.title %}, {{ job.title }}{% endif %}
+          </span>
+        </div>
+        {% if job.bullets %}
+          <ul class="bullets">
+            {% for b in job.bullets %}<li>{{ b }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+
+    <section class="section">
+      <div class="section-title">IT &amp; AI Skills</div>
+      <ul class="simple-list">
+        {% for sk in it_ai_skills or [] %}<li>{{ sk }}</li>{% endfor %}
+      </ul>
+    </section>
+
+    <section class="section">
+      <div class="section-title">Technical &amp; Operational Skills</div>
+      <ul class="simple-list">
+        {% for sk in technical_operational_skills or [] %}<li>{{ sk }}</li>{% endfor %}
+      </ul>
+    </section>
+
+    <section class="section">
       <div class="section-title">Education</div>
       {% for edu in education or [] %}
       <div class="entry">
@@ -78,48 +111,6 @@
     </section>
 
     <section class="section">
-      <div class="section-title">Work experience</div>
-      {% for job in work_experience or [] %}
-      <div class="entry">
-        <div class="entry-head">
-          <span class="entry-date">{{ job.date_range }}</span>
-          <span class="entry-title">
-            {{ job.employer }}{% if job.location %}, {{ job.location }}{% endif %}{% if job.title %}, {{ job.title }}{% endif %}
-          </span>
-        </div>
-        {% if job.bullets %}
-          <ul class="bullets">
-            {% for b in job.bullets %}<li>{{ b }}</li>{% endfor %}
-          </ul>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </section>
-
-
-    <section class="section">
-      <div class="section-title">Selected Technical Projects</div>
-      {% for exp in further_experience or [] %}
-      <div class="entry">
-        <div class="entry-head">
-          <span class="entry-date">{{ exp.date_range }}</span>
-          <span class="further-exp-title">{{ exp.title }}{% if exp.organization %}, {{ exp.organization }}{% endif %}</span>
-        </div>
-        {% if exp.bullets %}
-          <ul class="bullets">
-            {% for b in exp.bullets %}<li>{{ b }}</li>{% endfor %}
-          </ul>
-        {% endif %}
-        {% if exp.details %}
-          <div class="entry-body">
-            {% for d in exp.details %}<div class="entry-line">{{ d }}</div>{% endfor %}
-          </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </section>
-
-    <section class="section">
       <div class="section-title">Language Skills</div>
       <div class="two-col-list">
         {% for lang in languages or [] %}
@@ -135,20 +126,6 @@
           {% endif %}
         {% endfor %}
       </div>
-    </section>
-
-    <section class="section">
-      <div class="section-title">IT &amp; AI Skills</div>
-      <ul class="simple-list">
-        {% for sk in it_ai_skills or [] %}<li>{{ sk }}</li>{% endfor %}
-      </ul>
-    </section>
-
-    <section class="section">
-      <div class="section-title">Technical &amp; Operational Skills</div>
-      <ul class="simple-list">
-        {% for sk in technical_operational_skills or [] %}<li>{{ sk }}</li>{% endfor %}
-      </ul>
     </section>
 
     <section class="section">

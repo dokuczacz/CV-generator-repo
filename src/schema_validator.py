@@ -18,10 +18,10 @@ CANONICAL_KEYS = {
     "work_experience", "education",
     # Template-aligned fields
     "address_lines", "birth_date", "nationality",
-    "profile", "it_ai_skills", "technical_operational_skills", "interests",
+    "profile", "it_ai_skills", "interests",
     "further_experience", "references", "data_privacy",
     # Legacy/compat fields still accepted/normalized
-    "skills", "certifications", "summary",
+    "skills", "technical_operational_skills", "certifications", "summary",
     "languages", "language"
 }
 

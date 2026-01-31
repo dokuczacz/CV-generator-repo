@@ -1,0 +1,19 @@
+{
+  "description": "Recorded OpenAI responses from successful test sessions",
+  "purpose": "These fixtures allow E2E tests to run without OpenAI API key by using pre-recorded responses",
+  "usage": "Load these JSON files in tests to mock backend OpenAI responses",
+  "last_updated": "2026-01-29",
+  "responses": {
+    "session_create": "session_create_response.json",
+    "language_select": "language_select_response.json", 
+    "import_docx": "import_docx_response.json",
+    "job_offer_analyze": "job_offer_analyze_response.json",
+    "work_experience_tailor": "work_experience_tailor_response.json",
+    "it_ai_skills_tailor": "it_ai_skills_tailor_response.json",
+    "tech_ops_skills_tailor": "tech_ops_skills_tailor_response.json",
+    "further_experience_tailor": "further_experience_tailor_response.json",
+    "contact_confirm": "contact_confirm_response.json",
+    "education_confirm": "education_confirm_response.json",
+    "generate_pdf": "generate_pdf_response.json"
+  }
+}

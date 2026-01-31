@@ -1,0 +1,31 @@
+{
+  "success": true,
+  "response": "Language selected. Proceeding...",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "58f939b3-7cef-463d-b82e-6371a3c62ab4",
+  "stage": "import_gate_pending",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "confirm",
+    "stage": "IMPORT_PREFILL",
+    "title": "Import DOCX data?",
+    "text": "Do you want to import the data extracted from your DOCX file?",
+    "actions": [
+      {
+        "id": "CONFIRM_IMPORT_PREFILL_YES",
+        "label": "Import DOCX prefill",
+        "style": "primary"
+      },
+      {
+        "id": "CONFIRM_IMPORT_PREFILL_NO",
+        "label": "Do not import",
+        "style": "secondary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

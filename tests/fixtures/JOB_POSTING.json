@@ -1,0 +1,38 @@
+{
+  "success": true,
+  "response": "Optionally add a job offer for tailoring (or skip).",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "962189b4-813c-43a6-b3bb-d641894b9eb2",
+  "stage": "job_posting",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "review_form",
+    "stage": "JOB_POSTING",
+    "title": "Stage 3/6 — Job offer (optional)",
+    "text": "Paste a job offer for tailoring (optional), or skip.",
+    "fields": [
+      {
+        "key": "job_posting_text_present",
+        "label": "Job offer text",
+        "value": "(none)"
+      }
+    ],
+    "actions": [
+      {
+        "id": "JOB_OFFER_PASTE",
+        "label": "Paste job offer text / URL",
+        "style": "primary"
+      },
+      {
+        "id": "JOB_OFFER_SKIP",
+        "label": "Skip",
+        "style": "secondary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

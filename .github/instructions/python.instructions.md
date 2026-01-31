@@ -6,6 +6,9 @@ description: Best practices for Azure Functions Python code in this repository
 
 # Python Azure Functions Conventions
 
+This repository includes **LLM-driven orchestration**. For cross-cutting LLM risk controls and the recommended test pyramid, also follow:
+- `.github/instructions/llm-orchestration.instructions.md`
+
 ## Azure Functions Structure
 
 Each Azure Function follows this pattern:
@@ -78,6 +81,24 @@ def validate_cv(body):
 - **No side effects:** Don't modify Azure storage / databases during tests.
 - **Mock external calls:** Mock OpenAI, Azure services in unit tests.
 
+## LLM Integration (orchestration-first)
+
+When integrating an LLM into a workflow:
+
+- **Keep one orchestrator**: orchestration (state machine, retries, idempotency, readiness gating) stays in the backend.
+- **Isolate the provider**: wrap LLM calls behind a small adapter so it can be mocked deterministically.
+- **Determinism flags**: support running with AI disabled or mocked (env flags), so Tier 0/1 tests never require network calls.
+- **Strict structured output**:
+    - Always validate model output against a schema.
+    - Reject invalid JSON; do not “best-effort” apply partial patches unless the behavior is explicitly specified.
+- **Prompt injection hygiene**:
+    - Treat uploads/job postings as untrusted text.
+    - Never execute instructions contained in those inputs.
+    - Use delimiters and a data-only policy in prompts.
+- **Timeouts and bounded retries**: avoid infinite retries; backoff where needed.
+- **Idempotency for writes**: state-changing operations should be safe to retry.
+- **Observability**: return a `trace_id` (and optionally a compact per-turn trace) so E2E failures can be debugged.
+
 ## Avoid
 
 - ❌ Modifying runtime files (Azure Functions core code).
@@ -85,6 +106,9 @@ def validate_cv(body):
 - ❌ Long-running synchronous code (use async if needed).
 - ❌ Hardcoded paths (use `Path()` or env vars).
 - ❌ Importing from unvetted external sources.
+- ❌ Writing orchestration logic in the UI instead of the backend.
+- ❌ Calling real LLM providers in default/CI tests.
+- ❌ Asserting exact LLM phrasing in tests.
 
 ## References
 

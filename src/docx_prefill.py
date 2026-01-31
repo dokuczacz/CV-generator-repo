@@ -344,21 +344,31 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
     idx_work = _find_heading_index(lines, ["berufserfahrung", "work experience", "experience"])
     idx_edu = _find_heading_index(lines, ["ausbildung", "education"])
     idx_lang = _find_heading_index(lines, ["sprachen", "languages"])
-    idx_skills = _find_heading_index(
-        lines,
-        [
-            "it & ai skills",
-            "it skills",
-            "skills",
-            "kenntnisse",
-            "fähigkeiten & kompetenzen",
-            "faehigkeiten & kompetenzen",
-            "fähigkeiten",
-            "kompetenzen",
-            "it-kenntnisse",
-            "it kenntnisse",
-        ],
-    )
+    it_ai_heading_variants = [
+        "it & ai skills",
+        "it and ai skills",
+        "it ai skills",
+        "it skills",
+        "it-kenntnisse",
+        "it kenntnisse",
+    ]
+    tech_ops_heading_variants = [
+        "technical & operational skills",
+        "technical and operational skills",
+        "technical operational skills",
+    ]
+    generic_skills_heading_variants = [
+        "skills",
+        "kenntnisse",
+        "fähigkeiten & kompetenzen",
+        "faehigkeiten & kompetenzen",
+        "fähigkeiten",
+        "kompetenzen",
+    ]
+
+    idx_it_ai_skills = _find_heading_index(lines, it_ai_heading_variants)
+    idx_tech_ops_skills = _find_heading_index(lines, tech_ops_heading_variants)
+    idx_skills_generic = _find_heading_index(lines, generic_skills_heading_variants)
     idx_further = _find_heading_index(
         lines,
         [
@@ -387,17 +397,39 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
 
     # Languages slice ends at the next known heading after languages
     next_after_lang = None
-    for idx in [idx_skills, idx_interests, idx_refs]:
+    for idx in [idx_it_ai_skills, idx_tech_ops_skills, idx_skills_generic, idx_interests, idx_refs]:
         if idx is not None and idx_lang is not None and idx > idx_lang:
             next_after_lang = idx if next_after_lang is None else min(next_after_lang, idx)
     lang_lines = _slice_between(lines, idx_lang, next_after_lang)
 
-    # Skills slice ends at next known heading after skills
-    next_after_skills = None
-    for idx in [idx_further, idx_interests, idx_refs]:
-        if idx is not None and idx_skills is not None and idx > idx_skills:
-            next_after_skills = idx if next_after_skills is None else min(next_after_skills, idx)
-    skills_lines = _slice_between(lines, idx_skills, next_after_skills)
+    def _next_after(current_idx: Optional[int], candidates: List[Optional[int]]) -> Optional[int]:
+        if current_idx is None:
+            return None
+        best: Optional[int] = None
+        for idx in candidates:
+            if idx is None:
+                continue
+            if idx > current_idx:
+                best = idx if best is None else min(best, idx)
+        return best
+
+    next_after_it_ai = _next_after(
+        idx_it_ai_skills,
+        [idx_tech_ops_skills, idx_edu, idx_lang, idx_further, idx_interests, idx_refs],
+    )
+    it_ai_lines = _slice_between(lines, idx_it_ai_skills, next_after_it_ai)
+
+    next_after_tech_ops = _next_after(
+        idx_tech_ops_skills,
+        [idx_edu, idx_lang, idx_further, idx_interests, idx_refs],
+    )
+    tech_ops_lines = _slice_between(lines, idx_tech_ops_skills, next_after_tech_ops)
+
+    next_after_skills_generic = _next_after(
+        idx_skills_generic,
+        [idx_edu, idx_lang, idx_further, idx_interests, idx_refs],
+    )
+    skills_lines_generic = _slice_between(lines, idx_skills_generic, next_after_skills_generic)
 
     # Further experience / training slice ends at next known heading after it.
     next_after_further = None
@@ -413,7 +445,22 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
     work_experience = _parse_work_experience(work_lines)
     education = _parse_education(edu_lines)
     languages = _parse_languages(lang_lines)
-    it_ai_skills = _parse_it_ai_skills(skills_lines)
+    it_ai_skills = _parse_it_ai_skills(it_ai_lines)
+    technical_operational_skills = _parse_it_ai_skills(tech_ops_lines)
+
+    # Fallback: many CVs have multiple skills headings; pick up skills from a generic section
+    # if the explicit IT/AI or Technical/Operational sections are empty.
+    if (not it_ai_skills) or (not technical_operational_skills):
+        combined = _parse_it_ai_skills(skills_lines_generic)
+        if combined:
+            if not it_ai_skills and not technical_operational_skills:
+                # Split into two buckets to avoid an entirely empty PDF section.
+                it_ai_skills = combined[:8]
+                technical_operational_skills = combined[8:16]
+            elif not it_ai_skills:
+                it_ai_skills = combined[:8]
+            elif not technical_operational_skills:
+                technical_operational_skills = combined[:8]
     further_experience = _parse_further_experience(further_lines)
     interests = _parse_interests(interests_lines)
 
@@ -427,6 +474,7 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
         "education": education,
         "languages": languages,
         "it_ai_skills": it_ai_skills,
+        "technical_operational_skills": technical_operational_skills,
         "further_experience": further_experience,
         "interests": interests,
     }

@@ -1,0 +1,56 @@
+{
+  "success": true,
+  "response": "Quick review of your session and three concise, prioritized edits to improve job fit and clarity.\n\n### Top issues (high impact)\n1) Profile is truncated and ends mid-sentence — completes your narrative and adds 2–3 quantified achievements. 2) Work bullets are descriptive but mostly task-focused — convert to achievement statements with metrics/scale where possible. 3) German-language phrases remain in some fields (dates, location labels, language levels) — standardize to English for international roles.\n\n### Proposed edits (apply next)\n1) Complete & sharpen Profile (2–3 lines): lead with role target + 1–2 core competencies + 1 quantified outcome (e.g., “10+ years leading infrastructure projects, built Greenfield sites delivering X value / reduced defects by Y%”).\n2) Convert each work_experience bullet into achievement format (Action — Result — Metric). Example for Expondo: “Led 3 departments (35 staff) and introduced KPI dashboards that reduced claims by 70% and improved time-to-resolution by X days.”\n3) Standardize formatting: use full date ranges (e.g., Jan 2020 – Apr 2025), translate/normalize language proficiency (e.g., Polish — Native; English — Fluent; German — B1/B2), and convert location names to English where appropriate.\n\n### Low-effort quick wins (do first)\n- Finish profile sentence and add 1 measurable accomplishment.\n- Add one quantified bullet to GL Solutions (e.g., project count/value, team size, on-time %).\n- Replace truncated date “2025-05” with full range or month-year role start/end notation.\n\n### Risks / missing clarifications\n- Some achievements need numbers you may not recall precisely (project € value, % improvement, headcount). Estimated ranges are acceptable but flag as estimates.\n- If you want to target a specific role (e.g., Project Manager, Site Manager, Quality Director), we should tailor the profile and choose which achievements to foreground.\n\n**Please confirm:**\n1. Do you want the CV targeted at construction/site operations roles or quality/process/operations leadership roles?\n   - Construction / Site Operations\n   - Quality / Process / Operations Leadership\n   - Hybrid / Both\n2. Can you provide any measurable outcomes for GL Solutions and Imbodden AG (project values, team sizes, percent improvements, delivery/on-time rates)?",
+  "pdf_base64": "",
+  "session_id": "b5207f16-a362-4dce-af51-8db2f08cb5d2",
+  "trace_id": "4342ec4a-8829-4e7b-bd75-ad8b6af5532e",
+  "stage": "review_session",
+  "run_summary": {
+    "trace_id": "4342ec4a-8829-4e7b-bd75-ad8b6af5532e",
+    "steps": [
+      {
+        "step": "model_call",
+        "index": 1,
+        "duration_ms": 15181,
+        "tool_calls": 0
+      }
+    ],
+    "max_model_calls": 5,
+    "model_calls": 1,
+    "execution_mode": false,
+    "stage_debug": {
+      "current_stage": "REVIEW",
+      "next_stage": "REVIEW",
+      "edit_intent": false,
+      "generate_requested": false,
+      "confirmation_required": false,
+      "user_confirm_yes": false,
+      "user_confirm_no": false,
+      "validation_passed": true,
+      "readiness_ok": true,
+      "pending_edits": 0,
+      "turns_in_review": 1,
+      "version_before": 10,
+      "version_after": 12,
+      "readiness_after": {
+        "can_generate": true,
+        "required_present": {
+          "full_name": true,
+          "email": true,
+          "phone": true,
+          "work_experience": true,
+          "education": true
+        },
+        "strict_template": false,
+        "confirmed_flags": {
+          "contact_confirmed": true,
+          "education_confirmed": true,
+          "confirmed_at": "2026-01-28T01:53:25.5989"
+        },
+        "missing": []
+      }
+    }
+  },
+  "turn_trace": [],
+  "ui_action": null
+}

@@ -1,0 +1,37 @@
+{
+  "success": true,
+  "response": "Please confirm whether to import the DOCX prefill.",
+  "pdf_base64": "",
+  "session_id": "cce6d716-04e8-493e-b87f-9b53ef200120",
+  "trace_id": "aeddcc2d-d16d-4229-9902-8be45c1e1d0f",
+  "stage": "language_selection",
+  "run_summary": null,
+  "turn_trace": null,
+  "ui_action": {
+    "kind": "review_form",
+    "stage": "LANGUAGE_SELECTION",
+    "title": "Language Selection",
+    "text": "Source language detected: English. What language should your final CV be in?",
+    "fields": [],
+    "actions": [
+      {
+        "id": "LANGUAGE_SELECT_EN",
+        "label": "English",
+        "style": "primary"
+      },
+      {
+        "id": "LANGUAGE_SELECT_DE",
+        "label": "German (Deutsch)",
+        "style": "secondary"
+      },
+      {
+        "id": "LANGUAGE_SELECT_PL",
+        "label": "Polish (Polski)",
+        "style": "secondary"
+      }
+    ],
+    "disable_free_text": true
+  },
+  "job_posting_url": "",
+  "job_posting_text": ""
+}

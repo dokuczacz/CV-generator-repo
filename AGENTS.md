@@ -13,6 +13,10 @@ If you need the full runbooks/templates, open:
 - Stay **hot_only**: solve the current narrow task; don’t broaden scope unless asked.
 - Prefer **deterministic micro-checks** over repo-wide scans.
 - No secrets inline; use env vars / local settings templates.
+
+## Planning gate (stop-the-line)
+- Before executing non-trivial work, follow: `.github/instructions/planning-gate.instructions.md`
+- If the gate fails (no stable scenario pack / no DoD / deterministic constraints missing fallback), stop and use the stall-escalation pattern to request the missing artifacts/decisions.
 ## Architecture baseline (default)
 - Backend-first (Python): backend is the only orchestrator (stage/state, retries, timeouts, idempotency, validation, limits).
 - UI is minimal: UI is a thin proxy for inputs/outputs; do not implement orchestration/workflow in UI.
