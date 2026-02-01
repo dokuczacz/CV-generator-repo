@@ -3278,7 +3278,7 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
                     if not isinstance(r, dict):
                         continue
                     title = str(r.get("title") or "").strip()
-                    company = str(r.get("company") or "").strip()
+                    company = str(r.get("company") or r.get("employer") or "").strip()
                     date_range = str(r.get("date_range") or "").strip()
                     location = str(r.get("location") or "").strip()
                     bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else []
@@ -4450,7 +4450,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 cv2 = dict(cv_data or {})
                 cv2["work_experience"] = [
                     {
-                        "employer": _clean_one_line(str(r.get("company") or "")),
+                        "employer": _clean_one_line(str(r.get("company") or r.get("employer") or "")),
                         "title": _clean_one_line(str(r.get("title") or "")),
                         "date_range": _clean_one_line(str(r.get("date_range") or "")),
                         "location": _clean_one_line(str(r.get("location") or "")),
