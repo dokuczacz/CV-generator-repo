@@ -67,7 +67,8 @@ def _parse_profile(lines: List[str]) -> str:
 
 
 _DATE_PREFIX_RE = re.compile(
-    r"^\s*(?P<dates>(?:\d{4}(?:-\d{2})?)(?:\s*[\u2013\u2014\-]\s*(?:\d{4}(?:-\d{2})?|Present|today))?)\s*(?P<rest>.+?)\s*$"
+    r"^\s*(?P<dates>(?:\d{4}(?:-\d{2})?)(?:\s*[\u2013\u2014\-]\s*(?:\d{4}(?:-\d{2})?|Present|present|today|Today|PRESENT))?)\s*(?P<rest>.+?)\s*$",
+    re.IGNORECASE
 )
 
 
@@ -125,6 +126,29 @@ def _parse_work_experience(lines: List[str]) -> List[Dict[str, Any]]:
                 "employer": employer,
                 "location": location,
                 "title": title_part,
+                "bullets": [],
+            }
+            continue
+
+        # Fallback: check if line contains a date pattern anywhere (reversed format: Title...YYYY-MM – Present...)
+        date_anywhere = re.search(r"(\d{4}(?:-\d{2})?)(?:\s*[\u2013\u2014\-]\s*(?:\d{4}(?:-\d{2})?|Present|present|today|Today|PRESENT))?", l, re.IGNORECASE)
+        if date_anywhere:
+            if current is not None:
+                items.append(current)
+            
+            dates = date_anywhere.group(0).strip()
+            # Extract title from everything before the date
+            before_date = l[:date_anywhere.start()].strip()
+            # Clean up title (remove trailing commas, "GitHub:", URLs, etc.)
+            title = re.sub(r",?\s*GitHub:.*$", "", before_date, flags=re.IGNORECASE).strip()
+            title = re.sub(r",?\s*http[s]?://.*$", "", title).strip()
+            title = title.rstrip(",").strip()
+            
+            current = {
+                "date_range": dates,
+                "employer": "",
+                "location": "",
+                "title": title if title else "Role",
                 "bullets": [],
             }
             continue
