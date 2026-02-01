@@ -3631,6 +3631,7 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
                 "fields": fields_list,
                 "actions": [
                     {"id": "SKILLS_TAILOR_ACCEPT", "label": "Accept proposal", "style": "primary"},
+                    {"id": "SKILLS_TAILOR_RUN", "label": "Regenerate proposal", "style": "secondary"},
                     {"id": "SKILLS_TAILOR_SKIP", "label": "Skip ranking", "style": "secondary"},
                 ],
                 "disable_free_text": True,
