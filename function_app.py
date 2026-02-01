@@ -3873,12 +3873,14 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     meta2["docx_prefill_unconfirmed"] = None
 
                 # Upfront bulk translation gate: if source language != target language, translate ALL sections once.
+                # Also trigger if target_language explicitly selected to catch and normalize mixed-language content in DOCX.
                 target_lang = str(meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
                 source_lang = str(meta2.get("source_language") or cv_data.get("language") or "en").strip().lower()
+                explicit_target_lang_selected = bool(meta2.get("target_language"))
                 needs_bulk_translation = (
                     aid == "CONFIRM_IMPORT_PREFILL_YES"
                     and _openai_enabled()
-                    and source_lang != target_lang
+                    and (source_lang != target_lang or explicit_target_lang_selected)
                     and str(meta2.get("bulk_translated_to") or "") != target_lang
                 )
 
