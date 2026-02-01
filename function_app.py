@@ -1190,15 +1190,19 @@ def _compute_pdf_download_name(*, cv_data: dict, meta: dict) -> str:
 
     name_part = _sanitize_filename_part(full_name, max_len=40) or "Candidate"
     
+    # Add date stamp for better organization
+    from datetime import datetime
+    date_stamp = datetime.utcnow().strftime("%Y-%m-%d")
+    
     # Prefer company name, fallback to job title
     if company:
         company_part = _sanitize_filename_part(company, max_len=40)
-        return f"CV_{name_part}_{company_part}.pdf"
+        return f"CV_{name_part}_{company_part}_{date_stamp}.pdf"
     elif job_title:
         job_part = _sanitize_filename_part(job_title, max_len=40)
-        return f"CV_{name_part}_{job_part}.pdf"
+        return f"CV_{name_part}_{job_part}_{date_stamp}.pdf"
     
-    return f"CV_{name_part}.pdf"
+    return f"CV_{name_part}_{date_stamp}.pdf"
 
 
 def _build_session_debug_snapshot(session: dict) -> dict:
