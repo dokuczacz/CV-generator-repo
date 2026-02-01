@@ -200,6 +200,7 @@ Additional debug tools:
 ## Configuration Files
 
 - [PROMPT_SYSTEM_REVISED.md](PROMPT_SYSTEM_REVISED.md) - **Current system prompt** with phase-aware workflow + Wave 0-3 guardrails
+- [docs/CV_GENERATION_PROMPTS.md](docs/CV_GENERATION_PROMPTS.md) - **Complete prompts reference** for all 7 CV generation stages (job_posting, bulk_translation, work_experience, further_experience, it_ai_skills, interests)
 - [local.settings.template.json](local.settings.template.json) - Environment variables template (OpenAI keys, feature flags)
 - `ui/lib/prompts.ts` - CV_SYSTEM_PROMPT (reference, can be used locally)
 - `ui/lib/tools.ts` - Tool definitions (reference, not used in code)
