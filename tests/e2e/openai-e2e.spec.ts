@@ -5,10 +5,7 @@ import { spawnSync } from 'child_process';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
-const INPUT_DOCX = path.join(
-  __dirname,
-  '../../archive/wzory/Lebenslauf_Mariusz_Horodecki_CH.docx'
-);
+const INPUT_DOCX = path.join(__dirname, '../../samples/Lebenslauf_Mariusz_Horodecki_CH.docx');
 
 const JOB_URL = 'https://www.jobs.ch/en/vacancies/detail/faa45fb1-e562-43b3-a4dd-be9717ed2074/';
 

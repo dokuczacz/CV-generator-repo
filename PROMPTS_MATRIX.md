@@ -124,7 +124,7 @@ Do not infer or fabricate metrics, tools, team size, scope, or impact.
 Do NOT copy or paraphrase job posting bullets. 
 Output language: {target_language}. 
 Constraints: select 3-4 most relevant roles; 2-4 bullets per role; total bullets 8-12; 
-keep companies and date ranges; translate role titles only if a clear, standard equivalent exists in the target language; date_range must be a single line.
+keep companies and date ranges; translate role titles to the most accurate, standard equivalent job position in the target language (if no clear standard equivalent exists, keep the original title); date_range must be a single line.
 ```
 
 **Output schema:**
@@ -216,27 +216,53 @@ Constraints: select 1-3 most relevant entries; 1-3 bullets per entry; total bull
 
 ---
 
-### 5. **IT_AI_SKILLS** (Rank IT/AI skills by job relevance)
+### 5. **SKILLS_RANKING** (Unified IT & AI + Technical & Operational)
 
-**Stage ID:** `it_ai_skills`  
+**Stage ID:** `it_ai_skills` (unified, triggers both sections)  
 **Triggered by:** `SKILLS_TAILOR_RUN`  
 **Input:** 
   - `[JOB_SUMMARY]` (job reference)
-  - `[RANKING_NOTES]` (user notes)
-  - `[CANDIDATE_IT_AI_SKILLS]` (existing skills list)
+  - `[CANDIDATE_PROFILE]` (CV profile)
+  - `[TAILORING_SUGGESTIONS]` (user notes with achievements)
+  - `[RANKING_NOTES]` (user feedback)
+  - `[CANDIDATE_SKILLS]` (pooled list from CV + DOCX prefill)
   
-**Output schema:** `get_skills_proposal_response_format()`  
-**Max tokens:** 1000  
+**Output schema:** `get_skills_unified_proposal_response_format()`  
+**Max tokens:** 1200  
 **Target language placeholder:** `{target_language}`
 
 **Backend prompt (from `_AI_PROMPT_BY_STAGE["it_ai_skills"]`):**
+
+**UNIFIED APPROACH:** Single prompt generates both `it_ai_skills` and `technical_operational_skills` arrays in one response.
+
 ```
-Rank and filter the candidate's IT & AI skills by relevance to the job posting. 
-Focus on: programming languages, frameworks, tools, databases, cloud platforms, AI/ML tools. 
-Keep only skills mentioned in the job posting or closely related. 
-Order by relevance (most important first). 
-Output 5-10 top skills max. 
-Output language: {target_language}.
+Your task is to derive two complementary skill sections from the provided inputs.
+
+Inputs include:
+- a job offer summary,
+- the candidate's CV and achievements,
+- and user-provided tailoring notes describing real work achievements.
+
+You must:
+1) Identify the candidate's most relevant IT & AI skills,
+2) Identify the candidate's most relevant Technical & Operational skills.
+
+Guidelines:
+- Skills must be grounded in the candidate's real experience and achievements.
+- Prefer skills that are demonstrated through actions, systems, or results.
+- Do not invent skills that are not supported by the inputs.
+- You may generalize from described work (e.g., automation, system design, process optimization), but do not fabricate tools or certifications.
+
+Section definitions:
+- IT & AI Skills: digital tools, automation, AI usage, data-driven systems, reporting, and technical enablers.
+- Technical & Operational Skills: quality systems, process improvement methods, project delivery, production, construction, and operational governance.
+
+Output rules:
+- Provide two separate lists: it_ai_skills and technical_operational_skills.
+- Each list should contain 5–8 concise skill entries.
+- Skills should be phrased clearly and professionally, suitable for a Swiss industry CV.
+- Avoid duplication between the two sections.
+- Output language: {target_language}.
 ```
 
 **Output schema:**
@@ -244,40 +270,29 @@ Output language: {target_language}.
 {
   "type": "object",
   "properties": {
-    "skills": {
+    "it_ai_skills": {
       "type": "array",
       "items": {"type": "string"},
-      "maxItems": 10
+      "description": "Digital tools, automation, AI usage, data-driven systems, reporting (5-8 items)"
+    },
+    "technical_operational_skills": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Quality systems, process improvement, project delivery, production, construction, operational governance (5-8 items)"
     },
     "notes": {"type": "string"}
   },
-  "required": ["skills"]
+  "required": ["it_ai_skills", "technical_operational_skills"]
 }
 ```
 
 **Review checklist:**
-- [ ] Should we filter to "only job-mentioned skills" or include related skills?
-- [ ] What's the ideal max count? (5, 8, 10?)
-- [ ] Should we preserve original order (candidate priority) or always re-rank?
-- [ ] Should we group skills by category (languages, frameworks, tools)?
+- [x] Should we combine both sections in one prompt? **YES — ensures consistency and prevents duplication**
+- [x] What max count per section? **5-8 items each (confirmed)**
+- [x] How to avoid duplication across sections? **Explicit in prompt + review logic**
+- [x] Should we ground skills in real achievements? **YES — only demonstrated through work/systems/results**
 
 ---
-
-### 6. **TECHNICAL_OPERATIONAL_SKILLS** (Rank operational skills by job relevance)
-
-**Stage ID:** `technical_operational_skills`  
-**Triggered by:** `TECH_OPS_TAILOR_RUN`  
-**Input:** 
-  - `[JOB_SUMMARY]` (job reference)
-  - `[RANKING_NOTES]` (user notes)
-  - `[CANDIDATE_TECHNICAL_OPERATIONAL_SKILLS]` (existing skills list)
-  
-**Output schema:** `get_technical_operational_skills_proposal_response_format()`  
-**Max tokens:** 1000  
-**Target language placeholder:** `{target_language}`
-
-**Backend prompt (from `_AI_PROMPT_BY_STAGE["technical_operational_skills"]`):**
-```
 Rank and filter the candidate's technical and operational skills by relevance to the job posting. 
 Focus on: process management, quality systems, operational excellence, lean/six sigma, project management. 
 Keep only skills mentioned in the job posting or closely related. 

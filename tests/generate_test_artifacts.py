@@ -1,7 +1,11 @@
-"""
-Generate test artifacts for Playwright comparison
-This script creates both HTML and PDF outputs in the test-output directory
-Uses CV data for Aline Keller (Phase 1: exact replica of original DOCX)
+"""Generate deterministic test artifacts for Playwright comparison.
+
+This script creates both HTML and PDF outputs in the test-output directory.
+
+Default dataset: Mariusz Horodecki (from `samples/extracted_cv.json`).
+
+Override with:
+    CV_TEST_DATASET=aline  (legacy)
 """
 
 import sys
@@ -13,26 +17,38 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from render import render_html, render_pdf
-from aline_keller_cv_data import CV_DATA
+
+
+def _load_cv_data():
+    dataset = os.getenv("CV_TEST_DATASET", "mariusz").strip().lower()
+    if dataset in {"aline", "aline_keller", "keller"}:
+        from aline_keller_cv_data import CV_DATA  # type: ignore
+
+        return "Aline Keller", CV_DATA
+
+    from mariusz_horodecki_cv_data import CV_DATA  # type: ignore
+
+    return "Mariusz Horodecki", CV_DATA
 
 
 def main():
     output_dir = Path(__file__).parent / "test-output"
     output_dir.mkdir(exist_ok=True)
-    
-    print("Generating test artifacts for Aline Keller CV...")
+
+    label, cv_data = _load_cv_data()
+    print(f"Generating test artifacts for {label} CV...")
 
     # Windows-friendly PDF rendering for local tests only.
     os.environ.setdefault("CV_PDF_RENDERER", "playwright")
     
     # Generate HTML
-    html_content = render_html(CV_DATA, inline_css=True)
+    html_content = render_html(cv_data, inline_css=True)
     html_path = output_dir / "preview.html"
     html_path.write_text(html_content, encoding="utf-8")
     print(f"[OK] HTML saved to: {html_path}")
     
     # Generate PDF
-    pdf_bytes = render_pdf(CV_DATA)
+    pdf_bytes = render_pdf(cv_data)
     pdf_path = output_dir / "preview.pdf"
     alt_pdf_path = output_dir / "preview.generated.pdf"
     ts_pdf_path = output_dir / f"preview.generated-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pdf"

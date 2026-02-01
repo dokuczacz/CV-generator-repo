@@ -56,6 +56,7 @@ def get_sample_docx_base64():
     """Get sample DOCX for testing from samples or create via test data"""
     # Try to find existing DOCX files
     for sample_path in [
+        Path("samples/Lebenslauf_Mariusz_Horodecki_CH.docx"),
         Path("samples/sample_cv.docx"),
         Path("tests/samples/sample_cv.docx"),
         Path("work/sample.docx"),

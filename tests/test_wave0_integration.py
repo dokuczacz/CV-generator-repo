@@ -71,6 +71,11 @@ def test_health_check():
 
 def get_sample_docx_base64():
     """Create or find sample DOCX"""
+    sample_docx = Path(__file__).parent.parent / "samples" / "Lebenslauf_Mariusz_Horodecki_CH.docx"
+    if sample_docx.exists():
+        log_step(f"Using sample DOCX: {sample_docx}")
+        return base64.b64encode(sample_docx.read_bytes()).decode("ascii")
+
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from tests.aline_keller_cv_data import CV_DATA

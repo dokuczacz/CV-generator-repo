@@ -41,18 +41,29 @@ test('quick smoke test - contact + education only', async ({ page }) => {
   console.log('[smoke] Import/Language stage reached');
 
   // Handle language selection
-  const langBtn = page.getByText('English');
+  const langBtn = page.getByRole('button', { name: /^English$/i });
   if (await langBtn.isVisible().catch(() => false)) {
     console.log('[smoke] Clicking English...');
-    // Wait for response after clicking
-    const responsePromise = page.waitForResponse(
-      (r) => r.url().includes('/api/process-cv'),
-      { timeout: 30_000 }
-    ).catch(() => null);
-    
+    const responsePromise = page
+      .waitForResponse((r) => r.url().includes('/api/process-cv'), { timeout: 30_000 })
+      .catch(() => null);
+
     await langBtn.click();
     await responsePromise;
-    await page.waitForTimeout(2000);
+
+    // Wait until we leave Language Selection, or proceed to import / Stage 1.
+    await page.waitForFunction(
+      () => {
+        const text = document.body.innerText;
+        return (
+          !text.includes('Language Selection') ||
+          text.includes('Import DOCX prefill') ||
+          /Stage\s+1\s*\//i.test(text)
+        );
+      },
+      undefined,
+      { timeout: 60_000 }
+    );
     console.log('[smoke] Language selected');
   }
 
@@ -73,7 +84,7 @@ test('quick smoke test - contact + education only', async ({ page }) => {
 
   // Wait for Stage 1: Contact
   await page.waitForFunction(
-    () => document.body.innerText.includes('Stage 1/6'),
+    () => /Stage\s+1\s*\//i.test(document.body.innerText),
     undefined,
     { timeout: 30_000 }
   );

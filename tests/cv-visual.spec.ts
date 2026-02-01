@@ -8,11 +8,11 @@ const PX_TO_MM = (px: string) => parseFloat(px) / 3.7795;
 const PX_TO_PT = (px: string) => parseFloat(px) / (96 / 72);
 
 const EXPECTED_SECTIONS_IN_ORDER = [
-  'Education',
   'Work experience',
-  'Further experience / commitment',
-  'Language Skills',
   'IT & AI Skills',
+  'Technical & Operational Skills',
+  'Education',
+  'Language Skills',
   'Interests',
   'References',
 ];
