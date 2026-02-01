@@ -3192,7 +3192,7 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
             for i, r in enumerate(work_list[:10]):
                 if not isinstance(r, dict):
                     continue
-                company = str(r.get("company") or "").strip()
+                company = str(r.get("company") or r.get("employer") or "").strip()
                 title = str(r.get("title") or r.get("position") or "").strip()
                 date = str(r.get("date_range") or "").strip()
                 head = " | ".join([p for p in [title, company, date] if p]) or f"Role #{i+1}"
