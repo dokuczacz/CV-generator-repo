@@ -3878,6 +3878,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 # Upfront bulk translation gate: if source language != target language, translate ALL sections once.
                 # Also trigger if target_language explicitly selected to catch and normalize mixed-language content in DOCX.
+                # Execute translation inline (not deferred) to avoid UI deadlock.
                 target_lang = str(meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
                 source_lang = str(meta2.get("source_language") or cv_data.get("language") or "en").strip().lower()
                 explicit_target_lang_selected = bool(meta2.get("target_language"))
@@ -3889,13 +3890,118 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 )
 
                 if needs_bulk_translation:
-                    meta2 = _wizard_set_stage(meta2, "bulk_translation")
-                    cv_data, meta2 = _persist(cv_data, meta2)
-                    return _wizard_resp(
-                        assistant_text=f"Translating all content from {source_lang} to {target_lang}...",
-                        meta_out=meta2,
-                        cv_out=cv_data,
+                    # Execute translation inline to avoid UI deadlock
+                    cv_payload = {
+                        "profile": str(cv_data.get("profile") or ""),
+                        "work_experience": cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else [],
+                        "further_experience": cv_data.get("further_experience") if isinstance(cv_data.get("further_experience"), list) else [],
+                        "education": cv_data.get("education") if isinstance(cv_data.get("education"), list) else [],
+                        "it_ai_skills": cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else [],
+                        "technical_operational_skills": cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else [],
+                        "languages": cv_data.get("languages") if isinstance(cv_data.get("languages"), list) else [],
+                        "interests": str(cv_data.get("interests") or ""),
+                        "references": str(cv_data.get("references") or ""),
+                    }
+
+                    ok, parsed, err = _openai_json_schema_call(
+                        system_prompt=_build_ai_system_prompt(stage="bulk_translation", target_language=target_lang),
+                        user_text=json.dumps(cv_payload, ensure_ascii=False),
+                        response_format={
+                            "type": "json_schema",
+                            "name": "bulk_translation",
+                            "strict": True,
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "profile": {"type": "string"},
+                                    "work_experience": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "employer": {"type": "string"},
+                                                "title": {"type": "string"},
+                                                "date_range": {"type": "string"},
+                                                "location": {"type": "string"},
+                                                "bullets": {"type": "array", "items": {"type": "string"}},
+                                            },
+                                            "required": ["employer", "title", "date_range", "location", "bullets"],
+                                        },
+                                    },
+                                    "further_experience": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "title": {"type": "string"},
+                                                "organization": {"type": "string"},
+                                                "date_range": {"type": "string"},
+                                                "location": {"type": "string"},
+                                                "bullets": {"type": "array", "items": {"type": "string"}},
+                                            },
+                                            "required": ["title", "organization", "date_range", "location", "bullets"],
+                                        },
+                                    },
+                                    "education": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "title": {"type": "string"},
+                                                "institution": {"type": "string"},
+                                                "date_range": {"type": "string"},
+                                                "specialization": {"type": "string"},
+                                                "details": {"type": "array", "items": {"type": "string"}},
+                                                "location": {"type": "string"},
+                                            },
+                                            "required": ["title", "institution", "date_range", "specialization", "details", "location"],
+                                        },
+                                    },
+                                    "it_ai_skills": {"type": "array", "items": {"type": "string"}},
+                                    "technical_operational_skills": {"type": "array", "items": {"type": "string"}},
+                                    "languages": {"type": "array", "items": {"type": "string"}},
+                                    "interests": {"type": "string"},
+                                    "references": {"type": "string"},
+                                },
+                                "required": [
+                                    "profile",
+                                    "work_experience",
+                                    "further_experience",
+                                    "education",
+                                    "it_ai_skills",
+                                    "technical_operational_skills",
+                                    "languages",
+                                    "interests",
+                                    "references",
+                                ],
+                            },
+                        },
+                        max_output_tokens=900,
+                        stage="bulk_translation",
                     )
+
+                    if ok and isinstance(parsed, dict):
+                        cv_data2 = dict(cv_data or {})
+                        cv_data2["profile"] = str(parsed.get("profile") or "")
+                        cv_data2["work_experience"] = parsed.get("work_experience") if isinstance(parsed.get("work_experience"), list) else []
+                        cv_data2["further_experience"] = parsed.get("further_experience") if isinstance(parsed.get("further_experience"), list) else []
+                        cv_data2["education"] = parsed.get("education") if isinstance(parsed.get("education"), list) else []
+                        cv_data2["it_ai_skills"] = parsed.get("it_ai_skills") if isinstance(parsed.get("it_ai_skills"), list) else []
+                        cv_data2["technical_operational_skills"] = parsed.get("technical_operational_skills") if isinstance(parsed.get("technical_operational_skills"), list) else []
+                        cv_data2["languages"] = parsed.get("languages") if isinstance(parsed.get("languages"), list) else []
+                        cv_data2["interests"] = str(parsed.get("interests") or "")
+                        cv_data2["references"] = str(parsed.get("references") or "")
+                        cv_data = cv_data2
+                        meta2["bulk_translated_to"] = target_lang
+                        meta2["bulk_translation_status"] = "ok"
+                        meta2.pop("bulk_translation_error", None)
+                    else:
+                        meta2["bulk_translation_status"] = "call_failed"
+                        meta2["bulk_translation_error"] = str(err or "").strip()[:400]
 
                 meta2 = _wizard_set_stage(meta2, "contact")
                 cv_data, meta2 = _persist(cv_data, meta2)
