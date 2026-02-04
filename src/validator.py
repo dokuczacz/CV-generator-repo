@@ -77,7 +77,7 @@ CV_LIMITS = {
             },
             "bullets": {
                 "max_count": 4,
-                "max_chars_per_bullet": 90,  # Testing with 90, may adjust
+                "max_chars_per_bullet": 100,
                 "height_mm_per_bullet": 4.5,
                 "reason": "Achievement bullets"
             }

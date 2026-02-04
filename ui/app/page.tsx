@@ -586,6 +586,30 @@ export default function CVGenerator() {
     return { current, total };
   })();
 
+  const latestPdfDownloadName = (() => {
+    if (!cvPreview?.metadata || typeof cvPreview.metadata !== 'object') return null;
+    const pdfRefs = (cvPreview.metadata as any)?.pdf_refs;
+    if (!pdfRefs || typeof pdfRefs !== 'object') return null;
+    const entries = Object.entries(pdfRefs as Record<string, any>).filter(([, v]) => v && typeof v === 'object');
+    if (!entries.length) return null;
+    entries.sort((a, b) => String(b[1]?.created_at || '').localeCompare(String(a[1]?.created_at || '')));
+    const latest = entries[0]?.[1];
+    const name = String(latest?.download_name || '').trim();
+    return name || null;
+  })();
+
+  const stepper = (() => {
+    if (!wizardStep || wizardStep.total !== 6) return null;
+    return [
+      { n: 1, label: 'Kontakt', targetWizardStage: 'contact' },
+      { n: 2, label: 'Edukacja', targetWizardStage: 'education' },
+      { n: 3, label: 'Oferta (opcjonalnie)', targetWizardStage: 'job_posting' },
+      { n: 4, label: 'Doświadczenie', targetWizardStage: 'work_experience' },
+      { n: 5, label: 'Skills', targetWizardStage: 'it_ai_skills' },
+      { n: 6, label: 'PDF', targetWizardStage: 'review_final' },
+    ] as const;
+  })();
+
   const describeMissing = (key: string): { label: string; hint: string } => {
     const map: Record<string, { label: string; hint: string }> = {
       full_name: { label: 'Imię i nazwisko', hint: 'Uzupełnij w kroku „Kontakt”.' },
@@ -774,18 +798,34 @@ export default function CVGenerator() {
                 <div className="text-sm font-semibold text-slate-900">Krok</div>
                 <div className="mt-1 text-xs text-slate-600">Aktualny etap kreatora i akcje.</div>
               </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  clearLocalSession();
-                  setCvFile(null);
-                  setMessages([INITIAL_ASSISTANT_MESSAGE]);
-                  setExpandedMessages({});
-                }}
-              >
-                Zmień CV
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    handleStartFresh();
+                    setMessages((prev) => [
+                      ...prev,
+                      { role: 'assistant', content: '✅ Nowa wersja: zaczynam nową sesję (plik CV pozostaje ten sam).' },
+                    ]);
+                  }}
+                  title="Zaczyna nową sesję dla tego samego CV"
+                >
+                  Nowa wersja
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    clearLocalSession();
+                    setCvFile(null);
+                    setMessages([INITIAL_ASSISTANT_MESSAGE]);
+                    setExpandedMessages({});
+                  }}
+                >
+                  Zmień plik
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -806,6 +846,37 @@ export default function CVGenerator() {
                     </div>
                     <div className="text-xs text-slate-600">
                       Krok {wizardStep.current}/{wizardStep.total}
+                    </div>
+                  </div>
+                ) : null}
+
+                {stepper ? (
+                  <div className="rounded-lg border border-slate-200 bg-white p-2">
+                    <div className="text-[11px] font-semibold text-slate-700">Nawigacja</div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {stepper.map((s) => {
+                        const isCurrent = wizardStep?.current === s.n;
+                        const isPast = (wizardStep?.current || 0) > s.n;
+                        const isFuture = (wizardStep?.current || 0) < s.n;
+                        return (
+                          <Button
+                            key={s.n}
+                            size="sm"
+                            variant={isCurrent ? 'primary' : 'secondary'}
+                            disabled={!isPast}
+                            title={isFuture ? 'Dokończ bieżący krok, aby przejść dalej.' : isCurrent ? 'Bieżący krok' : 'Wróć do kroku'}
+                            onClick={() => {
+                              if (!isPast) return;
+                              void handleSendUserAction('WIZARD_GOTO_STAGE', { target_stage: s.targetWizardStage });
+                            }}
+                          >
+                            {s.n}. {s.label}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 text-[11px] text-slate-600">
+                      Możesz wracać do poprzednich kroków. Przyszłe kroki są zablokowane.
                     </div>
                   </div>
                 ) : null}
@@ -849,8 +920,16 @@ export default function CVGenerator() {
                     const actions = uiAction.actions || [];
                     const fields = Array.isArray(uiAction.fields) ? uiAction.fields : [];
                     const hasEditable = uiAction.kind === 'edit_form' || fields.some((f) => !!f?.editable);
-                    const primary = actions.filter((a) => !(a.style === 'secondary' || a.style === 'tertiary'));
+                    const primaryRaw = actions.filter((a) => !(a.style === 'secondary' || a.style === 'tertiary'));
+                    const primary = primaryRaw.length > 1 ? primaryRaw.slice(0, 1) : primaryRaw;
                     const advanced = actions.filter((a) => a.style === 'secondary' || a.style === 'tertiary');
+                    const demotedPrimary = primaryRaw.length > 1 ? primaryRaw.slice(1).map((a) => ({ ...a, style: 'secondary' as const })) : [];
+
+                    const isLanguageSelection = String(uiAction.stage || '').toUpperCase() === 'LANGUAGE_SELECTION';
+                    const languageNote =
+                      isLanguageSelection
+                        ? 'Wersje językowe są niezależne (możesz później zrobić osobny przebieg dla DE/PL).'
+                        : null;
 
                     const renderButtons = (items: UIActionButton[]) => (
                       <div className="flex flex-wrap gap-2">
@@ -858,17 +937,27 @@ export default function CVGenerator() {
                           const isSecondary = a.style === 'secondary' || a.style === 'tertiary';
                           const isCancel = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK');
                           const payload = hasEditable && !isCancel ? formDraft : undefined;
+                          const isLangDisabled = isLanguageSelection && a.id !== 'LANGUAGE_SELECT_EN';
+                          const wantsDownload =
+                            a.id === 'REQUEST_GENERATE_PDF' &&
+                            (latestPdfBase64 || Boolean((cvPreview?.metadata as any)?.pdf_generated));
+
+                          const label = (() => {
+                            if (isLangDisabled) return `${a.label} (Coming soon)`;
+                            if (a.id === 'REQUEST_GENERATE_PDF') return wantsDownload ? 'Pobierz PDF' : 'Generuj PDF';
+                            return a.label;
+                          })();
                           return (
                             <Button
                               key={a.id}
                               variant={isSecondary ? 'secondary' : 'primary'}
+                              disabled={isLangDisabled}
+                              title={isLangDisabled ? 'Coming soon — najpierw dopracuj wersję EN.' : undefined}
                               onClick={() => {
                                 // If we already have a PDF in memory and the action is effectively "download",
                                 // download directly instead of round-tripping through the backend.
-                                const wantsDownload =
-                                  a.id === 'REQUEST_GENERATE_PDF' && String(a.label || '').toLowerCase().includes('pobierz');
                                 if (wantsDownload && latestPdfBase64) {
-                                  downloadPDF(latestPdfBase64, `CV_${Date.now()}.pdf`);
+                                  downloadPDF(latestPdfBase64, latestPdfDownloadName || `CV_${Date.now()}.pdf`);
                                   return;
                                 }
                                 void handleSendUserAction(a.id, payload);
@@ -876,7 +965,7 @@ export default function CVGenerator() {
                               loading={isLoading}
                               data-testid={`action-${a.id}`}
                             >
-                              {a.label}
+                              {label}
                             </Button>
                           );
                         })}
@@ -885,11 +974,12 @@ export default function CVGenerator() {
 
                     return (
                       <div className="space-y-2">
+                        {languageNote ? <div className="text-xs text-slate-600">{languageNote}</div> : null}
                         {primary.length ? renderButtons(primary) : renderButtons(actions)}
-                        {advanced.length ? (
+                        {advanced.length || demotedPrimary.length ? (
                           <details className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                             <summary className="cursor-pointer text-xs font-semibold text-slate-800">Więcej akcji</summary>
-                            <div className="mt-2">{renderButtons(advanced)}</div>
+                            <div className="mt-2">{renderButtons([...demotedPrimary, ...advanced])}</div>
                           </details>
                         ) : null}
                       </div>
@@ -996,7 +1086,7 @@ export default function CVGenerator() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => downloadPDF(latestPdfBase64, `CV_${Date.now()}.pdf`)}
+                    onClick={() => downloadPDF(latestPdfBase64, latestPdfDownloadName || `CV_${Date.now()}.pdf`)}
                     data-testid="download-pdf"
                   >
                     Pobierz PDF

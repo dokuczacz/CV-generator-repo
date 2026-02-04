@@ -394,7 +394,7 @@ def _apply_work_experience_proposal_with_locks(*, cv_data: dict, proposal_roles:
 
         # Never truncate bullets in backend. If the proposal violates hard limits,
         # skip applying this role to avoid silently corrupting content.
-        if len(bullets_clean) >= 3 and _bullets_within_limit(bullets_clean, hard_limit=180):
+        if len(bullets_clean) >= 3 and _bullets_within_limit(bullets_clean, hard_limit=200):
             new_role["bullets"] = bullets_clean
 
         # Final guard: employer must be present for validation/PDF generation.
@@ -606,7 +606,7 @@ _AI_PROMPT_BY_STAGE: dict[str, str] = {
         "Set location to an empty string in the proposal; the backend keeps imported locations. "
         "If a role is missing a location in the imported CV, the user will add it manually.\n\n"
         "LIMIT NOTES (2-page PDF constraints): "
-        "Aim for 1-2 rendered lines per bullet. Soft cap: 160 chars per bullet. Hard max: 180 chars (error). "
+        "Aim for 1-2 rendered lines per bullet. Soft cap: 180 chars per bullet. Hard max: 200 chars (error). "
         "Never end a bullet mid-sentence or with dangling words (e.g., 'with', 'to', 'and'). "
         "Each bullet must be a complete clause (action + object + outcome). "
         "If you must shorten, remove secondary qualifiers first (adjectives, examples, parentheticals) before cutting meaning.\n\n"
@@ -5456,6 +5456,43 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(assistant_text="Language selected. Proceeding...", meta_out=meta2, cv_out=cv_data)
 
+            if aid == "WIZARD_GOTO_STAGE":
+                payload = user_action_payload or {}
+                target = str(payload.get("target_stage") or "").strip().lower()
+
+                def _major(st: str) -> int | None:
+                    s = str(st or "").strip().lower()
+                    if s in ("contact", "contact_edit"):
+                        return 1
+                    if s in ("education", "education_edit_json"):
+                        return 2
+                    if s in ("job_posting", "job_posting_paste", "interests_edit"):
+                        return 3
+                    if s in ("work_experience", "work_notes_edit", "work_tailor_review", "work_tailor_feedback", "work_select_role", "work_role_view", "work_locations_edit"):
+                        return 4
+                    if s in ("it_ai_skills", "skills_notes_edit", "skills_tailor_review"):
+                        return 5
+                    if s in ("review_final", "generate_confirm"):
+                        return 6
+                    return None
+
+                cur_stage = _wizard_get_stage(meta2)
+                cur_major = _major(cur_stage)
+                tgt_major = _major(target)
+                if cur_major is None or tgt_major is None:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cannot navigate: unknown stage.", meta_out=meta2, cv_out=cv_data)
+                if tgt_major > cur_major:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cannot jump forward. Finish the current step first.", meta_out=meta2, cv_out=cv_data)
+
+                major_to_stage = {1: "contact", 2: "education", 3: "job_posting", 4: "work_experience", 5: "it_ai_skills", 6: "review_final"}
+                meta2 = _wizard_set_stage(meta2, major_to_stage.get(tgt_major, cur_stage))
+                # Clear any per-stage selection to avoid stale UI state.
+                meta2.pop("work_selected_index", None)
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(assistant_text="Navigated.", meta_out=meta2, cv_out=cv_data)
+
             if aid == "CONTACT_CONFIRM":
                 full_name = str(cv_data.get("full_name") or "").strip()
                 email = str(cv_data.get("email") or "").strip()
@@ -6002,9 +6039,9 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     roles = prop.roles if hasattr(prop, 'roles') else []
                     validation_warnings = []
                     validation_errors = []
-                    recommended_limit = 160
-                    soft_limit = 160
-                    hard_limit = 180
+                    recommended_limit = 180
+                    soft_limit = 180
+                    hard_limit = 200
                     total_bullets = 0
                     
                     for role_idx, role in enumerate(roles):
@@ -6093,7 +6130,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 # Deterministic guard: never apply a proposal that violates hard limits.
                 # (Backend must not truncate CV content under any circumstances.)
-                hard_limit = 180
+                hard_limit = 200
                 violations: list[str] = []
                 for role_idx, r in enumerate(roles[:8]):
                     rr = _normalize_work_role_from_proposal(r) if isinstance(r, dict) else {"employer": "", "bullets": []}
@@ -6773,6 +6810,123 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             pm = payload.get("pdf_metadata") if isinstance(payload.get("pdf_metadata"), dict) else None
                             if pm and pm.get("download_error"):
                                 err = f"{err or 'PDF generation failed'} (download_error={pm.get('download_error')})"
+
+                            # Auto-fix (bounded): if validation fails, attempt one AI repair pass and retry once.
+                            try:
+                                auto_fix_enabled = str(os.environ.get("CV_AUTO_FIX_VALIDATION", "1")).strip() == "1"
+                            except Exception:
+                                auto_fix_enabled = True
+                            already_attempted = bool(meta2.get("auto_fix_validation_attempted_at"))
+                            can_try_fix = bool(auto_fix_enabled) and bool(_openai_enabled()) and (not already_attempted)
+
+                            if can_try_fix and v and isinstance(v.get("errors"), list) and v.get("errors"):
+                                fix_errors = v.get("errors") or []
+                                # Only attempt auto-fix when the failure is in work experience (most common hard blocker).
+                                wants_fix = any(
+                                    str(e.get("field") or "").strip().startswith("work_experience[") if isinstance(e, dict) else False
+                                    for e in fix_errors
+                                )
+                                if wants_fix:
+                                    try:
+                                        job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
+                                        job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+                                        notes = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
+                                        profile = str(cv_data.get("profile") or "").strip()
+                                        target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
+
+                                        # Serialize current work roles (as-is) so the model can rewrite only what's necessary.
+                                        work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                                        work_list = work if isinstance(work, list) else []
+                                        role_blocks = []
+                                        for r in work_list[:12]:
+                                            if not isinstance(r, dict):
+                                                continue
+                                            company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
+                                            title = _sanitize_for_prompt(str(r.get("title") or r.get("position") or ""))
+                                            date = _sanitize_for_prompt(str(r.get("date_range") or ""))
+                                            bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else r.get("responsibilities")
+                                            bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:12])
+                                            head = " | ".join([p for p in [title, company, date] if p]) or "Role"
+                                            role_blocks.append(f"{head}\n{bullet_lines}")
+                                        roles_text = "\n\n".join(role_blocks)
+
+                                        fix_lines = []
+                                        for e in fix_errors[:8]:
+                                            if not isinstance(e, dict):
+                                                continue
+                                            f = str(e.get("field") or "").strip()
+                                            m = str(e.get("message") or "").strip()
+                                            s = str(e.get("suggestion") or "").strip()
+                                            one = m or f or "validation_error"
+                                            if f and f not in one:
+                                                one = f"{f}: {one}"
+                                            if s:
+                                                one = f"{one} | suggestion: {s}"
+                                            fix_lines.append(one)
+                                        fix_feedback = (
+                                            "FIX_VALIDATION: rewrite ONLY what is necessary to pass validation.\n"
+                                            "- Keep the same roles (companies + date ranges) and do not remove roles.\n"
+                                            "- Keep 3-4 bullets per role.\n"
+                                            "- Ensure every bullet is within hard max length and ends as a complete clause.\n"
+                                            "- Do NOT invent facts, tools, or numbers.\n"
+                                            "\nValidation errors:\n"
+                                            + "\n".join([f"- {ln}" for ln in fix_lines if ln])
+                                        )
+
+                                        user_text_fix = (
+                                            f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
+                                            f"[CANDIDATE_PROFILE]\n{_sanitize_for_prompt(profile[:2000])}\n\n"
+                                            f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
+                                            f"[TAILORING_FEEDBACK]\n{_escape_user_input_for_prompt(fix_feedback)}\n\n"
+                                            f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
+                                        )
+
+                                        ok_fix, parsed_fix, err_fix = _openai_json_schema_call(
+                                            system_prompt=_build_ai_system_prompt(stage="work_experience", target_language=target_lang),
+                                            user_text=user_text_fix,
+                                            trace_id=trace_id,
+                                            session_id=session_id,
+                                            response_format=get_work_experience_bullets_proposal_response_format(),
+                                            max_output_tokens=1800,
+                                            stage="work_experience",
+                                        )
+                                        if ok_fix and isinstance(parsed_fix, dict):
+                                            try:
+                                                prop_fix = parse_work_experience_bullets_proposal(parsed_fix)
+                                                roles_fix = prop_fix.roles if hasattr(prop_fix, "roles") else []
+                                                if roles_fix:
+                                                    cv_data = _apply_work_experience_proposal_with_locks(
+                                                        cv_data=cv_data,
+                                                        proposal_roles=[r.dict() if hasattr(r, "dict") else r for r in roles_fix[:5]],
+                                                        meta=meta2,
+                                                    )
+                                                    meta2["auto_fix_validation_attempted_at"] = _now_iso()
+                                                    meta2["auto_fix_validation_openai_response_id"] = str(parsed_fix.get("_openai_response_id") or "")[:120]
+                                                    cv_data, meta2 = _persist(cv_data, meta2)
+                                                    # Retry PDF generation once after applying fixes.
+                                                    status3, payload3, content_type3 = _try_generate(force_regen=True)
+                                                    if (
+                                                        status3 == 200
+                                                        and content_type3 == "application/pdf"
+                                                        and isinstance(payload3, dict)
+                                                        and isinstance(payload3.get("pdf_bytes"), (bytes, bytearray))
+                                                    ):
+                                                        pdf_bytes = bytes(payload3["pdf_bytes"])
+                                                        sess_after = store.get_session(session_id) or {}
+                                                        meta_after = sess_after.get("metadata") if isinstance(sess_after.get("metadata"), dict) else meta2
+                                                        cv_after = sess_after.get("cv_data") if isinstance(sess_after.get("cv_data"), dict) else cv_data
+                                                        meta_after = _wizard_set_stage(dict(meta_after or {}), "review_final")
+                                                        cv_data, meta2 = _persist(dict(cv_after or {}), meta_after)
+                                                        return _wizard_resp(
+                                                            assistant_text="Validation fixed automatically. PDF generated.",
+                                                            meta_out=meta2,
+                                                            cv_out=cv_data,
+                                                            pdf_bytes=pdf_bytes,
+                                                        )
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
                         meta2_final = _wizard_set_stage(meta2, "review_final")
                         cv_data, meta2_final = _persist(cv_data, meta2_final)
                         return _wizard_resp(
