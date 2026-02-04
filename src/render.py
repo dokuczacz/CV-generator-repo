@@ -16,6 +16,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates" / "html"
 TEMPLATE_NAME = "cv_template_2pages_2025.html"
 CSS_NAME = "cv_template_2pages_2025.css"
+CL_TEMPLATE_NAME = "cover_letter_template_2025.html"
+CL_CSS_NAME = "cover_letter_template_2025.css"
 
 
 class RenderError(Exception):
@@ -26,8 +28,18 @@ def _count_pdf_pages(pdf_bytes: bytes) -> int:
     try:
         from PyPDF2 import PdfReader
     except ImportError as exc:
+        # Fallback heuristic (no dependency): count "/Type /Page" markers (exclude "/Pages").
+        # This is sufficient for DoD enforcement in CI/dev where PyPDF2 may be absent.
+        import re
+
+        try:
+            n = len(re.findall(rb"/Type\s*/Page(?!s)\b", pdf_bytes or b""))
+            if n > 0:
+                return int(n)
+        except Exception:
+            pass
         raise RenderError(
-            "PyPDF2 not installed. Install with `pip install PyPDF2` to enable DoD page-count validation."
+            "PyPDF2 not installed and page-count heuristic failed. Install with `pip install PyPDF2` to enable strict page-count validation."
         ) from exc
 
     import io
@@ -57,6 +69,11 @@ def _load_env() -> Environment:
         )
         # Pre-compile the CV template on first load
         _jinja_env.get_template(TEMPLATE_NAME)
+        try:
+            _jinja_env.get_template(CL_TEMPLATE_NAME)
+        except Exception:
+            # Keep CV rendering working in older checkouts where the CL template isn't present.
+            pass
     return _jinja_env
 
 
@@ -124,6 +141,73 @@ def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
         context["_inline_css"] = css
     context["_styles"] = styles
     return template.render(**context)
+
+
+def render_cover_letter_html(payload: Dict[str, Any], inline_css: bool = True) -> str:
+    """Render cover letter HTML from a backend-derived payload."""
+    env = _load_env()
+    template = env.get_template(CL_TEMPLATE_NAME)
+    css = ""
+    if inline_css:
+        css_path = TEMPLATES_DIR / CL_CSS_NAME
+        css = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
+
+    # Reuse style tokens from the CV extractor for visual consistency.
+    docx_path = Path(__file__).resolve().parents[1] / "wzory" / "CV_template_2pages_2025.docx"
+    if docx_path.exists():
+        try:
+            from src.style_extractor import extract_styles_dict  # type: ignore
+        except Exception:
+            from style_extractor import extract_styles_dict  # type: ignore
+        styles = extract_styles_dict(docx_path)
+    else:
+        styles = {
+            "page_width_mm": 210.0,
+            "page_height_mm": 297.0,
+            "margin_top_mm": 20.0,
+            "margin_right_mm": 22.4,
+            "margin_bottom_mm": 20.0,
+            "margin_left_mm": 25.0,
+            "font_family": "Arial",
+            "body_font_size_pt": 11.0,
+            "name_font_size_pt": 16.0,
+            "title_color_hex": "#0000ff",
+            "body_color_hex": "#000000",
+            "section_gap_mm": 6.0,
+        }
+
+    context = dict(payload or {})
+    if inline_css:
+        context["_inline_css"] = css
+    context["_styles"] = styles
+    return template.render(**context)
+
+
+def render_cover_letter_pdf(
+    payload: Dict[str, Any], *, enforce_one_page: bool = True, use_cache: bool = True
+) -> bytes:
+    if use_cache:
+        cache_key = _cv_cache_key({"cover_letter": payload})
+        cl_json = json.dumps(payload, sort_keys=True)
+        pdf = _render_cover_letter_pdf_cached(cache_key, cl_json)
+    else:
+        html = render_cover_letter_html(payload, inline_css=True)
+        pdf = _render_pdf_weasyprint(html, cv_data=None)
+
+    if enforce_one_page:
+        pages = count_pdf_pages(pdf)
+        if pages != 1:
+            raise RenderError(f"DoD violation: pages != 1 (got {pages}).")
+    return pdf
+
+
+@lru_cache(maxsize=16)
+def _render_cover_letter_pdf_cached(cache_key: str, payload_json: str) -> bytes:
+    """Cached CL rendering (same cache infra as CV, but distinct renderer)."""
+    _ = cache_key  # stable key; payload_json is used for correctness
+    data = json.loads(payload_json)
+    html = render_cover_letter_html(data, inline_css=True)
+    return _render_pdf_weasyprint(html, cv_data=None)
 
 
 # Module-level singleton for WeasyPrint font configuration (optimization: cache fonts)

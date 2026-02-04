@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cover Letter</title>
+    {% if _inline_css %}
+    <style>
+      :root {
+        --font-family: {{ (_styles.font_family or "Arial") }};
+      }
+      {{ _inline_css }}
+    </style>
+    {% endif %}
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div class="sender">
+          <div class="name">{{ sender_name }}</div>
+          {% if sender_address %}<div class="line">{{ sender_address }}</div>{% endif %}
+          {% if sender_email %}<div class="line">{{ sender_email }}</div>{% endif %}
+          {% if sender_phone %}<div class="line">{{ sender_phone }}</div>{% endif %}
+        </div>
+        <div class="meta">
+          <div class="line">{{ date }}</div>
+        </div>
+      </div>
+
+      {% if recipient_company or recipient_job_title %}
+      <div class="recipient">
+        {% if recipient_company %}<div class="line">{{ recipient_company }}</div>{% endif %}
+        {% if recipient_job_title %}<div class="line">{{ recipient_job_title }}</div>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="body">
+        {% if opening_paragraph %}<p>{{ opening_paragraph }}</p>{% endif %}
+        {% for p in core_paragraphs or [] %}
+          {% if p %}<p>{{ p }}</p>{% endif %}
+        {% endfor %}
+        {% if closing_paragraph %}<p>{{ closing_paragraph }}</p>{% endif %}
+        {% if signoff %}<div class="signoff">{{ signoff }}</div>{% endif %}
+      </div>
+    </div>
+  </body>
+</html>
+

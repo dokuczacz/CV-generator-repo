@@ -50,7 +50,7 @@ from src.context_pack import build_context_pack_v2, format_context_pack_with_del
 from src.docx_photo import extract_first_photo_from_docx_bytes
 from src.docx_prefill import prefill_cv_from_docx_bytes
 from src.normalize import normalize_cv_data
-from src.render import count_pdf_pages, render_html, render_pdf
+from src.render import count_pdf_pages, render_cover_letter_pdf, render_html, render_pdf
 from src.schema_validator import validate_canonical_schema
 from src.profile_store import get_profile_store
 from src.session_store import CVSessionStore
@@ -60,6 +60,7 @@ from src.cv_fsm import CVStage, SessionState, ValidationState, resolve_stage, de
 from src.job_reference import get_job_reference_response_format, parse_job_reference, format_job_reference_for_display
 from src.work_experience_proposal import get_work_experience_bullets_proposal_response_format, parse_work_experience_bullets_proposal
 from src.further_experience_proposal import get_further_experience_proposal_response_format, parse_further_experience_proposal
+from src.cover_letter_proposal import get_cover_letter_proposal_response_format, parse_cover_letter_proposal
 from src.json_repair import extract_first_json_value, sanitize_json_text, strip_markdown_code_fences
 from src.skills_proposal import (
     get_skills_proposal_response_format,
@@ -99,6 +100,11 @@ _SCHEMA_REPAIR_HINTS_BY_STAGE: dict[str, str] = {
         "Do not include literal newline characters inside JSON strings; use spaces instead. "
         "Do not truncate the JSON; ensure all required keys are present. "
         "Keep arrays the same length as input and keep every string single-line."
+    ),
+    "cover_letter": (
+        "Return ONLY valid JSON (no markdown/code fences, no prose). "
+        "Do not include literal newline characters inside JSON strings; use spaces instead (signoff may contain one '\\n'). "
+        "No bullet points. Max 450 words total."
     ),
 }
 
@@ -177,6 +183,76 @@ def _normalize_date_range_one_line(s: str) -> str:
     txt = re.sub(r"\s*-\s*", " - ", txt)
     txt = re.sub(r"\s+", " ", txt).strip()
     return txt
+
+
+def _infer_style_profile(cv_data: dict) -> str:
+    """Infer a simple style profile from CV data (deterministic heuristic)."""
+    try:
+        it = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
+        tech = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
+        work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+        has_metrics = False
+        for r in work[:6] if isinstance(work, list) else []:
+            if not isinstance(r, dict):
+                continue
+            bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else []
+            for b in bullets[:8] if isinstance(bullets, list) else []:
+                if re.search(r"\b\d+%|\b\d+\s*(k|K)\b|\b\d+\s*(months?|weeks?)\b", str(b)):
+                    has_metrics = True
+                    break
+            if has_metrics:
+                break
+        if len(it) >= 6 and len(tech) <= 4:
+            return "technical"
+        if len(tech) >= 6 and len(it) <= 4:
+            return "managerial"
+        if has_metrics:
+            return "mixed_metrics"
+        return "mixed"
+    except Exception:
+        return "mixed"
+
+
+def _count_words(s: str) -> int:
+    return len([w for w in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9]+", str(s or "")) if w.strip()])
+
+
+def _validate_cover_letter_block(*, block: dict, cv_data: dict) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    if not isinstance(block, dict):
+        return False, ["Cover letter block missing or invalid"]
+
+    opening = str(block.get("opening_paragraph") or "").strip()
+    core = block.get("core_paragraphs") if isinstance(block.get("core_paragraphs"), list) else []
+    closing = str(block.get("closing_paragraph") or "").strip()
+    signoff = str(block.get("signoff") or "").strip()
+
+    if not opening or not closing or not signoff:
+        errors.append("Missing required paragraphs")
+
+    core_clean = [str(p).strip() for p in (core or []) if str(p).strip()]
+    if not core_clean:
+        errors.append("Missing core paragraphs")
+
+    text_all = "\n\n".join([opening] + core_clean + [closing, signoff]).strip()
+
+    # No bullets
+    if re.search(r"(^|\n)\s*[-•]\s+", text_all):
+        errors.append("Bullet points are not allowed")
+
+    # Word cap (exclude header, which backend derives)
+    wc = _count_words("\n\n".join([opening] + core_clean + [closing]).strip())
+    if wc > 450:
+        errors.append(f"Word cap exceeded: {wc} (max 450)")
+
+    # Ensure sign-off is anchored to the CV identity
+    full_name = str(cv_data.get("full_name") or "").strip()
+    if not full_name:
+        errors.append("CV full_name is missing (needed for sign-off)")
+    elif full_name.casefold() not in signoff.casefold():
+        errors.append("Sign-off must include the CV full name")
+
+    return (len(errors) == 0), errors
 
 
 def _normalize_work_role_from_proposal(raw: dict) -> dict:
@@ -692,6 +768,29 @@ _AI_PROMPT_BY_STAGE: dict[str, str] = {
         "  notes: 'explanation'  // String (optional, max 500 chars)\n"
         "}\n"
         "Both lists must be arrays of strings. Do not duplicate skills across sections."
+    ),
+    "cover_letter": (
+        "You are generating a formal European (CH/EU) cover letter.\n\n"
+        "Hard rules:\n"
+        "- The cover letter must be strictly consistent with the provided CV data.\n"
+        "- Do NOT add any facts, skills, achievements, tools, companies, dates, or claims not present in the CV data.\n"
+        "- Match the professional tone, seniority, and style of the CV (sentence length, technical vs managerial emphasis, use of metrics).\n"
+        "- Be concise, factual, and neutral. Avoid motivational language, buzzwords, and self-praise.\n"
+        "- No bullet points, no section headings beyond the fixed structure.\n"
+        "- Max 450 words total.\n\n"
+        "Fixed structure (do not reorder):\n"
+        "1) Opening paragraph (2 sentences: profile + application context)\n"
+        "2) Core paragraph 1 (primary domain from CV)\n"
+        "3) Core paragraph 2 (optional; secondary domain if applicable)\n"
+        "4) Closing paragraph (neutral closing)\n"
+        "5) Formal sign-off\n\n"
+        "Job adaptation (optional):\n"
+        "- If a job reference is provided, emphasize relevant CV elements.\n"
+        "- Do not restate the job posting; focus on alignment using CV facts.\n\n"
+        "Header policy:\n"
+        "- Do NOT invent contact details, address, date, or recipient details.\n"
+        "- Set all header fields to empty strings; the backend will fill them deterministically.\n\n"
+        "Output language: {target_language}."
     ),
     # Interests (keep concise; avoid sensitive details).
     "interests": (
@@ -1992,6 +2091,175 @@ def _compute_pdf_download_name(*, cv_data: dict, meta: dict) -> str:
     return f"CV_{name_part}_{date_stamp}.pdf"
 
 
+def _compute_cover_letter_download_name(*, cv_data: dict, meta: dict) -> str:
+    full_name = ""
+    if isinstance(cv_data, dict):
+        v = cv_data.get("full_name")
+        if isinstance(v, str):
+            full_name = v.strip()
+
+    company = _extract_company_from_metadata(meta if isinstance(meta, dict) else {})
+    job_title = _extract_job_title_from_metadata(meta)
+
+    name_part = _sanitize_filename_part(full_name, max_len=40) or "Candidate"
+    date_stamp = datetime.utcnow().strftime("%Y-%m-%d")
+
+    if company:
+        company_part = _sanitize_filename_part(company, max_len=40)
+        return f"CoverLetter_{name_part}_{company_part}_{date_stamp}.pdf"
+    if job_title:
+        job_part = _sanitize_filename_part(job_title, max_len=40)
+        return f"CoverLetter_{name_part}_{job_part}_{date_stamp}.pdf"
+    return f"CoverLetter_{name_part}_{date_stamp}.pdf"
+
+
+def _build_cover_letter_render_payload(*, cv_data: dict, meta: dict, block: dict) -> dict:
+    addr_lines = cv_data.get("address_lines")
+    if isinstance(addr_lines, list):
+        addr = "\n".join([str(x).strip() for x in addr_lines if str(x).strip()])
+    else:
+        addr = str(cv_data.get("address") or "").strip()
+
+    jr = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else {}
+    recipient_company = str(jr.get("company") or "").strip()
+    recipient_job_title = str(jr.get("title") or "").strip()
+
+    return {
+        "sender_name": str(cv_data.get("full_name") or "").strip(),
+        "sender_email": str(cv_data.get("email") or "").strip(),
+        "sender_phone": str(cv_data.get("phone") or "").strip(),
+        "sender_address": addr,
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "recipient_company": recipient_company,
+        "recipient_job_title": recipient_job_title,
+        "opening_paragraph": str(block.get("opening_paragraph") or "").strip(),
+        "core_paragraphs": [str(p).strip() for p in (block.get("core_paragraphs") or []) if str(p).strip()],
+        "closing_paragraph": str(block.get("closing_paragraph") or "").strip(),
+        # Backend enforces deterministic sign-off identity.
+        "signoff": f"Kind regards,\n{str(cv_data.get('full_name') or '').strip()}",
+    }
+
+
+def _generate_cover_letter_block_via_openai(
+    *,
+    cv_data: dict,
+    meta: dict,
+    trace_id: str,
+    session_id: str,
+    target_language: str,
+) -> tuple[bool, dict | None, str]:
+    profile = str(cv_data.get("profile") or "").strip()
+
+    job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else None
+    job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+    job_text = str(meta.get("job_posting_text") or "")
+
+    # If we only have raw job text, extract a compact job summary first (best-effort).
+    if (not job_summary) and job_text and len(job_text) >= 80:
+        ok_jr, parsed_jr, err_jr = _openai_json_schema_call(
+            system_prompt=_build_ai_system_prompt(stage="job_posting"),
+            user_text=job_text[:20000],
+            trace_id=trace_id,
+            session_id=session_id,
+            response_format=get_job_reference_response_format(),
+            max_output_tokens=900,
+            stage="job_posting",
+        )
+        if ok_jr and isinstance(parsed_jr, dict):
+            try:
+                jr = parse_job_reference(parsed_jr)
+                meta["job_reference"] = jr.dict()
+                meta["job_reference_status"] = "ok"
+                job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else None
+                job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+            except Exception as e:
+                meta["job_reference_error"] = str(e)[:400]
+                meta["job_reference_status"] = "parse_failed"
+        else:
+            meta["job_reference_error"] = str(err_jr)[:400]
+            meta["job_reference_status"] = "call_failed"
+
+    # Compact CV excerpt.
+    role_blocks: list[str] = []
+    work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+    for r in (work_list or [])[:5]:
+        if not isinstance(r, dict):
+            continue
+        company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
+        title = _sanitize_for_prompt(str(r.get("title") or r.get("position") or ""))
+        date = _sanitize_for_prompt(str(r.get("date_range") or ""))
+        bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else r.get("responsibilities")
+        bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:5])
+        head = " | ".join([p for p in [title, company, date] if p]) or "Role"
+        role_blocks.append(f"{head}\n{bullet_lines}")
+    roles_text = "\n\n".join(role_blocks)
+
+    it_ai = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
+    tech = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
+    skills_text = "\n".join([f"- {str(s).strip()}" for s in (it_ai or [])[:8] if str(s).strip()] + [f"- {str(s).strip()}" for s in (tech or [])[:8] if str(s).strip()])
+
+    style_profile = _infer_style_profile(cv_data)
+
+    user_text = (
+        f"[JOB_REFERENCE]\n{_sanitize_for_prompt(job_summary)}\n\n"
+        f"[STYLE_PROFILE]\n{_sanitize_for_prompt(style_profile)}\n\n"
+        f"[CV_PROFILE]\n{_sanitize_for_prompt(profile[:2000])}\n\n"
+        f"[WORK_EXPERIENCE]\n{roles_text}\n\n"
+        f"[SKILLS]\n{_sanitize_for_prompt(skills_text[:2000])}\n"
+    )
+
+    def _call(extra_fix: str | None = None) -> tuple[bool, dict | None, str]:
+        system_prompt = _build_ai_system_prompt(stage="cover_letter", target_language=target_language, extra=extra_fix)
+        return _openai_json_schema_call(
+            system_prompt=system_prompt,
+            user_text=user_text,
+            trace_id=trace_id,
+            session_id=session_id,
+            response_format=get_cover_letter_proposal_response_format(),
+            max_output_tokens=1200,
+            stage="cover_letter",
+        )
+
+    ok, parsed, err = _call(None)
+    if not ok or not isinstance(parsed, dict):
+        return False, None, str(err)
+
+    try:
+        prop = parse_cover_letter_proposal(parsed)
+        cl_block = {
+            "opening_paragraph": str(prop.opening_paragraph or "").strip(),
+            "core_paragraphs": [str(p).strip() for p in (prop.core_paragraphs or []) if str(p).strip()],
+            "closing_paragraph": str(prop.closing_paragraph or "").strip(),
+            "signoff": str(prop.signoff or "").strip(),
+            "notes": str(prop.notes or "")[:500],
+            "openai_response_id": str(parsed.get("_openai_response_id") or "")[:120],
+            "created_at": _now_iso(),
+        }
+        ok2, errs2 = _validate_cover_letter_block(block=cl_block, cv_data=cv_data)
+        if ok2:
+            return True, cl_block, ""
+
+        # Bounded fix attempt (semantic validation, not schema repair).
+        ok_fix, parsed_fix, err_fix = _call("Fix these validation errors:\n- " + "\n- ".join(errs2[:8]))
+        if not ok_fix or not isinstance(parsed_fix, dict):
+            return False, None, "Validation failed: " + "; ".join(errs2[:4])
+        prop_fix = parse_cover_letter_proposal(parsed_fix)
+        cl_block2 = {
+            "opening_paragraph": str(prop_fix.opening_paragraph or "").strip(),
+            "core_paragraphs": [str(p).strip() for p in (prop_fix.core_paragraphs or []) if str(p).strip()],
+            "closing_paragraph": str(prop_fix.closing_paragraph or "").strip(),
+            "signoff": str(prop_fix.signoff or "").strip(),
+            "notes": str(prop_fix.notes or "")[:500],
+            "openai_response_id": str(parsed_fix.get("_openai_response_id") or "")[:120],
+            "created_at": _now_iso(),
+        }
+        ok3, errs3 = _validate_cover_letter_block(block=cl_block2, cv_data=cv_data)
+        if not ok3:
+            return False, None, "Validation failed: " + "; ".join(errs3[:4])
+        return True, cl_block2, ""
+    except Exception as e:
+        return False, None, str(e)
+
 def _build_session_debug_snapshot(session: dict) -> dict:
     cv_data = session.get("cv_data") or {}
     meta = session.get("metadata") or {}
@@ -2320,6 +2588,23 @@ def _tool_schemas_for_responses(*, allow_persist: bool, stage: str = "review_ses
         tools.append(
             {
                 "type": "function",
+                "name": "generate_cover_letter_from_session",
+                "strict": False,
+                "description": "Generate and persist a 1-page Cover Letter PDF for the current session (execution stage only).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "language": {"type": "string"},
+                    },
+                    "required": ["session_id"],
+                    "additionalProperties": False,
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
                 "name": "get_pdf_by_ref",
                 "strict": False,
                 "description": "Fetch previously generated PDF by reference (execution stage only).",
@@ -2352,6 +2637,18 @@ def _sanitize_tool_output_for_model(tool_name: str, payload: Any) -> str:
                         "render_ms": payload.get("render_ms"),
                         "validation_passed": payload.get("validation_passed"),
                         "pdf_pages": payload.get("pdf_pages"),
+                    },
+                    ensure_ascii=False,
+                )
+        if tool_name == "generate_cover_letter_from_session":
+            if isinstance(payload, dict):
+                return json.dumps(
+                    {
+                        "ok": payload.get("success") is True and bool(payload.get("pdf_ref")),
+                        "success": payload.get("success"),
+                        "error": payload.get("error"),
+                        "pdf_ref": payload.get("pdf_ref"),
+                        "pdf_size_bytes": payload.get("pdf_size_bytes"),
                     },
                     ensure_ascii=False,
                 )
@@ -2673,7 +2970,7 @@ def _run_responses_tool_loop(
             tool_payload: Any = {}
             tool_output_for_model = "{}"
             try:
-                if name in ("generate_cv_from_session", "get_pdf_by_ref") and stage not in ("generate_pdf", "fix_validation"):
+                if name in ("generate_cv_from_session", "generate_cover_letter_from_session", "get_pdf_by_ref") and stage not in ("generate_pdf", "fix_validation"):
                     tool_payload = {"error": "pdf_tool_not_allowed_in_stage", "stage": stage}
                 elif name == "get_cv_session":
                     sid = args.get("session_id") or session_id
@@ -2819,6 +3116,36 @@ def _run_responses_tool_loop(
                         else:
                             tool_payload = payload if isinstance(payload, dict) else {"error": "generate_failed"}
                             logging.warning(f"=== TOOL: generate_cv_from_session (v1) FAILED === status={status} payload={tool_payload}")
+                elif name == "generate_cover_letter_from_session":
+                    sid = args.get("session_id") or session_id
+                    logging.info(f"=== TOOL: generate_cover_letter_from_session (v1) === session_id={sid} trace_id={trace_id}")
+                    s = store.get_session(str(sid))
+                    if not s:
+                        tool_payload = {"error": "Session not found or expired"}
+                        logging.warning("=== TOOL: generate_cover_letter_from_session (v1) FAILED === session not found")
+                    else:
+                        status, payload, content_type = _tool_generate_cover_letter_from_session(
+                            session_id=str(sid),
+                            language=str(args.get("language") or "").strip() or None,
+                            session=s,
+                        )
+                        if content_type == "application/pdf" and isinstance(payload, dict) and isinstance(payload.get("pdf_bytes"), (bytes, bytearray)) and status == 200:
+                            pdf_bytes = bytes(payload["pdf_bytes"])
+                            pdf_meta = payload.get("pdf_metadata") or {}
+                            tool_payload = {
+                                "success": True,
+                                "session_id": sid,
+                                "pdf_ref": pdf_meta.get("pdf_ref") or payload.get("pdf_ref"),
+                                "pdf_size_bytes": len(pdf_bytes),
+                            }
+                            logging.info(
+                                "=== TOOL: generate_cover_letter_from_session (v1) SUCCESS === pdf_size=%d bytes pdf_ref=%s",
+                                len(pdf_bytes),
+                                pdf_meta.get("pdf_ref") or payload.get("pdf_ref"),
+                            )
+                        else:
+                            tool_payload = payload if isinstance(payload, dict) else {"error": "generate_failed"}
+                            logging.warning(f"=== TOOL: generate_cover_letter_from_session (v1) FAILED === status={status} payload={tool_payload}")
                 elif name == "get_pdf_by_ref":
                     sid = args.get("session_id") or session_id
                     pdf_ref = str(args.get("pdf_ref") or "").strip()
@@ -3413,7 +3740,7 @@ def _run_responses_tool_loop_v2(
             tool_start = time.time()
             tool_payload: Any = {}
             try:
-                if name in ("generate_cv_from_session", "get_pdf_by_ref") and stage not in ("generate_pdf", "fix_validation"):
+                if name in ("generate_cv_from_session", "generate_cover_letter_from_session", "get_pdf_by_ref") and stage not in ("generate_pdf", "fix_validation"):
                     tool_payload = {"error": "pdf_tool_not_allowed_in_stage", "stage": stage}
                 elif name == "get_cv_session":
                     sid = args.get("session_id") or session_id
@@ -3575,6 +3902,36 @@ def _run_responses_tool_loop_v2(
                         else:
                             tool_payload = payload if isinstance(payload, dict) else {"error": "generate_failed"}
                             logging.warning(f"=== TOOL: generate_cv_from_session (v2) FAILED === status={status} payload={tool_payload}")
+                elif name == "generate_cover_letter_from_session":
+                    sid = args.get("session_id") or session_id
+                    logging.info(f"=== TOOL: generate_cover_letter_from_session (v2) === session_id={sid} trace_id={trace_id}")
+                    s = store.get_session(str(sid))
+                    if not s:
+                        tool_payload = {"error": "Session not found or expired"}
+                        logging.warning("=== TOOL: generate_cover_letter_from_session (v2) FAILED === session not found")
+                    else:
+                        status, payload, content_type = _tool_generate_cover_letter_from_session(
+                            session_id=str(sid),
+                            language=str(args.get("language") or "").strip() or None,
+                            session=s,
+                        )
+                        if content_type == "application/pdf" and isinstance(payload, dict) and isinstance(payload.get("pdf_bytes"), (bytes, bytearray)) and status == 200:
+                            pdf_bytes = bytes(payload["pdf_bytes"])
+                            pdf_meta = payload.get("pdf_metadata") or {}
+                            tool_payload = {
+                                "success": True,
+                                "session_id": sid,
+                                "pdf_ref": pdf_meta.get("pdf_ref") or payload.get("pdf_ref"),
+                                "pdf_size_bytes": len(pdf_bytes),
+                            }
+                            logging.info(
+                                "=== TOOL: generate_cover_letter_from_session (v2) SUCCESS === pdf_size=%d bytes pdf_ref=%s",
+                                len(pdf_bytes),
+                                pdf_meta.get("pdf_ref") or payload.get("pdf_ref"),
+                            )
+                        else:
+                            tool_payload = payload if isinstance(payload, dict) else {"error": "generate_failed"}
+                            logging.warning(f"=== TOOL: generate_cover_letter_from_session (v2) FAILED === status={status} payload={tool_payload}")
                 elif name == "get_pdf_by_ref":
                     sid = args.get("session_id") or session_id
                     pdf_ref = str(args.get("pdf_ref") or "").strip()
@@ -4571,6 +4928,29 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
         if wizard_stage == "review_final":
             pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
             has_pdf = bool(meta.get("pdf_generated") or (isinstance(pdf_refs, dict) and len(pdf_refs) > 0))
+            target_lang = str(meta.get("target_language") or meta.get("language") or "en").strip().lower()
+
+            actions: list[dict] = [
+                {
+                    "id": "REQUEST_GENERATE_PDF",
+                    "label": "Pobierz PDF" if has_pdf else "Generate PDF",
+                    "style": "primary",
+                }
+            ]
+
+            try:
+                cover_enabled = str(os.environ.get("CV_ENABLE_COVER_LETTER", "0")).strip() == "1"
+            except Exception:
+                cover_enabled = False
+            if cover_enabled and target_lang == "en" and _openai_enabled():
+                has_cover = bool(isinstance(meta.get("cover_letter_pdf_ref"), str) and meta.get("cover_letter_pdf_ref"))
+                actions.append(
+                    {
+                        "id": "COVER_LETTER_PREVIEW",
+                        "label": "Cover Letter (download)" if has_cover else "Generate Cover Letter (optional)",
+                        "style": "secondary",
+                    }
+                )
 
             return {
                 "kind": "review_form",
@@ -4578,12 +4958,39 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
                 "title": "Stage 6/6 — Generate",
                 "text": "PDF is ready. Download it?" if has_pdf else "Your CV is ready. Generate PDF?",
                 "fields": [],
+                "actions": actions,
+                "disable_free_text": True,
+            }
+
+        if wizard_stage == "cover_letter_review":
+            cl = meta.get("cover_letter_block") if isinstance(meta.get("cover_letter_block"), dict) else None
+            fields_list: list[dict] = []
+            if isinstance(cl, dict):
+                fields_list.append({"key": "opening", "label": "Opening", "value": str(cl.get("opening_paragraph") or "").strip()})
+                core = cl.get("core_paragraphs") if isinstance(cl.get("core_paragraphs"), list) else []
+                if len(core) >= 1:
+                    fields_list.append({"key": "core1", "label": "Core paragraph 1", "value": str(core[0] or "").strip()})
+                if len(core) >= 2:
+                    fields_list.append({"key": "core2", "label": "Core paragraph 2", "value": str(core[1] or "").strip()})
+                fields_list.append({"key": "closing", "label": "Closing", "value": str(cl.get("closing_paragraph") or "").strip()})
+                fields_list.append({"key": "signoff", "label": "Sign-off", "value": str(cl.get("signoff") or "").strip()})
+            if not fields_list:
+                fields_list = [{"key": "cover_letter", "label": "Cover letter", "value": "(not generated)"}]
+
+            has_cover = bool(isinstance(meta.get("cover_letter_pdf_ref"), str) and meta.get("cover_letter_pdf_ref"))
+            return {
+                "kind": "review_form",
+                "stage": "COVER_LETTER",
+                "title": "Stage 6/6 — Cover Letter (optional)",
+                "text": "Review your cover letter draft. Generate the final 1-page PDF when ready.",
+                "fields": fields_list,
                 "actions": [
+                    {"id": "COVER_LETTER_BACK", "label": "Back", "style": "secondary"},
                     {
-                        "id": "REQUEST_GENERATE_PDF",
-                        "label": "Pobierz PDF" if has_pdf else "Generate PDF",
+                        "id": "COVER_LETTER_GENERATE",
+                        "label": "Download Cover Letter PDF" if has_cover else "Generate final Cover Letter PDF",
                         "style": "primary",
-                    }
+                    },
                 ],
                 "disable_free_text": True,
             }
@@ -5472,7 +5879,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         return 4
                     if s in ("it_ai_skills", "skills_notes_edit", "skills_tailor_review"):
                         return 5
-                    if s in ("review_final", "generate_confirm"):
+                    if s in ("review_final", "generate_confirm", "cover_letter_review"):
                         return 6
                     return None
 
@@ -6750,6 +7157,123 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     meta_out=meta2,
                     cv_out=cv_data,
                 )
+
+            if aid == "COVER_LETTER_PREVIEW":
+                target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
+                if str(os.environ.get("CV_ENABLE_COVER_LETTER", "0")).strip() != "1":
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cover letter is disabled.", meta_out=meta2, cv_out=cv_data)
+                if target_lang != "en":
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cover letter is available only for English (EN) for now.", meta_out=meta2, cv_out=cv_data)
+                if not _openai_enabled():
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="AI is not configured. Cover letter generation is unavailable.", meta_out=meta2, cv_out=cv_data)
+
+                # If we already have a generated cover-letter PDF, treat this as "download".
+                existing_ref = meta2.get("cover_letter_pdf_ref") if isinstance(meta2.get("cover_letter_pdf_ref"), str) else ""
+                if existing_ref:
+                    status, payload, content_type = _tool_get_pdf_by_ref(
+                        session_id=session_id,
+                        pdf_ref=existing_ref,
+                        session=store.get_session(session_id) or {"cv_data": cv_data, "metadata": meta2},
+                    )
+                    if status == 200 and content_type == "application/pdf" and isinstance(payload, (bytes, bytearray)):
+                        meta2 = _wizard_set_stage(meta2, "review_final")
+                        cv_data, meta2 = _persist(cv_data, meta2)
+                        return _wizard_resp(assistant_text="Cover letter PDF ready.", meta_out=meta2, cv_out=cv_data, pdf_bytes=bytes(payload))
+
+                ok_cl, cl_block, err_cl = _generate_cover_letter_block_via_openai(
+                    cv_data=cv_data,
+                    meta=meta2,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    target_language=target_lang,
+                )
+                if not ok_cl or not isinstance(cl_block, dict):
+                    meta2["cover_letter_error"] = str(err_cl)[:400]
+                    meta2 = _wizard_set_stage(meta2, "review_final")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text=_friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
+
+                meta2["cover_letter_block"] = cl_block
+                meta2.pop("cover_letter_error", None)
+                meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(assistant_text="Cover letter draft ready.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "COVER_LETTER_BACK":
+                meta2 = _wizard_set_stage(meta2, "review_final")
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(assistant_text="Back to PDF generation.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "COVER_LETTER_GENERATE":
+                # Download if already generated; otherwise render + persist 1-page PDF from the current draft.
+                existing_ref = meta2.get("cover_letter_pdf_ref") if isinstance(meta2.get("cover_letter_pdf_ref"), str) else ""
+                if existing_ref:
+                    status, payload, content_type = _tool_get_pdf_by_ref(
+                        session_id=session_id,
+                        pdf_ref=existing_ref,
+                        session=store.get_session(session_id) or {"cv_data": cv_data, "metadata": meta2},
+                    )
+                    if status == 200 and content_type == "application/pdf" and isinstance(payload, (bytes, bytearray)):
+                        meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                        cv_data, meta2 = _persist(cv_data, meta2)
+                        return _wizard_resp(assistant_text="Cover letter PDF ready.", meta_out=meta2, cv_out=cv_data, pdf_bytes=bytes(payload))
+
+                cl = meta2.get("cover_letter_block") if isinstance(meta2.get("cover_letter_block"), dict) else None
+                if not isinstance(cl, dict):
+                    target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
+                    ok_cl, cl_block, err_cl = _generate_cover_letter_block_via_openai(
+                        cv_data=cv_data,
+                        meta=meta2,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        target_language=target_lang,
+                    )
+                    if not ok_cl or not isinstance(cl_block, dict):
+                        meta2["cover_letter_error"] = str(err_cl)[:400]
+                        meta2 = _wizard_set_stage(meta2, "review_final")
+                        cv_data, meta2 = _persist(cv_data, meta2)
+                        return _wizard_resp(assistant_text=_friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
+                    cl = cl_block
+                    meta2["cover_letter_block"] = cl
+
+                ok2, errs2 = _validate_cover_letter_block(block=cl, cv_data=cv_data)
+                if not ok2:
+                    meta2["cover_letter_error"] = "Validation failed"
+                    meta2["cover_letter_error_details"] = errs2[:8]
+                    meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Validation failed: " + "; ".join(errs2[:4]), meta_out=meta2, cv_out=cv_data)
+
+                try:
+                    payload = _build_cover_letter_render_payload(cv_data=cv_data, meta=meta2, block=cl)
+                    pdf_bytes = render_cover_letter_pdf(payload, enforce_one_page=True, use_cache=False)
+                except Exception as e:
+                    meta2["cover_letter_error"] = str(e)[:400]
+                    meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text=str(e)[:400], meta_out=meta2, cv_out=cv_data)
+
+                pdf_ref = f"cover_letter_{uuid.uuid4().hex[:10]}"
+                blob_ptr = _upload_pdf_blob_for_session(session_id=session_id, pdf_ref=pdf_ref, pdf_bytes=pdf_bytes)
+                pdf_refs = meta2.get("pdf_refs") if isinstance(meta2.get("pdf_refs"), dict) else {}
+                pdf_refs = dict(pdf_refs or {})
+                pdf_refs[pdf_ref] = {
+                    "kind": "cover_letter",
+                    "container": (blob_ptr or {}).get("container"),
+                    "blob_name": (blob_ptr or {}).get("blob_name"),
+                    "download_name": _compute_cover_letter_download_name(cv_data=cv_data, meta=meta2),
+                    "created_at": _now_iso(),
+                }
+                meta2["pdf_refs"] = pdf_refs
+                meta2["cover_letter_pdf_ref"] = pdf_ref
+                meta2.pop("cover_letter_error", None)
+                meta2.pop("cover_letter_error_details", None)
+                meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(assistant_text="Cover letter PDF generated.", meta_out=meta2, cv_out=cv_data, pdf_bytes=pdf_bytes)
 
             if aid == "REQUEST_GENERATE_PDF":
                 # Generate on first click (avoid the "clicked but nothing happened" UX).
@@ -8208,6 +8732,70 @@ def _download_json_blob(*, container: str, blob_name: str) -> dict | None:
         return None
 
 
+def _tool_generate_cover_letter_from_session(
+    *,
+    session_id: str,
+    language: str | None,
+    session: dict,
+) -> tuple[int, dict | bytes, str]:
+    cv_data = session.get("cv_data") if isinstance(session.get("cv_data"), dict) else {}
+    meta = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+    meta2 = dict(meta or {})
+
+    target_lang = str(language or meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
+    if target_lang != "en":
+        return 400, {"error": "cover_letter_en_only", "details": "Cover letter generation is EN-only for now."}, "application/json"
+    if str(os.environ.get("CV_ENABLE_COVER_LETTER", "0")).strip() != "1":
+        return 403, {"error": "cover_letter_disabled"}, "application/json"
+    if not _openai_enabled():
+        return 400, {"error": "ai_disabled_or_missing_key"}, "application/json"
+
+    trace_id = uuid.uuid4().hex
+    ok_cl, cl_block, err_cl = _generate_cover_letter_block_via_openai(
+        cv_data=cv_data,
+        meta=meta2,
+        trace_id=trace_id,
+        session_id=session_id,
+        target_language=target_lang,
+    )
+    if not ok_cl or not isinstance(cl_block, dict):
+        return 500, {"error": "cover_letter_generation_failed", "details": str(err_cl)[:400]}, "application/json"
+
+    ok2, errs2 = _validate_cover_letter_block(block=cl_block, cv_data=cv_data)
+    if not ok2:
+        return 400, {"error": "cover_letter_validation_failed", "details": errs2[:8]}, "application/json"
+
+    payload = _build_cover_letter_render_payload(cv_data=cv_data, meta=meta2, block=cl_block)
+    try:
+        pdf_bytes = render_cover_letter_pdf(payload, enforce_one_page=True, use_cache=False)
+    except Exception as exc:
+        return 500, {"error": "cover_letter_render_failed", "details": str(exc)[:400]}, "application/json"
+
+    pdf_ref = f"cover_letter_{uuid.uuid4().hex[:10]}"
+    blob_ptr = _upload_pdf_blob_for_session(session_id=session_id, pdf_ref=pdf_ref, pdf_bytes=pdf_bytes)
+
+    # Persist refs and the latest block for future preview/download.
+    pdf_refs = meta2.get("pdf_refs") if isinstance(meta2.get("pdf_refs"), dict) else {}
+    pdf_refs = dict(pdf_refs or {})
+    pdf_refs[pdf_ref] = {
+        "kind": "cover_letter",
+        "container": (blob_ptr or {}).get("container"),
+        "blob_name": (blob_ptr or {}).get("blob_name"),
+        "download_name": _compute_cover_letter_download_name(cv_data=cv_data, meta=meta2),
+        "created_at": _now_iso(),
+    }
+    meta2["pdf_refs"] = pdf_refs
+    meta2["cover_letter_block"] = cl_block
+    meta2["cover_letter_pdf_ref"] = pdf_ref
+    try:
+        _get_session_store().update_session(session_id, cv_data, meta2)
+    except Exception:
+        pass
+
+    pdf_metadata = {"pdf_ref": pdf_ref, "download_name": pdf_refs[pdf_ref].get("download_name")}
+    return 200, {"pdf_bytes": pdf_bytes, "pdf_metadata": pdf_metadata, "pdf_ref": pdf_ref}, "application/pdf"
+
+
 def _tool_get_pdf_by_ref(*, session_id: str, pdf_ref: str, session: dict) -> tuple[int, dict | bytes, str]:
     metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
     pdf_refs = metadata.get("pdf_refs") if isinstance(metadata, dict) else None
@@ -8537,6 +9125,32 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
                     download_name = dn.strip()
             if not download_name:
                 download_name = _compute_pdf_download_name(cv_data=session.get("cv_data") or {}, meta=session.get("metadata") or {})
+            headers = {"Content-Disposition": f'attachment; filename=\"{download_name}\"'}
+            return func.HttpResponse(body=payload["pdf_bytes"], mimetype="application/pdf", status_code=status, headers=headers)
+        if isinstance(payload, dict):
+            return _json_response(payload, status_code=status)
+        return _json_response({"error": "Unexpected payload type"}, status_code=500)
+
+    if tool_name == "generate_cover_letter_from_session":
+        language = str(params.get("language") or "").strip() or None
+        status, payload, content_type = _tool_generate_cover_letter_from_session(
+            session_id=session_id,
+            language=language,
+            session=session,
+        )
+        if (
+            content_type == "application/pdf"
+            and isinstance(payload, dict)
+            and isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
+        ):
+            meta = payload.get("pdf_metadata") if isinstance(payload.get("pdf_metadata"), dict) else {}
+            download_name = ""
+            if isinstance(meta, dict):
+                dn = meta.get("download_name")
+                if isinstance(dn, str) and dn.strip():
+                    download_name = dn.strip()
+            if not download_name:
+                download_name = _compute_cover_letter_download_name(cv_data=session.get("cv_data") or {}, meta=session.get("metadata") or {})
             headers = {"Content-Disposition": f'attachment; filename=\"{download_name}\"'}
             return func.HttpResponse(body=payload["pdf_bytes"], mimetype="application/pdf", status_code=status, headers=headers)
         if isinstance(payload, dict):
