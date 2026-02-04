@@ -486,6 +486,37 @@ def _apply_work_experience_proposal_with_locks(*, cv_data: dict, proposal_roles:
     return cv2
 
 
+def _drop_one_work_bullet_bottom_up(*, cv_in: dict, min_bullets_per_role: int) -> tuple[dict, str | None]:
+    """Drop exactly one work-experience bullet (bottom-up), keeping a floor per role.
+
+    Deterministic and non-destructive: never shortens text, only removes the last bullet.
+    """
+    cv2 = dict(cv_in or {})
+    work = cv2.get("work_experience") if isinstance(cv2.get("work_experience"), list) else None
+    if not isinstance(work, list) or not work:
+        return cv2, None
+
+    work2 = list(work)
+    for i in range(len(work2) - 1, -1, -1):
+        role = work2[i]
+        if not isinstance(role, dict):
+            continue
+        bullets = role.get("bullets")
+        if not isinstance(bullets, list):
+            bullets = role.get("responsibilities") if isinstance(role.get("responsibilities"), list) else []
+        bullets = list(bullets or [])
+        if len(bullets) <= int(min_bullets_per_role):
+            continue
+        role2 = dict(role)
+        role2["bullets"] = bullets[:-1]
+        if "responsibilities" in role2 and isinstance(role2.get("responsibilities"), list):
+            role2["responsibilities"] = list(role2["bullets"])
+        work2[i] = role2
+        cv2["work_experience"] = work2
+        return cv2, f"work_drop_bullet[{i}]"
+    return cv2, None
+
+
 def _dedupe_strings_case_insensitive(items: list, *, max_items: int) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -8567,41 +8598,62 @@ def _tool_generate_cv_from_session(*, session_id: str, language: str | None, cli
 
     cv_data = normalize_cv_data(cv_data)
 
-    # Deterministic shrink-to-fit: try bounded levels before failing hard.
+    # Iterative shrink-to-fit: prefer keeping content; drop exactly 1 bullet at a time (bottom-up).
+    # Important: validate_cv's layout height estimate can be conservative; if errors are layout-only,
+    # try rendering anyway and stop at the first snapshot that renders as exactly 2 pages.
+    layout_fields = {"_total_pages", "_page1_overflow", "_page2_overflow"}
+    max_steps = 40
     last_validation = None
-    last_shrink = None
+    shrink_changes: list[str] = []
     pdf_bytes: bytes | None = None
-    for lvl in range(0, 9):
-        if lvl == 0:
-            cv_try = cv_data
-            shrink_summary = {"level": 0, "changes": []}
-        else:
-            cv_try, shrink_summary = _shrink_cv_for_pdf(cv_in=cv_data, meta_in=meta if isinstance(meta, dict) else {}, level=lvl)
+    cv_try = cv_data
+
+    for step in range(0, max_steps + 1):
         validation_result = validate_cv(cv_try)
         last_validation = validation_result
-        last_shrink = shrink_summary
-        run_summary["shrink_level"] = shrink_summary.get("level")
-        run_summary["shrink_changes"] = shrink_summary.get("changes")
-        if not validation_result.is_valid:
-            continue
-        try:
-            logging.info("=== PDF GENERATION START === session_id=%s shrink_level=%s", session_id, shrink_summary.get("level"))
-            pdf_bytes = render_pdf(cv_try, enforce_two_pages=True)
-            cv_data = cv_try  # render snapshot used for this PDF (for download name + metadata)
-            break
-        except Exception as e:
-            # If WeasyPrint still violates DoD (pages != 2), try next shrink level.
-            run_summary["render_error"] = str(e)[:200]
-            continue
+
+        hard_errors = []
+        if isinstance(validation_result.errors, list):
+            for e in validation_result.errors:
+                try:
+                    field = str(getattr(e, "field", "") or "")
+                except Exception:
+                    field = ""
+                if field and field in layout_fields:
+                    continue
+                # Treat unknown/malformed errors as hard.
+                hard_errors.append(e)
+
+        run_summary["shrink_level"] = step
+        run_summary["shrink_changes"] = shrink_changes[:60]
+
+        if not hard_errors:
+            try:
+                logging.info("=== PDF GENERATION START === session_id=%s shrink_step=%s", session_id, step)
+                pdf_bytes = render_pdf(cv_try, enforce_two_pages=True)
+                cv_data = cv_try  # render snapshot used for download name + metadata
+                break
+            except Exception as e:
+                # If renderer still violates DoD (pages != 2), shrink once and retry.
+                run_summary["render_error"] = str(e)[:200]
+
+        # Shrink step: keep >=3 bullets/role if possible, else allow dropping to 2.
+        cv_next, change = _drop_one_work_bullet_bottom_up(cv_in=cv_try, min_bullets_per_role=3)
+        if not change:
+            cv_next, change = _drop_one_work_bullet_bottom_up(cv_in=cv_try, min_bullets_per_role=2)
+        if not change:
+            # Fallback to legacy shrink to cap auxiliary lists (skills/languages/projects) if work bullets can't shrink.
+            cv_next, summary = _shrink_cv_for_pdf(cv_in=cv_try, meta_in=meta if isinstance(meta, dict) else {}, level=min(8, 1 + step // 5))
+            change = ",".join(summary.get("changes") or []) if isinstance(summary, dict) else "legacy_shrink"
+
+        if change:
+            shrink_changes.append(change)
+        cv_try = cv_next
 
     if not pdf_bytes:
         if last_validation is None:
             last_validation = validate_cv(cv_data)
         payload = {"error": "Validation failed", "validation": _serialize_validation_result(last_validation), "run_summary": run_summary}
-        if isinstance(last_shrink, dict):
-            payload["run_summary"] = dict(run_summary)
-            payload["run_summary"]["shrink_level"] = last_shrink.get("level")
-            payload["run_summary"]["shrink_changes"] = last_shrink.get("changes")
         return 400, payload, "application/json"
 
     pdf_ref = f"{session_id}-{uuid.uuid4().hex}"
