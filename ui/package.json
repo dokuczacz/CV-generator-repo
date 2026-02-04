@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --import tsx --test tests/capsule_context.test.ts"
+    "test": "node --import tsx --test tests/capsule_context.test.ts tests/wizard_step1_plumbing.test.ts"
   },
   "dependencies": {
     "next": "14.2.5",

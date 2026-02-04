@@ -36,13 +36,15 @@ async function callAzureFunction(path: string, body: any): Promise<{ status: num
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const message = typeof body?.message === 'string' ? body.message : '';
+    const hasDocx = typeof body?.docx_base64 === 'string' && !!body.docx_base64.trim();
+    const rawMessage = typeof body?.message === 'string' ? body.message : '';
 
     const userAction = typeof body?.user_action === 'object' && body?.user_action ? body.user_action : undefined;
     const userActionId = typeof userAction?.id === 'string' ? userAction.id : '';
-    if (!message.trim() && !userActionId.trim()) {
-      return NextResponse.json({ success: false, error: 'message is required (or provide user_action)' }, { status: 400 });
+    if (!rawMessage.trim() && !userActionId.trim() && !hasDocx) {
+      return NextResponse.json({ success: false, error: 'message is required (or provide user_action or docx_base64)' }, { status: 400 });
     }
+    const message = rawMessage.trim() ? rawMessage : 'start';
 
     const { status, payload } = await callAzureFunction('/cv-tool-call-handler', {
       tool_name: 'process_cv_orchestrated',
@@ -67,6 +69,7 @@ export async function POST(req: NextRequest) {
         session_id: payload?.session_id || null,
         trace_id: payload?.trace_id || null,
         stage: payload?.stage || null,
+        stage_updates: payload?.stage_updates || [],
         run_summary: payload?.run_summary || null,
         turn_trace: payload?.turn_trace || null,
         ui_action: payload?.ui_action || null,
@@ -80,4 +83,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
-

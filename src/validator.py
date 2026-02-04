@@ -60,8 +60,8 @@ CV_LIMITS = {
         "per_entry": {
             "date_range": {
                 "max_chars": 25,
-                "pattern": r"^(\d{4}-\d{2}|\d{2}/\d{4})\s*(–\s*(\d{4}-\d{2}|\d{2}/\d{4}|Present))?$",
-                "reason": "Format: 2020-01 – 2025-04 OR 01/2020 – 04/2025"
+                "pattern": r"^(\d{4}-\d{2}|\d{2}/\d{4})\s*((–|-)\s*(\d{4}-\d{2}|\d{2}/\d{4}|Present))?$",
+                "reason": "Format: 2020-01 - 2025-04 OR 01/2020 - 04/2025"
             },
             "employer": {
                 "max_chars": 60,
@@ -111,8 +111,8 @@ CV_LIMITS = {
         "per_entry": {
             "date_range": {
                 "max_chars": 25,
-                "pattern": r"^(\d{4}-\d{2}|\d{2}/\d{4}|since\s+(\d{4}-\d{2}|\d{2}/\d{4}))\s*(–\s*(\d{4}-\d{2}|\d{2}/\d{4}|Present))?$",
-                "reason": "Format: 2020-01 – 2025-04 OR 01/2020 – 04/2025 OR since 01/2024"
+                "pattern": r"^(\d{4}-\d{2}|\d{2}/\d{4}|since\s+(\d{4}-\d{2}|\d{2}/\d{4}))\s*((–|-)\s*(\d{4}-\d{2}|\d{2}/\d{4}|Present))?$",
+                "reason": "Format: 2020-01 - 2025-04 OR 01/2020 - 04/2025 OR since 01/2024"
             },
             "organization": {
                 "max_chars": 70,
