@@ -98,7 +98,7 @@ jobs:
     
     - name: Install dependencies
       working-directory: ./ui
-      run: npm ci
+      run: npm install
     
     - name: Run linter
       working-directory: ./ui
@@ -163,7 +163,7 @@ jobs:
     
     - name: Install frontend dependencies
       working-directory: ./ui
-      run: npm ci
+      run: npm install
     
     - name: Install Playwright browsers
       run: npx playwright install --with-deps chromium
