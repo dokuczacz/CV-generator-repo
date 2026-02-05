@@ -8202,6 +8202,11 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
     # Fast-path: edit intent should not invoke the model; return deterministic response.
     if detect_edit_intent(message):
+        # Populate stage_debug for edit intent fast-path
+        stage_debug["edit_intent"] = True
+        stage_debug["current_stage"] = current_stage.value
+        stage_debug["generate_requested"] = bool(generate_requested)
+        
         run_summary = {
             "stage_debug": stage_debug,
             "steps": [{"step": "edit_intent_short_circuit"}],
