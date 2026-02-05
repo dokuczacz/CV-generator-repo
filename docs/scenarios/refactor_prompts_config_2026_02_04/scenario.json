@@ -1,0 +1,29 @@
+{
+  "scenario_id": "refactor_prompts_config_2026_02_04",
+  "created_at": "2026-02-04T00:00:00Z",
+  "description": "Deterministic refactor: extract prompts + product config from function_app.py without behavior changes. Golden flow: CV PDF generation.",
+  "requirement_type": "deterministic",
+  "dod": {
+    "commands": [
+      "python -m py_compile function_app.py",
+      "npm test (if available)"
+    ],
+    "thresholds": [
+      "No syntax errors",
+      "Behavior unchanged from before refactor",
+      "PDF generates successfully from CV data"
+    ],
+    "fallback": "Rollback refactor changes; revert to pre-refactor state"
+  },
+  "golden_flow": {
+    "scenario": "Generate PDF from tailored CV (work + skills applied)",
+    "input": "CV data with work_experience + it_ai_skills populated",
+    "expected_output": "PDF file, 2 pages max, no validation errors",
+    "success_criterion": "PDF downloads successfully"
+  },
+  "artifacts": {
+    "cv_source": "opis_do_cv.txt (key achievements)",
+    "job_posting": "https://www.jobs.ch/en/vacancies/detail/faa45fb1-e562-43b3-a4dd-be9717ed2074/",
+    "template": "templates/html/cv_template_2pages_2025.html"
+  }
+}

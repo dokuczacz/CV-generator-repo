@@ -1,4 +1,0 @@
-stage=education
-ui_stage=EDUCATION
-ui_title=Stage 2/6 — Education
-actions=EDUCATION_EDIT_JSON,EDUCATION_CONFIRM

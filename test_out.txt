@@ -1,0 +1,61 @@
+
+================================================================================
+TEST: GERMAN CV GENERATION IN DE LANGUAGE
+================================================================================
+
+1. Starting with DOCX (language=de)...
+[OK] Session: bf2d9b2d-296f-4031-8954-2ed8692a513a
+  Stage: language_selection
+  Target language: None
+
+1.5. Selecting German language...
+[OK] Stage: import_gate_pending
+  Target language: de
+
+2. Contact...
+[OK] Stage: import_gate_pending
+  Target language: de
+
+2.5. Importing DOCX data...
+[OK] Stage: contact
+  Target language: de
+
+3. Education...
+[OK] Stage: job_posting
+  Target language: de
+
+4. Job Posting...
+[OK] Stage: job_posting
+  Target language: de
+
+5. RUNNING WORK EXPERIENCE TAILORING IN GERMAN...
+   >>> Checking if output is DEUTSCH or ENGLISH <<<
+DEBUG: Response status=200
+DEBUG: Response body={"success": true, "trace_id": "d7950f67-1154-40af-8028-0f9a6be0303d", "session_id": "bf2d9b2d-296f-4031-8954-2ed8692a513a", "stage": "work_tailor_review", "response": "Work experience proposal ready. Please review and accept.", "assistant_text": "Work experience proposal ready. Please review and accept.", "pdf_base64": "", "filename": "", "run_summary": null, "turn_trace": null, "ui_action": {"kind": "review_form", "stage": "WORK_EXPERIENCE", "title": "Stage 4/7 Ś Work experience (proposal)", "text": "Review the proposed tailored bullets. Accept to apply to your CV.", "fields": [{"key": "proposal", "label": "Proposed work experience", "value": "**Direktor @ GL Solutions (2020-01 ľ 2025-04)**\n- Leitete Planung und Koordination von Strassenbau- und Infrastrukturprojekten Řber 5 Jahre und sicherte fristgerechte Umsetzung\n- Koordinierte Subunternehmer und BaustellenŘberwachung zur Gewńhrleistung gesetzlicher Vorschriften und Qualitńtsstandards\n- Erstellte Terminplńne, Budgets und Abschl
+[OK] Stage: work_tailor_review
+  Target language: de
+  Bulk translated to: de
+
+DEBUG: cv_data keys=['full_name', 'email', 'phone', 'address_lines', 'photo_url', 'profile', 'work_experience', 'education', 'further_experience', 'languages', 'it_ai_skills', 'interests', 'references', 'technical_operational_skills']
+DEBUG: work_experience type=<class 'list'>
+DEBUG: work_experience length=5
+DEBUG: work_experience[0] keys=['employer', 'title', 'date_range', 'location', 'bullets']
+DEBUG: work_experience[0].bullets=['AusfŘhrung manueller Tńtigkeiten auf Tiefbau- und Strassenbaustellen', 'UnterstŘtzung bei Grabungsarbeiten, Rohrverlegung und Baustellenreinigung', 'Mithilfe beim Materialtransport und bei einfachen Maschineneinsńtzen', 'Einblick in Schweizer Baustandards und Sicherheitsvorschriften gewonnen']
+    Role 1 Bullet 1: AusfŘhrung manueller Tńtigkeiten auf Tiefbau- und Strassenbaustellen
+    Role 1 Bullet 2: UnterstŘtzung bei Grabungsarbeiten, Rohrverlegung und Baustellenreinigung
+    Role 2 Bullet 1: Planung und Koordination von Strassenbau- und Infrastrukturprojekten
+    Role 2 Bullet 2: ▄berwachung von Baustellen, Subunternehmern und Einhaltung gesetzlicher Vorschriften
+    Role 3 Bullet 1: Leitung von drei Abteilungen mit insgesamt 35 Mitarbeitenden
+    Role 3 Bullet 2: Sicherstellung der CE-Konformitńt, EinfŘhrung von KPI-Dashboards und Prozessverbesserungen
+    Role 4 Bullet 1: Leitung eines Bereichs mit fŘnf Sektionen und 80 Mitarbeitenden
+    Role 4 Bullet 2: Aufbau eines Greenfield-Werks, EinfŘhrung von Prozessen und Qualitńtssystemen
+    Role 5 Bullet 1: Optimierung von Arbeitsplńtzen und Prozessen sowie DurchfŘhrung von Zeitstudien
+    Role 5 Bullet 2: Kostenreduktion durch effiziente Produktionsl÷sungen
+
+6. LANGUAGE DETECTION:
+  German keywords: 31
+  English keywords: 4
+
+================================================================================
+[PASS] Output is in GERMAN
+

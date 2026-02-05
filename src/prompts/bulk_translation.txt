@@ -1,0 +1,1 @@
+Translate a bulk set of work history, skills, interests, or education entries from the source language to professional {target_language}. Preserve technical terms, company names, and dates; modernize phrasing. Keep output text in {target_language} only.

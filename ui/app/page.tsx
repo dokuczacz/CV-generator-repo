@@ -77,6 +77,7 @@ export default function CVGenerator() {
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [pendingSession, setPendingSession] = useState<{ id: string; timestamp: string } | null>(null);
   const [latestPdfBase64, setLatestPdfBase64] = useState<string | null>(null);
+  const [latestPdfFilename, setLatestPdfFilename] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const [lastStage, setLastStage] = useState<string | null>(null);
   const [stageUpdates, setStageUpdates] = useState<StageUpdate[]>([]);
@@ -93,6 +94,7 @@ export default function CVGenerator() {
     setJobPostingText(null);
     setUiAction(null);
     setLatestPdfBase64(null);
+    setLatestPdfFilename(null);
     setLastTraceId(null);
     setLastStage(null);
     setStageUpdates([]);
@@ -235,6 +237,7 @@ export default function CVGenerator() {
       ) {
         setCvFile(file);
         setLatestPdfBase64(null);
+        setLatestPdfFilename(null);
         setLastTraceId(null);
         setLastStage(null);
         setStageUpdates([]);
@@ -401,6 +404,17 @@ export default function CVGenerator() {
         if (result.pdf_base64) {
           assistantMsg.pdfBase64 = result.pdf_base64;
           setLatestPdfBase64(result.pdf_base64);
+          if (typeof result.filename === 'string' && result.filename.trim()) {
+            setLatestPdfFilename(result.filename.trim());
+          }
+
+          const isCoverLetterAction = actionId === 'COVER_LETTER_GENERATE' || actionId === 'COVER_LETTER_PREVIEW';
+          if (isCoverLetterAction) {
+            const fallbackName = `CoverLetter_${Date.now()}.pdf`;
+            const downloadName =
+              typeof result.filename === 'string' && result.filename.trim() ? result.filename.trim() : fallbackName;
+            downloadPDF(result.pdf_base64, downloadName);
+          }
         }
         setMessages((prev) => [...prev, assistantMsg]);
 
@@ -920,12 +934,19 @@ export default function CVGenerator() {
                     const actions = uiAction.actions || [];
                     const fields = Array.isArray(uiAction.fields) ? uiAction.fields : [];
                     const hasEditable = uiAction.kind === 'edit_form' || fields.some((f) => !!f?.editable);
+                    const keepInline = new Set(['COVER_LETTER_PREVIEW']);
                     const primaryRaw = actions.filter((a) => !(a.style === 'secondary' || a.style === 'tertiary'));
                     const primary = primaryRaw.length > 1 ? primaryRaw.slice(0, 1) : primaryRaw;
-                    const advanced = actions.filter((a) => a.style === 'secondary' || a.style === 'tertiary');
+                    const inlineSecondary = actions.filter(
+                      (a) => (a.style === 'secondary' || a.style === 'tertiary') && keepInline.has(a.id)
+                    );
+                    const advanced = actions.filter(
+                      (a) => (a.style === 'secondary' || a.style === 'tertiary') && !keepInline.has(a.id)
+                    );
                     const demotedPrimary = primaryRaw.length > 1 ? primaryRaw.slice(1).map((a) => ({ ...a, style: 'secondary' as const })) : [];
 
                     const isLanguageSelection = String(uiAction.stage || '').toUpperCase() === 'LANGUAGE_SELECTION';
+                    const enabledLanguageActions = new Set(['LANGUAGE_SELECT_EN', 'LANGUAGE_SELECT_DE']);
                     const languageNote =
                       isLanguageSelection
                         ? 'Wersje językowe są niezależne (możesz później zrobić osobny przebieg dla DE/PL).'
@@ -937,7 +958,7 @@ export default function CVGenerator() {
                           const isSecondary = a.style === 'secondary' || a.style === 'tertiary';
                           const isCancel = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK');
                           const payload = hasEditable && !isCancel ? formDraft : undefined;
-                          const isLangDisabled = isLanguageSelection && a.id !== 'LANGUAGE_SELECT_EN';
+                          const isLangDisabled = isLanguageSelection && !enabledLanguageActions.has(a.id);
                           const wantsDownload =
                             a.id === 'REQUEST_GENERATE_PDF' &&
                             (latestPdfBase64 || Boolean((cvPreview?.metadata as any)?.pdf_generated));
@@ -957,7 +978,7 @@ export default function CVGenerator() {
                                 // If we already have a PDF in memory and the action is effectively "download",
                                 // download directly instead of round-tripping through the backend.
                                 if (wantsDownload && latestPdfBase64) {
-                                  downloadPDF(latestPdfBase64, latestPdfDownloadName || `CV_${Date.now()}.pdf`);
+                                  downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`);
                                   return;
                                 }
                                 void handleSendUserAction(a.id, payload);
@@ -975,7 +996,7 @@ export default function CVGenerator() {
                     return (
                       <div className="space-y-2">
                         {languageNote ? <div className="text-xs text-slate-600">{languageNote}</div> : null}
-                        {primary.length ? renderButtons(primary) : renderButtons(actions)}
+                        {primary.length ? renderButtons([...primary, ...inlineSecondary]) : renderButtons(actions)}
                         {advanced.length || demotedPrimary.length ? (
                           <details className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                             <summary className="cursor-pointer text-xs font-semibold text-slate-800">Więcej akcji</summary>
@@ -1086,7 +1107,7 @@ export default function CVGenerator() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => downloadPDF(latestPdfBase64, latestPdfDownloadName || `CV_${Date.now()}.pdf`)}
+                    onClick={() => downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`)}
                     data-testid="download-pdf"
                   >
                     Pobierz PDF

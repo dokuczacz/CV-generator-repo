@@ -78,8 +78,8 @@ cv-generator-repo/
 │   └── html/                   # HTML/CSS for rendering
 │
 ├── TOOLS_CONFIG.md             # (legacy/lab) Tools JSON for OpenAI dashboard
-├── SYSTEM_PROMPT.md            # System prompt for dashboard
-├── PROMPT_INSTRUCTIONS.md      # Knowledge file (upload to dashboard)
+├── PROMPT_SYSTEM_REVISED.md    # Current system prompt (dashboard)
+├── docs/CV_GENERATION_PROMPTS.md # Prompt reference for all stages
 └── README.md                   # This file
 ```
 
@@ -118,8 +118,8 @@ https://platform.openai.com/assistants
 ```
 
 **b) Create/Edit Prompt:**
-- Paste content from `SYSTEM_PROMPT.md` into "System Prompt" field
-- Upload `PROMPT_INSTRUCTIONS.md` as knowledge file
+- Paste content from `PROMPT_SYSTEM_REVISED.md` into "System Prompt" field
+- (Optional) Use `docs/CV_GENERATION_PROMPTS.md` as prompt reference
 
  **c) Add Tools:**
  - Tools are exposed directly via OpenAI Responses API in backend orchestration (`_tool_schemas_for_responses()`).
@@ -178,6 +178,7 @@ The OpenAI prompt uses a session-based workflow and calls backend tools through 
 - `update_cv_field` → apply edits (supports batching via `edits[]` + `confirm`)
 - `validate_cv` → deterministic schema + DoD checks (no PDF render)
 - `generate_cv_from_session` → generate the final PDF (requires readiness + confirmations)
+- `generate_cover_letter_from_session` → generate 1-page cover letter PDF (EN/DE, optional)
 Additional debug tools:
 - `generate_context_pack_v2` (capsule builder)
 - `cv_session_search` (bounded search across session + docx snapshot)
@@ -219,6 +220,7 @@ Additional debug tools:
 ✅ **Tool Calling** - AI orchestrates workflow  
 ✅ **Photo Extraction** - Automatic from DOCX  
 ✅ **Validation** - Pre-render checks  
+✅ **Cover Letter (optional, EN/DE)**  
 ✅ **Multi-language** - EN/DE/PL support  
 ✅ **ATS-Compliant** - Parseable by recruitment systems  
 ✅ **2-Page Limit** - Professional Swiss template  

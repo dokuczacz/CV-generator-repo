@@ -27,9 +27,7 @@
     }
     @page :first { @top-right { content: none; } }
     .section{ margin-top: {{ _styles.section_gap_mm }}mm; break-inside: avoid; page-break-inside: avoid; }
-    .bullets{ margin-left: 45.5mm; padding-left: 0; font-size: 10pt; line-height: 1.4; list-style: none; }
-    .bullets li{ padding-left: 0; text-indent: 0; position: relative; }
-    .bullets li::before{ content: "•"; position: absolute; left: -{{ _styles.bullet_hanging_mm }}mm; top: 0; }
+    .bullets{ margin-left: 42.5mm; padding-left: {{ _styles.bullet_hanging_mm }}mm; font-size: 10pt; line-height: 1.4; }
   </style>
   {% endif %}
 </head>
@@ -62,24 +60,14 @@
         <div class="entry-head">
           <span class="entry-date">{{ job.date_range }}</span>
           <span class="entry-title">
-            {% set title = (job.title or "")|trim %}
-            {% set employer = (job.employer or job.company or "")|trim %}
-            {% set location = (job.location or "")|trim %}
-            {% if title %}{{ title }}{% endif %}
-            {% if employer %}{% if title %}, {% endif %}{{ employer }}{% endif %}
-            {% if location %}{% if title or employer %}, {% endif %}{{ location }}{% endif %}
+            {% if job.title %}{{ job.title }}{% endif %}
+            {% if job.employer %}{% if job.title %}, {% endif %}{{ job.employer }}{% endif %}
+            {% if job.location %}{% if job.title or job.employer %}, {% endif %}{{ job.location }}{% endif %}
           </span>
         </div>
         {% if job.bullets %}
           <ul class="bullets">
-            {% for b in job.bullets %}
-              {% set bullet = (b|replace("\u00a0", " ")|trim) %}
-              {% if bullet.startswith("- ") %}{% set bullet = bullet[2:] %}{% endif %}
-              {% if bullet.startswith("• ") %}{% set bullet = bullet[2:] %}{% endif %}
-              {% if bullet.startswith("-") %}{% set bullet = bullet[1:]|trim %}{% endif %}
-              {% if bullet.startswith("•") %}{% set bullet = bullet[1:]|trim %}{% endif %}
-              <li>{{ bullet }}</li>
-            {% endfor %}
+            {% for b in job.bullets %}<li>{{ b }}</li>{% endfor %}
           </ul>
         {% endif %}
       </div>

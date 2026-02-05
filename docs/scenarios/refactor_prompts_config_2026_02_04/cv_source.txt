@@ -1,0 +1,45 @@
+# CV Generation: Achievements & Work Experience
+
+## Key Achievements
+
+### GL (Construction)
+- Created construction company from scratch, capable of delivering 30-40k EUR jobs
+- Served public sector clients
+
+### Expondo (Quality/Operations)
+- Technically solved 3-year-old company problem: good sales, bad quality
+- Reduced claims by 70%
+- Improved workflows: reduced warehouse steps by 50% through location rearrangement
+- Eliminated old department leftovers (no high-level overdue actions) within 3 months
+- Introduced work classification system: simple job, agency staff, technical work → technician
+
+### Sumitomo (Quality Management - Moldova)
+- Built quality team from scratch
+- Ensured product readiness for OEM production lines
+- IATF certification passed on first attempt
+- Passed multiple customer audits
+- Built team from local people
+- Planned and initiated 6-month handover process for role transition
+
+### Sumitomo (Global Process Improvement Specialist - 2011-03 to 2016-07)
+- ~60% time in production plants (various locations)
+- Fire-fighter role: sent to critical plants to resolve urgent issues (output shortfalls, quality problems)
+- Managed international shop floor standardization & KAIZEN implementation project
+- Highest-level expert in concern-wide technical decisions
+- Coordinated with Japanese shareholders on applicable business practices
+- Scheduled and coordinated concern-wide audits
+- Main contact person for implementation ideas and guidance
+- Led company-wide improvements in training systems and production management
+
+### OmniFlowBeta (Agent Orchestration)
+- Designed & implemented central orchestration layer for multiple AI agents
+- Contract-first architecture with explicit input/output/stop conditions
+- Deterministic tool-handler with centralized validation
+- JSON-based communication for predictable execution
+- Separated planning, execution, testing, review into instruction layers
+- Model-agnostic execution (GPT-5.2, Codex 5.1 mini/max via instruction files)
+- PDCA/ISO-aligned workflows with explicit DoD and rollback capability
+- Cost optimization through minimized implicit state
+
+## All in English
+All content formatted for English-language CV submission.

@@ -1,7 +1,0 @@
-http=200
-success=True
-stage=work_experience
-resp_head=AI proposal ready. Accept to apply, or Reject.
-ui_kind=review_form
-ui_title=Stage 4/6 — Work experience
-actions=WORK_ROLE_ACCEPT_PROPOSAL,WORK_ROLE_REJECT_PROPOSAL,WORK_ROLE_VIEW

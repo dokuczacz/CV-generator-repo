@@ -3,28 +3,12 @@
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "languageWorkers__python__defaultExecutablePath": "C:\\AI memory\\CV-generator-repo\\.venv\\Scripts\\python.exe",
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-
-    "OPENAI_PROMPT_ID": "",
-    "REQUIRE_OPENAI_PROMPT_ID_PER_STAGE": "0",
-
-    "OPENAI_PROMPT_ID_REVIEW_SESSION": "",
-    "OPENAI_PROMPT_ID_APPLY_EDITS": "",
-    "OPENAI_PROMPT_ID_GENERATE_PDF": "",
-    "OPENAI_PROMPT_ID_FIX_VALIDATION": "",
-
-    "OPENAI_PROMPT_ID_JOB_POSTING": "",
-    "OPENAI_PROMPT_ID_EDUCATION_TRANSLATION": "",
-    "OPENAI_PROMPT_ID_WORK_EXPERIENCE": "",
-    "OPENAI_PROMPT_ID_FURTHER_EXPERIENCE": "",
-    "OPENAI_PROMPT_ID_IT_AI_SKILLS": "",
-    "OPENAI_PROMPT_ID_TECHNICAL_OPERATIONAL_SKILLS": "",
-    "OPENAI_PROMPT_ID_INTERESTS": "",
-
-    "OPENAI_PROMPT_ID_WORK_TAILOR_RUN": "",
-    "OPENAI_DASHBOARD_INCLUDE_SYSTEM_PROMPT": "0",
+    "OPENAI_API_KEY": "",
+    "OPENAI_PROMPT_ID": "pmpt_696f593c42148195ab41b3a3aaeaa55d029c2c08c553971f",
     "REQUIRE_OPENAI_PROMPT_ID": "1",
-    "OPENAI_MODEL": "",
+    "OPENAI_DASHBOARD_INCLUDE_SYSTEM_PROMPT": "1",
     "STORAGE_ACCOUNT_URL": "https://YOUR_STORAGE_ACCOUNT.blob.core.windows.net",
     "STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
     "STORAGE_CONTAINER_THEMES": "cv-themes",
@@ -35,16 +19,11 @@
     "AZURE_SDK_LOG_LEVEL": "WARNING",
     "CV_DEFAULT_THEME": "zurich",
     "CV_PDF_RENDERER": "playwright",
-    "CV_OPENAI_TRACE": "0",
-    "CV_OPENAI_TRACE_FULL": "0",
+    "CV_OPENAI_TRACE": "1",
+    "CV_OPENAI_TRACE_FULL": "1",
     "CV_OPENAI_TRACE_DIR": "tmp/openai_trace",
     "USE_STRUCTURED_OUTPUT": "0",
-    "CV_EXECUTION_LATCH": "1",
-    "CV_SINGLE_CALL_EXECUTION": "1",
-    "CV_BATCH_WRITES": "1",
-    "CV_METADATA_TO_BLOB": "1",
-    "STORAGE_CONTAINER_PDFS": "cv-pdfs",
-    "STORAGE_CONTAINER_METADATA": "cv-metadata"
+    "CV_ENABLE_COVER_LETTER": "1"
   },
-  "Comment": "Local dev defaults: UseDevelopmentStorage=true requires Azurite running. STORAGE_CONNECTION_STRING is used for both Azure Blob Storage AND Azure Table Storage (Phase 2 sessions). USE_STRUCTURED_OUTPUT=1 enables experimental JSON structured responses (see STRUCTURED_RESPONSE_SCHEMA.md). Wave 0 flags: CV_EXECUTION_LATCH=1 prevents duplicate PDF generation (returns cached bytes from blob), CV_SINGLE_CALL_EXECUTION=1 limits execution phase to 1 OpenAI call (enforced via stage-gated tool exposure and execution_mode), CV_BATCH_WRITES=1 reduces session writes, CV_METADATA_TO_BLOB=1 stores large metadata in blob storage. PDF generation tools (generate_cv_from_session, get_pdf_by_ref) are only exposed when stage=generate_pdf or fix_validation."
+  "Comment": "Local dev defaults: UseDevelopmentStorage=true requires Azurite running. STORAGE_CONNECTION_STRING is used for both Azure Blob Storage AND Azure Table Storage (Phase 2 sessions)."
 }

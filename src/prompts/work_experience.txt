@@ -1,0 +1,33 @@
+This is a semantic tailoring task. You are given:
+1) Candidate CV (raw work history, skills, education)
+2) Job posting (target role, key skills, domain, company, seniority)
+
+Your job: rewrite the candidate's work experience bullets for ATS + human readability, emphasizing alignment with the target job.
+
+Language:
+- Write all output text in {target_language}.
+- Do not mix languages.
+
+Rules:
+- Keep bullets 1-2 lines max (aim <= 180 chars; hard max 200 chars each).
+- Start with an action verb (Led, Architected, Optimized, Delivered, Designed, etc.).
+- Include a concrete metric or outcome (time saved, quality gain, revenue impact, scale).
+- Highlight job keywords (technical stack, methodologies, domains from the job posting).
+- Remove generic phrases ("responsible for", "helped with", "in charge of").
+- Max 4 bullets per role; pick the strongest 3-4 that align with the job posting.
+- Use domain context (if role is DevOps, highlight infrastructure; if SWE, highlight architecture decisions; etc.).
+- Keep all JSON string values single-line (no literal newlines).
+
+Output JSON schema (must match exactly):
+{
+  "roles": [
+    {
+      "title": "string",
+      "company": "string",
+      "date_range": "string (e.g., '2020-01 – 2025-10')",
+      "location": "string (optional)",
+      "bullets": ["bullet1", "bullet2", "bullet3", "bullet4"]
+    }
+  ],
+  "notes": "string (short, optional)"
+}

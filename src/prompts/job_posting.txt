@@ -1,0 +1,6 @@
+Extract a compact, ATS-oriented job reference (1-2 pages summary max) from the provided job posting. Preserve key technical and soft skills, domains, certifications, and salary info. Remove unnecessary detail.
+
+Language:
+- Use the same language as the job posting; do not translate.
+
+Output JSON: {job_id, company, title, key_skills[], tech_stack[], min_salary, max_salary, highlights[], domain, contract_type}.

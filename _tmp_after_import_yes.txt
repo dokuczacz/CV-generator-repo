@@ -1,4 +1,0 @@
-stage=contact
-ui_stage=CONTACT
-ui_title=Stage 1/6 — Contact
-actions=CONTACT_EDIT,CONTACT_CONFIRM
