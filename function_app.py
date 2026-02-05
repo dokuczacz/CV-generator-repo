@@ -7992,18 +7992,42 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     generate_requested = _wants_generate_from_message(message)
     edit_intent = detect_edit_intent(message)
 
-    # If user has edit intent, clear any pending confirmation to let them proceed with editing
+    # CRITICAL FAST-PATH: If user has edit intent, return immediately without FSM/AI logic
+    # This must happen BEFORE any pending_confirmation checks to avoid blocking the user
     if edit_intent:
-        pending_confirmation = _get_pending_confirmation(meta)
-        if pending_confirmation:
-            logging.info(f"Clearing pending_confirmation due to edit intent: {pending_confirmation}")
+        # Clear any pending confirmation that might block editing
+        if _get_pending_confirmation(meta):
+            logging.info(f"Clearing pending_confirmation due to edit intent")
             meta = _clear_pending_confirmation(meta)
             try:
                 store.update_session(session_id, cv_data, meta)
-                sess = store.get_session(session_id) or sess
-                meta = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else meta
             except Exception as e:
                 logging.warning(f"Failed to clear pending_confirmation: {e}")
+        
+        # Return immediately with edit intent confirmed
+        stage_debug_fastpath = {
+            "edit_intent": True,
+            "current_stage": current_stage.value,
+            "generate_requested": bool(generate_requested),
+        }
+        run_summary_fastpath = {
+            "stage_debug": stage_debug_fastpath,
+            "steps": [{"step": "edit_intent_fast_path_early"}],
+            "execution_mode": False,
+            "model_calls": 0,
+            "max_model_calls": product_config.CV_MAX_MODEL_CALLS,
+        }
+        return 200, {
+            "success": True,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "stage": current_stage.value,
+            "assistant_text": "Edit intent detected. Tell me what to change, and I will update your CV fields.",
+            "pdf_base64": "",
+            "last_response_id": None,
+            "run_summary": run_summary_fastpath,
+            "turn_trace": [],
+        }
 
     # confirmation_required is backend-owned: either we have explicit pending edits, or identity-critical fields not confirmed.
     confirmed_flags = meta.get("confirmed_flags") if isinstance(meta.get("confirmed_flags"), dict) else {}
@@ -8213,33 +8237,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     max_model_calls = max(1, min(max_model_calls, 5))
 
     version_before = sess.get("version")
-
-    # Fast-path: edit intent should not invoke the model; return deterministic response.
-    if detect_edit_intent(message):
-        # Populate stage_debug for edit intent fast-path
-        stage_debug["edit_intent"] = True
-        stage_debug["current_stage"] = current_stage.value
-        stage_debug["generate_requested"] = bool(generate_requested)
-        
-        run_summary = {
-            "stage_debug": stage_debug,
-            "steps": [{"step": "edit_intent_short_circuit"}],
-            "execution_mode": False,
-            "model_calls": 0,
-            "max_model_calls": max_model_calls,
-        }
-        return 200, {
-            "success": True,
-            "trace_id": trace_id,
-            "session_id": session_id,
-            "stage": stage,
-            "assistant_text": "Edit intent detected. Tell me what to change, and I will update your CV fields.",
-            "pdf_base64": "",
-            "last_response_id": None,
-            "run_summary": run_summary,
-            "turn_trace": [],
-            "client_context_keys": list(client_context.keys())[:20] if client_context else None,
-        }
 
     # Best-effort: append user event (for semantic debugging).
     try:
