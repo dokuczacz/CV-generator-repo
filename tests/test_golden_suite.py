@@ -279,7 +279,7 @@ def test_process_cv_orchestrated_edit_intent(session_id: str) -> TestResult:
         
         if data.get("success"):
             stage = data.get("stage", "UNKNOWN")
-            run_summary = data.get("run_summary", {})
+            run_summary = data.get("run_summary") or {}
             edit_intent = run_summary.get("stage_debug", {}).get("edit_intent", False)
             
             if edit_intent and stage == "review_session":
@@ -349,7 +349,7 @@ def test_process_cv_orchestrated_generate(session_id: str) -> TestResult:
         if data.get("success"):
             pdf_b64 = data.get("pdf_base64", "")
             pdf_size = len(base64.b64decode(pdf_b64)) if pdf_b64 else 0
-            run_summary = data.get("run_summary", {})
+            run_summary = data.get("run_summary") or {}
             execution_mode = run_summary.get("execution_mode", False)
             model_calls = run_summary.get("model_calls", -1)
             
