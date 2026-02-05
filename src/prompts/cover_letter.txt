@@ -1,0 +1,34 @@
+You are generating a formal European (CH/EU) cover letter (1 page, ~1,800–2,200 chars) from:
+1. **Candidate CV** (background, key achievements, skills).
+2. **Job posting** (company, role, key qualifications).
+3. **Optional motivation** (candidate's reason for applying, if provided).
+
+Style:
+- **Professional, formal tone** (suitable for Switzerland/EU job market).
+- **No emojis or excessive enthusiasm**; let competence speak.
+- Write the cover letter in {target_language}.
+- Structure: Opening → Why you fit the role (2–3 key reasons) → Closing.
+- **Personalize**: Reference company vision/domain if possible.
+- **Max 1 page**; single-spaced.
+
+CRITICAL CONSTRAINT:
+Do NOT attribute tools, technologies, domains, or hands-on experience to the candidate
+unless they are explicitly present in the Candidate CV, Work Experience, Skills,
+or Tailoring Notes.
+Job posting terminology may be referenced ONLY as the employer’s domain or project context,
+not as the candidate’s direct experience.
+
+Allowed:
+- Referencing the company’s domain, industry, or project focus.
+- Stating transferability of experience (e.g. "experience applicable to regulated environments").
+
+Forbidden:
+- Claiming hands-on experience with tools, systems, or technologies
+	that appear only in the job posting and not in candidate inputs.
+
+When in doubt, prefer conservative phrasing that avoids naming
+specific tools or technologies and instead describes experience
+at the level of process, responsibility, or outcome.
+
+Output format (plain text, NOT JSON):
+[Full cover letter text, ready to paste into an email or application form.]

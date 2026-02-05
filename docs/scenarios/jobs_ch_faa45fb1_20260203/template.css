@@ -91,7 +91,7 @@ body {
   /* Enable safe wrapping for long technical strings and prevent overflow */
   overflow-wrap: anywhere;
   word-break: normal;
-  hyphens: none;
+  hyphens: auto;
 }
 
 /* Enforce consistent line-height/font-size across paginated fragments */
@@ -285,8 +285,9 @@ a {
 
 
 .entry-body {
-  margin-left: 45.5mm;
+  margin-left: 42.5mm;
   margin-top: 0.8mm;
+  text-indent: 0;
 }
 
 .entry-line {
@@ -294,29 +295,20 @@ a {
 }
 
 .bullets {
-  margin: 0.8mm 0 0 45.5mm;
-  padding-left: 0;
+  margin: 0.8mm 0 0 42.5mm;
+  padding-left: 4mm;
   font-size: 10pt;
   line-height: 1.4;
-  list-style: none;
+  list-style: disc;
+  list-style-position: outside;
 }
 
 .bullets li {
   margin-bottom: 0.3mm;
   line-height: 1.4;
-  padding-left: 0;
-  text-indent: 0;
-  position: relative;
   overflow-wrap: anywhere;
   word-break: normal;
-  hyphens: none;
-}
-
-.bullets li::before {
-  content: "•";
-  position: absolute;
-  left: -5mm;
-  top: 0;
+  hyphens: auto;
 }
 
 .simple-list {
@@ -332,7 +324,7 @@ a {
   line-height: 1.25;
   overflow-wrap: anywhere;
   word-break: normal;
-  hyphens: none;
+  hyphens: auto;
 }
 
 .footer {

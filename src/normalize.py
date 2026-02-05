@@ -22,8 +22,14 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
         if not txt:
             return ""
         txt = txt.replace("–", "-").replace("—", "-").replace("−", "-")
+        # Preserve YYYY-MM formatting (no spaces around the month dash).
+        txt = re.sub(r"(\d{4})\s*-\s*(\d{2})", r"\1§§\2", txt)
+        # Normalize range separators with spaces around dashes.
         txt = re.sub(r"\s*-\s*", " - ", txt)
-        return re.sub(r"\s+", " ", txt).strip()
+        txt = re.sub(r"\s+", " ", txt).strip()
+        txt = txt.replace("§§", "-")
+        # Final safeguard: collapse any lingering YYYY - MM spacing.
+        return re.sub(r"(\d{4})\s*-\s*(\d{2})", r"\1-\2", txt)
 
     # Support alternate name field: 'name' -> 'full_name'
     if "full_name" not in normalized and "name" in normalized:

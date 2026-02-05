@@ -77,7 +77,7 @@ jobs:
     
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: backend-test-results
         path: |
@@ -95,12 +95,10 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: ui/package-lock.json
     
     - name: Install dependencies
       working-directory: ./ui
-      run: npm ci
+      run: npm install
     
     - name: Run linter
       working-directory: ./ui
@@ -111,7 +109,7 @@ jobs:
       run: npm run build
     
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: frontend-build
         path: ui/.next/
@@ -158,36 +156,45 @@ jobs:
         sed -i 's/your-openai-api-key-here/${{ secrets.OPENAI_API_KEY }}/g' local.settings.json
         sed -i 's/your-prompt-id-here/${{ secrets.OPENAI_PROMPT_ID }}/g' local.settings.json
     
-    - name: Start Azure Functions
-      run: |
-        func start &
-        sleep 15
-    
     - name: Install frontend dependencies
       working-directory: ./ui
-      run: npm ci
+      run: npm install
+    
+    - name: Install Playwright dependencies
+      run: npm install
     
     - name: Install Playwright browsers
       run: npx playwright install --with-deps chromium
     
-    - name: Start Next.js dev server
-      working-directory: ./ui
-      run: |
-        npm run dev &
-        sleep 10
-    
     - name: Run Playwright tests
-      run: npx playwright test
+      run: npm test
       env:
         BASE_URL: http://localhost:3000
         AZURE_FUNCTIONS_URL: http://localhost:7071
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_PROMPT_ID: ${{ secrets.OPENAI_PROMPT_ID }}
     
     - name: Upload Playwright report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: playwright-report
         path: playwright-report/
+    
+    - name: Upload test artifacts (DoD: CV + CL PDFs)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-artifacts
+        path: |
+          tests/test-output/normal_path_cv.pdf
+          tests/test-output/fast_path_cv.pdf
+          tests/test-output/normal_path_cover_letter.pdf
+          tests/test-output/fast_path_cover_letter.pdf
+          tests/test-output/mariusz_generated_cv.pdf
+          tests/test-output/preview.pdf
+          tests/test-output/preview.html
+          samples/reference_output.pdf
 
   # Deploy to Azure (only on main branch)
   deploy:

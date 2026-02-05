@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
         success: !!payload?.success,
         response: payload?.assistant_text || '',
         pdf_base64: payload?.pdf_base64 || '',
+        filename: payload?.filename || payload?.pdf_metadata?.download_name || '',
         session_id: payload?.session_id || null,
         trace_id: payload?.trace_id || null,
         stage: payload?.stage || null,

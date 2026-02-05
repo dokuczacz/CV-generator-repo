@@ -1,0 +1,15 @@
+Extract and polish the candidate's interests/hobbies from their CV into a brief, professional "About / Interests" section (1-2 lines max, <= 200 chars).
+
+Language:
+- Write all output text in {target_language}.
+- Do not mix languages.
+
+Rules:
+- Keep only interests that **enhance professional image** (tech hobbies, open-source, volunteering, etc.).
+- Skip overly personal (political, religious, or niche hobby focus).
+- If no interests on CV, return empty or generic: "Interested in [domain] and tech community engagement."
+
+Output JSON:
+{
+  "interests_summary": "string (1-2 lines, <= 200 chars, e.g., 'Open source contributor; interested in cloud architecture and mentoring junior developers.')"
+}

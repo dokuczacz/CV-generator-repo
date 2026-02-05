@@ -1,3 +1,0 @@
-http=200
-len=730
-head={"success":true,"response":"Paste the job offer text, then Analyze. Raw text will not be stored.","pdf_base64":"","session_id":"b5207f16-a362-4dce-af51-8db2f08cb5d2","trace_id":"87449933-973b-4d3c-ba61-178508d6c795","stage":"job_posting","run_summary":null,"turn_trace":null,"ui_action":{"kind":"edit_form","stage":"JOB_POSTING","title":"Stage 3/6 — Job offer (optional)","text":"Paste the job offer text. The backend will analyze once and store only a structured reference.","fields":[{"key":"job_offer_text","label":"Job offer text","value":"","type":"textarea"}],"actions":[{"id":"JOB_OFFER_ANALYZE","label":"Analyze","style":"primary"},{"id":"JOB_OFFER_BACK","label":"Continue","style":"secondary"}],"disable_free_text":true}}

@@ -19,6 +19,13 @@ def enforce_additional_properties_false(schema: dict[str, Any]) -> dict[str, Any
 
     def _walk(node: Any) -> None:
         if isinstance(node, dict):
+            if "$ref" in node:
+                # OpenAI strict schema rejects siblings on $ref (e.g., description/title).
+                ref = node.get("$ref")
+                node.clear()
+                if ref is not None:
+                    node["$ref"] = ref
+                return
             node_type = node.get("type")
             if node_type == "object":
                 # Required by OpenAI strict JSON schema validation.

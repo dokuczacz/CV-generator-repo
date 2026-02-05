@@ -1,3 +1,0 @@
-http=200
-len=721
-head={"success":true,"response":"Stage 2/6 — Education: confirm or edit.","pdf_base64":"","session_id":"b5207f16-a362-4dce-af51-8db2f08cb5d2","trace_id":"927a919c-d0dc-4a5c-a0d1-eb9b7f16b020","stage":"education","run_summary":null,"turn_trace":null,"ui_action":{"kind":"review_form","stage":"EDUCATION","title":"Stage 2/6 — Education","text":"Review education entries. Edit if needed, then Confirm & lock.","fields":[{"key":"education_entries","label":"Education","value":"1. Poznań University of Technology\n2. Poznań University of Technology"}],"actions":[{"id":"EDUCATION_EDIT_JSON","label":"Edit (JSON)","style":"secondary"},{"id":"EDUCATION_CONFIRM","label":"Confirm & lock","style":"primary"}],"disable_free_text":true}}

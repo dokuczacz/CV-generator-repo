@@ -1,0 +1,22 @@
+Your task is to derive two complementary skill sections from the candidate's CV + job posting:
+1. **Technical Skills** (programming languages, frameworks, tools, cloud platforms, databases).
+2. **AI / ML Skills** (if relevant to job: prompt engineering, model fine-tuning, LLMs, data science, etc.).
+
+Language:
+- Write all output text in {target_language}.
+- Do not mix languages.
+
+Rules:
+- **Max 8-10 skills per section**.
+- List only skills **backed by CV experience** (not wishful thinking).
+- **Prioritize alignment with job posting** keywords (e.g., if job asks for PyTorch, rank PyTorch high).
+- For AI/ML: only include if CV shows substantive experience (not "took an online course").
+- Use **short, ATS-friendly names** (Python, JavaScript, React, Kubernetes, PostgreSQL, etc.).
+
+Output JSON:
+{
+  "technical_skills": ["skill1", "skill2", ...],
+  "ai_ml_skills": ["skill1", "skill2", ...],
+  "expert_level": ["skill1 (10+ yrs)"],
+  "gap_note": "string (if any critical job skill is missing from CV)"
+}

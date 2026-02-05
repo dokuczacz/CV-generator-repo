@@ -1,3 +1,0 @@
-ui_title=Stage 4/6 — Work experience
-ui_text=Locked roles: 1/5. Select a role to continue.
-roles_head=0: Bauarbeiter | bullets=4 [locked]

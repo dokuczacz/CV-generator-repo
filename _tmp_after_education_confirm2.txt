@@ -1,4 +1,0 @@
-stage=job_posting
-ui_stage=JOB_POSTING
-ui_title=Stage 3/6 — Job offer (optional)
-actions=JOB_OFFER_PASTE,JOB_OFFER_SKIP

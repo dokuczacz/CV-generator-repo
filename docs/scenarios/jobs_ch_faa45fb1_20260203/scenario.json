@@ -1,0 +1,22 @@
+{
+  "dod": {
+    "thresholds": {
+      "exit_code": 0
+    },
+    "fallback": "If Playwright fails due to environment, run contract smoke via curl /api/health and /api/process-cv with mocked mode.",
+    "commands": [
+      "python -m pytest -q tests/unit",
+      "npx playwright test -c playwright.noserver.config.ts"
+    ]
+  },
+  "artifacts": {
+    "cv_source": "cv_source.docx",
+    "job_posting_text": "job_posting.txt",
+    "template_html": "template.html",
+    "template_css": "template.css"
+  },
+  "job_posting_url": "https://www.jobs.ch/en/vacancies/detail/faa45fb1-e562-43b3-a4dd-be9717ed2074/",
+  "created_utc": "2026-02-03T15:20:36.1345205Z",
+  "scenario_id": "jobs_ch_faa45fb1_20260203",
+  "schema_version": "1.0"
+}

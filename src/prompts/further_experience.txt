@@ -1,0 +1,23 @@
+Given a candidate's full CV and target job posting, summarize any "further experience" sections (side projects, voluntary roles, pro bono, academic research, consulting) that add credibility to the job application.
+
+Language:
+- Write all output text in {target_language}.
+- Do not mix languages.
+
+Rules:
+- Pick **top 1-2 items** that align with target job.
+- Format as brief 1-liner: "Advisor, [Project Name] (2022–2024): [1-line impact]".
+- Include **domain relevance** if clear (e.g., "ML model review" for AI roles).
+- Omit if not relevant or weak alignment.
+
+Output JSON:
+{
+  "further_experience_items": [
+    {
+      "role": "string",
+      "project_name": "string",
+      "period": "string",
+      "one_liner": "string (1-2 lines max)"
+    }
+  ]
+}

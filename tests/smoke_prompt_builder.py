@@ -19,10 +19,17 @@ def main() -> int:
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
-    from function_app import _AI_PROMPT_BY_STAGE, _build_ai_system_prompt
+    from function_app import _build_ai_system_prompt
+    from src.prompt_registry import get_prompt_registry
 
     failures: list[str] = []
-    for stage in sorted(_AI_PROMPT_BY_STAGE.keys()):
+    registry = get_prompt_registry()
+    prompts_dir = Path(registry.prompts_dir)
+    stages = sorted([p.stem for p in prompts_dir.glob("*.txt") if p.is_file()])
+    if not stages:
+        raise AssertionError(f"No prompt files found in {prompts_dir}")
+
+    for stage in stages:
         try:
             prompt = _build_ai_system_prompt(stage=stage, target_language="en")
         except Exception as exc:  # pragma: no cover
