@@ -165,6 +165,9 @@ jobs:
       working-directory: ./ui
       run: npm install
     
+    - name: Install Playwright dependencies
+      run: npm install
+    
     - name: Install Playwright browsers
       run: npx playwright install --with-deps chromium
     
