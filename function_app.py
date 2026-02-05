@@ -7992,6 +7992,19 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     generate_requested = _wants_generate_from_message(message)
     edit_intent = detect_edit_intent(message)
 
+    # If user has edit intent, clear any pending confirmation to let them proceed with editing
+    if edit_intent:
+        pending_confirmation = _get_pending_confirmation(meta)
+        if pending_confirmation:
+            logging.info(f"Clearing pending_confirmation due to edit intent: {pending_confirmation}")
+            meta = _clear_pending_confirmation(meta)
+            try:
+                store.update_session(session_id, cv_data, meta)
+                sess = store.get_session(session_id) or sess
+                meta = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else meta
+            except Exception as e:
+                logging.warning(f"Failed to clear pending_confirmation: {e}")
+
     # confirmation_required is backend-owned: either we have explicit pending edits, or identity-critical fields not confirmed.
     confirmed_flags = meta.get("confirmed_flags") if isinstance(meta.get("confirmed_flags"), dict) else {}
     pending_patch = meta.get("pending_patch") if isinstance(meta.get("pending_patch"), dict) else None
