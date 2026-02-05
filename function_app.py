@@ -8008,7 +8008,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     readiness_ok = bool(readiness.get("can_generate")) and _estimate_pages_ok(cv_data) and pending_edits == 0
 
     # Ensure a deterministic pending confirmation when DOCX prefill exists but is not committed.
-    if isinstance(docx_prefill_unconfirmed, dict) and (not cv_data.get("work_experience") or not cv_data.get("education")):
+    # BUT: if user has edit intent, let them edit instead of blocking with confirmation.
+    if isinstance(docx_prefill_unconfirmed, dict) and (not cv_data.get("work_experience") or not cv_data.get("education")) and not edit_intent:
         if not pending_confirmation:
             logging.info(f"Setting pending_confirmation for import_prefill (DOCX has data, canonical CV empty)")
             meta = _set_pending_confirmation(meta, kind="import_prefill")
