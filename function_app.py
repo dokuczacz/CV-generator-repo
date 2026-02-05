@@ -72,6 +72,7 @@ from src.skills_unified_proposal import (
 )
 from src.prompt_registry import get_prompt
 from src import product_config
+from src.i18n import get_cover_letter_signoff
 
 
 _SCHEMA_REPAIR_HINTS_BY_STAGE: dict[str, str] = {
@@ -2371,7 +2372,9 @@ def _generate_cover_letter_block_via_openai(
 
     try:
         prop = parse_cover_letter_proposal(parsed)
-        signoff = f"Kind regards,\n{str(cv_data.get('full_name') or '').strip()}"
+        # Use localized signoff based on target language
+        signoff_phrase = get_cover_letter_signoff(target_language)
+        signoff = f"{signoff_phrase},\n{str(cv_data.get('full_name') or '').strip()}"
         cl_block = {
             "opening_paragraph": str(prop.opening_paragraph or "").strip(),
             "core_paragraphs": [str(p).strip() for p in (prop.core_paragraphs or []) if str(p).strip()],
@@ -2390,6 +2393,9 @@ def _generate_cover_letter_block_via_openai(
         if not ok_fix or not isinstance(parsed_fix, dict):
             return False, None, "Validation failed: " + "; ".join(errs2[:4])
         prop_fix = parse_cover_letter_proposal(parsed_fix)
+        # Use localized signoff based on target language
+        signoff_phrase = get_cover_letter_signoff(target_language)
+        signoff = f"{signoff_phrase},\n{str(cv_data.get('full_name') or '').strip()}"
         cl_block2 = {
             "opening_paragraph": str(prop_fix.opening_paragraph or "").strip(),
             "core_paragraphs": [str(p).strip() for p in (prop_fix.core_paragraphs or []) if str(p).strip()],

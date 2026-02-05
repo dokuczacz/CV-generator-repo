@@ -36,7 +36,7 @@ class CoverLetterProposal(BaseModel):
     opening_paragraph: str = Field(..., description="Opening paragraph (2 sentences).")
     core_paragraphs: List[str] = Field(..., min_items=1, max_items=2, description="Core paragraphs (1–2).")
     closing_paragraph: str = Field(..., description="Closing paragraph (neutral).")
-    signoff: str = Field(..., description="Formal sign-off, e.g. 'Kind regards,\\nName' (Name must match CV).")
+    signoff: str = Field(..., description="Formal sign-off in the target language, e.g. 'Kind regards' (EN), 'Mit freundlichen Grüßen' (DE), 'Z poważaniem' (PL), followed by '\\nName' (Name must match CV).")
     notes: str = Field("", description="Optional short explanation (max 500 chars).")
 
     @validator("opening_paragraph", "closing_paragraph", "signoff", pre=True)

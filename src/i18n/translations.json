@@ -18,6 +18,9 @@
       "location": "Location",
       "present": "Present",
       "references_available": "Available upon request"
+    },
+    "cover_letter": {
+      "signoff": "Kind regards"
     }
   },
   "de": {
@@ -39,6 +42,9 @@
       "location": "Standort",
       "present": "Heute",
       "references_available": "Auf Anfrage verfügbar"
+    },
+    "cover_letter": {
+      "signoff": "Mit freundlichen Grüßen"
     }
   },
   "pl": {
@@ -60,6 +66,9 @@
       "location": "Lokalizacja",
       "present": "Obecnie",
       "references_available": "Dostępne na żądanie"
+    },
+    "cover_letter": {
+      "signoff": "Z poważaniem"
     }
   }
 }
