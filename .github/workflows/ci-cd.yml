@@ -181,13 +181,19 @@ jobs:
         name: playwright-report
         path: playwright-report/
     
-    - name: Upload test artifacts
+    - name: Upload test artifacts (DoD: CV + CL PDFs)
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: test-artifacts
         path: |
-          tests/test-output/
+          tests/test-output/normal_path_cv.pdf
+          tests/test-output/fast_path_cv.pdf
+          tests/test-output/normal_path_cover_letter.pdf
+          tests/test-output/fast_path_cover_letter.pdf
+          tests/test-output/mariusz_generated_cv.pdf
+          tests/test-output/preview.pdf
+          tests/test-output/preview.html
           samples/reference_output.pdf
 
   # Deploy to Azure (only on main branch)
