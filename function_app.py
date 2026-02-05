@@ -1399,9 +1399,13 @@ def _stable_profile_user_id(cv_data: dict, meta: dict) -> str | None:
 
 
 def _stable_profile_payload(*, cv_data: dict, meta: dict) -> dict:
-    """Build the stable profile payload for caching (contact/education/interests/languages)."""
+    """Build the stable profile payload for caching (contact/education/interests/languages).
+    
+    Optionally includes work_experience if it's been confirmed (for even faster repeat CVs).
+    """
     d = dict(cv_data or {})
-    return {
+    
+    profile = {
         "schema_version": "profile_v1",
         "saved_at": _now_iso(),
         "contact": {
@@ -1417,10 +1421,22 @@ def _stable_profile_payload(*, cv_data: dict, meta: dict) -> dict:
         "language": str(d.get("language") or meta.get("language") or "en").strip().lower() or "en",
         "target_language": str(meta.get("target_language") or meta.get("language") or d.get("language") or "en").strip().lower() or "en",
     }
+    
+    # Optional: include work_experience if confirmed (helps with repeat CVs)
+    # This is job-agnostic base experience that can be tailored later
+    cf = meta.get("confirmed_flags") if isinstance(meta.get("confirmed_flags"), dict) else {}
+    if cf.get("work_confirmed") and isinstance(d.get("work_experience"), list):
+        profile["work_experience"] = d.get("work_experience")
+    
+    return profile
 
 
 def _apply_stable_profile_payload(*, cv_data: dict, meta: dict, payload: dict) -> tuple[dict, dict]:
-    """Apply cached stable profile into cv_data/meta (does not touch tailored sections)."""
+    """Apply cached stable profile into cv_data/meta (does not touch tailored sections).
+    
+    Restores contact, education, interests, languages, and optionally work_experience
+    if it was saved in the profile.
+    """
     cv2 = dict(cv_data or {})
     meta2 = dict(meta or {})
 
@@ -1436,6 +1452,12 @@ def _apply_stable_profile_payload(*, cv_data: dict, meta: dict, payload: dict) -
     cv2["interests"] = str(payload.get("interests") or "").strip()
     if isinstance(payload.get("languages"), list):
         cv2["languages"] = payload.get("languages")
+    
+    # Optional: restore work_experience if saved in profile (for faster repeat CVs)
+    if isinstance(payload.get("work_experience"), list) and len(payload.get("work_experience", [])) > 0:
+        cv2["work_experience"] = payload.get("work_experience")
+        # Mark as pre-filled from profile
+        meta2["work_prefilled_from_profile"] = True
 
     lang = str(payload.get("language") or "").strip().lower()
     target = str(payload.get("target_language") or "").strip().lower()
@@ -6020,11 +6042,19 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     cf["confirmed_at"] = cf.get("confirmed_at") or _now_iso()
                     meta2["confirmed_flags"] = cf
                     meta2 = _wizard_set_stage(meta2, "job_posting")
+                    
+                    # Build message based on what was restored
+                    restored_parts = ["contact", "education", "interests", "language"]
+                    if meta2.get("work_prefilled_from_profile"):
+                        restored_parts.append("work experience")
+                    profile_msg = f"Fast path: applied saved profile ({', '.join(restored_parts)})."
                 else:
                     meta2 = _wizard_set_stage(meta2, "contact")
+                    profile_msg = "Review your contact details below."
+                    
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(
-                    assistant_text="Fast path: applied saved profile (contact, education, interests, language)." if applied_profile else "Review your contact details below.",
+                    assistant_text=profile_msg,
                     meta_out=meta2,
                     cv_out=cv_data,
                 )
