@@ -5274,6 +5274,47 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     except Exception:
         pass
 
+    # CRITICAL FAST-PATH: Detect edit intent BEFORE wizard/normal mode split
+    # This ensures edit intent works for ALL sessions regardless of flow_mode
+    edit_intent = detect_edit_intent(message)
+    if edit_intent:
+        current_stage = _get_stage_from_metadata(meta)
+        logging.info(f"Edit intent detected (universal fast-path), session={session_id}, stage={current_stage}")
+        
+        # Clear any pending confirmation that might block editing
+        if _get_pending_confirmation(meta):
+            logging.info(f"Clearing pending_confirmation due to edit intent")
+            meta = _clear_pending_confirmation(meta)
+            try:
+                store.update_session(session_id, cv_data, meta)
+            except Exception as e:
+                logging.warning(f"Failed to clear pending_confirmation: {e}")
+        
+        # Return immediately with edit intent confirmed (works for both wizard and normal modes)
+        stage_debug_fastpath = {
+            "edit_intent": True,
+            "current_stage": current_stage.value,
+            "flow_mode": meta.get("flow_mode"),
+        }
+        run_summary_fastpath = {
+            "stage_debug": stage_debug_fastpath,
+            "steps": [{"step": "edit_intent_universal_fast_path"}],
+            "execution_mode": False,
+            "model_calls": 0,
+            "max_model_calls": product_config.CV_MAX_MODEL_CALLS,
+        }
+        return 200, {
+            "success": True,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "stage": current_stage.value,
+            "assistant_text": "Edit intent detected. Tell me what to change, and I will update your CV fields.",
+            "pdf_base64": "",
+            "last_response_id": None,
+            "run_summary": run_summary_fastpath,
+            "turn_trace": [],
+        }
+
     # Wizard mode: deterministic, backend-driven stage UI (Playwright-backed).
     if meta.get("flow_mode") == "wizard":
         def _wizard_get_stage(m: dict) -> str:
@@ -7988,46 +8029,11 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         }.get(stage_now, "Continue.")
         return _wizard_resp(assistant_text=stage_text, meta_out=meta2, cv_out=cv_data)
 
+    # NON-WIZARD MODE: Continue with normal orchestration
     current_stage = _get_stage_from_metadata(meta)
     generate_requested = _wants_generate_from_message(message)
-    edit_intent = detect_edit_intent(message)
-
-    # CRITICAL FAST-PATH: If user has edit intent, return immediately without FSM/AI logic
-    # This must happen BEFORE any pending_confirmation checks to avoid blocking the user
-    if edit_intent:
-        # Clear any pending confirmation that might block editing
-        if _get_pending_confirmation(meta):
-            logging.info(f"Clearing pending_confirmation due to edit intent")
-            meta = _clear_pending_confirmation(meta)
-            try:
-                store.update_session(session_id, cv_data, meta)
-            except Exception as e:
-                logging.warning(f"Failed to clear pending_confirmation: {e}")
-        
-        # Return immediately with edit intent confirmed
-        stage_debug_fastpath = {
-            "edit_intent": True,
-            "current_stage": current_stage.value,
-            "generate_requested": bool(generate_requested),
-        }
-        run_summary_fastpath = {
-            "stage_debug": stage_debug_fastpath,
-            "steps": [{"step": "edit_intent_fast_path_early"}],
-            "execution_mode": False,
-            "model_calls": 0,
-            "max_model_calls": product_config.CV_MAX_MODEL_CALLS,
-        }
-        return 200, {
-            "success": True,
-            "trace_id": trace_id,
-            "session_id": session_id,
-            "stage": current_stage.value,
-            "assistant_text": "Edit intent detected. Tell me what to change, and I will update your CV fields.",
-            "pdf_base64": "",
-            "last_response_id": None,
-            "run_summary": run_summary_fastpath,
-            "turn_trace": [],
-        }
+    # edit_intent is handled early (before wizard split) and returns immediately, so it's always False here
+    edit_intent = False
 
     # confirmation_required is backend-owned: either we have explicit pending edits, or identity-critical fields not confirmed.
     confirmed_flags = meta.get("confirmed_flags") if isinstance(meta.get("confirmed_flags"), dict) else {}
@@ -8045,8 +8051,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     readiness_ok = bool(readiness.get("can_generate")) and _estimate_pages_ok(cv_data) and pending_edits == 0
 
     # Ensure a deterministic pending confirmation when DOCX prefill exists but is not committed.
-    # BUT: if user has edit intent, let them edit instead of blocking with confirmation.
-    if isinstance(docx_prefill_unconfirmed, dict) and (not cv_data.get("work_experience") or not cv_data.get("education")) and not edit_intent:
+    # Note: edit intent is handled early and returns before this code, so no need to check here.
+    if isinstance(docx_prefill_unconfirmed, dict) and (not cv_data.get("work_experience") or not cv_data.get("education")):
         if not pending_confirmation:
             logging.info(f"Setting pending_confirmation for import_prefill (DOCX has data, canonical CV empty)")
             meta = _set_pending_confirmation(meta, kind="import_prefill")
