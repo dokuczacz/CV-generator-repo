@@ -178,7 +178,7 @@ jobs:
         sleep 10
     
     - name: Run Playwright tests
-      run: npx playwright test
+      run: npm test
       env:
         BASE_URL: http://localhost:3000
         AZURE_FUNCTIONS_URL: http://localhost:7071
