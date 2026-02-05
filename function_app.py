@@ -5361,15 +5361,27 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
         # Best-effort URL fetch (non-blocking): if user provided job_posting_url via sidebar,
         # try to fetch content and store it so the user doesn't have to paste manually.
+        # Skip if already fetched or in progress.
         try:
             url = str(meta2.get("job_posting_url") or "").strip()
             has_text = bool(str(meta2.get("job_posting_text") or "").strip())
-            if url and not has_text and re.match(r"^https?://", url, re.IGNORECASE):
+            fetch_status = str(meta2.get("job_fetch_status") or "")
+            
+            # Only fetch if no text, no previous successful fetch, and not currently pending
+            if url and not has_text and fetch_status not in ("success", "manual") and re.match(r"^https?://", url, re.IGNORECASE):
+                meta2["job_fetch_status"] = "fetching"
                 ok, fetched_text, err = _fetch_text_from_url(url)
                 if ok and fetched_text.strip():
                     meta2["job_posting_text"] = fetched_text[:20000]
+                    meta2["job_fetch_status"] = "success"
+                    meta2["job_fetch_timestamp"] = _now_iso()
                     meta2.pop("job_posting_fetch_error", None)
+                    meta2.pop("job_fetch_error", None)
                 else:
+                    meta2["job_fetch_status"] = "failed"
+                    meta2["job_fetch_error"] = str(err)[:400]
+                    meta2["job_fetch_timestamp"] = _now_iso()
+                    # Keep legacy error field for compatibility
                     meta2["job_posting_fetch_error"] = str(err)[:400]
         except Exception:
             pass
@@ -5429,14 +5441,23 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 # Ensure we have job text (prefer payload override, fallback to stored metadata)
                 job_text = str(payload.get("job_posting_text") or payload.get("job_offer_text") or meta2.get("job_posting_text") or "")[:20000]
                 job_url = str(payload.get("job_posting_url") or meta2.get("job_posting_url") or "").strip()
-                if (not job_text.strip()) and job_url and re.match(r"^https?://", job_url, re.IGNORECASE):
+                fetch_status = str(meta2.get("job_fetch_status") or "")
+                
+                # Only fetch if we don't have text and haven't already successfully fetched
+                if (not job_text.strip()) and job_url and fetch_status != "success" and re.match(r"^https?://", job_url, re.IGNORECASE):
+                    meta2["job_fetch_status"] = "fetching"
                     ok, fetched_text, err = _fetch_text_from_url(job_url)
                     if ok and fetched_text.strip():
                         job_text = fetched_text[:20000]
                         meta2["job_posting_text"] = job_text
                         meta2["job_posting_url"] = job_url
+                        meta2["job_fetch_status"] = "success"
+                        meta2["job_fetch_timestamp"] = _now_iso()
                         stage_updates.append({"step": "fetch_job_url", "ok": True})
                     else:
+                        meta2["job_fetch_status"] = "failed"
+                        meta2["job_fetch_error"] = str(err)[:400]
+                        meta2["job_fetch_timestamp"] = _now_iso()
                         stage_updates.append({"step": "fetch_job_url", "ok": False, "error": str(err)[:200]})
                         meta2 = _wizard_set_stage(meta2, "job_posting_paste")
                         cv_data, meta2 = _persist(cv_data, meta2)
@@ -8478,8 +8499,12 @@ def _tool_extract_and_store_cv(*, docx_base64: str, language: str, extract_photo
     }
     if job_posting_url:
         metadata["job_posting_url"] = job_posting_url
+        # Add job fetch status tracking
+        metadata["job_fetch_status"] = "pending"
     if job_posting_text:
         metadata["job_posting_text"] = str(job_posting_text)[:20000]
+        if job_posting_url:
+            metadata["job_fetch_status"] = "manual"  # User provided text manually
 
     try:
         session_id = store.create_session(cv_data, metadata)
@@ -8487,6 +8512,34 @@ def _tool_extract_and_store_cv(*, docx_base64: str, language: str, extract_photo
     except Exception as e:
         logging.error(f"Session creation failed: {e}")
         return 500, {"error": "Failed to create session", "details": str(e)}
+
+    # Async best-effort: fetch job URL in background if provided and no text yet
+    if job_posting_url and not job_posting_text:
+        try:
+            url = str(job_posting_url).strip()
+            if re.match(r"^https?://", url, re.IGNORECASE):
+                logging.info(f"Starting async job URL fetch: {url[:100]}")
+                ok, fetched_text, err = _fetch_text_from_url(url, timeout=8.0)
+                
+                # Update session with fetch result (non-blocking)
+                session = store.get_session(session_id)
+                if session:
+                    meta_update = session.get("metadata") or {}
+                    if ok and fetched_text.strip():
+                        meta_update["job_posting_text"] = fetched_text[:20000]
+                        meta_update["job_fetch_status"] = "success"
+                        meta_update["job_fetch_timestamp"] = _now_iso()
+                        logging.info(f"Job URL fetch successful: {len(fetched_text)} chars")
+                    else:
+                        meta_update["job_fetch_status"] = "failed"
+                        meta_update["job_fetch_error"] = str(err)[:400]
+                        meta_update["job_fetch_timestamp"] = _now_iso()
+                        logging.warning(f"Job URL fetch failed: {err}")
+                    
+                    store.update_session(session_id, session.get("cv_data"), meta_update)
+        except Exception as e:
+            logging.warning(f"Async job URL fetch exception: {e}")
+            # Don't fail the whole request - just log and continue
 
     if photo_extracted and extracted_photo:
         try:
