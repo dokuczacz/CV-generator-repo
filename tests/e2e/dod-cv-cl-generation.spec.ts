@@ -124,7 +124,7 @@ async function generateAndSavePDF(page: Page, filename: string) {
 test.describe('DoD: CV and Cover Letter Generation (Normal Path + Fast Path)', () => {
   
   test('Normal Path: Generate CV + Cover Letter', async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000); // 10 minutes - wizard + LLM + PDF generation
 
     page.on('dialog', async (dialog) => {
       await dialog.dismiss().catch(() => undefined);
@@ -189,7 +189,7 @@ test.describe('DoD: CV and Cover Letter Generation (Normal Path + Fast Path)', (
   });
 
   test('Fast Path: Generate CV + Cover Letter (with profile cache)', async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000); // 10 minutes - full wizard flow + LLM calls take time
 
     page.on('dialog', async (dialog) => {
       await dialog.dismiss().catch(() => undefined);
