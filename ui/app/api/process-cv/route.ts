@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (!rawMessage.trim() && !userActionId.trim() && !hasDocx) {
       return NextResponse.json({ success: false, error: 'message is required (or provide user_action or docx_base64)' }, { status: 400 });
     }
-    const message = rawMessage.trim() ? rawMessage : 'start';
+    const message = rawMessage.trim() ? rawMessage : userActionId.trim() ? '' : 'start';
 
     const { status, payload } = await callAzureFunction('/cv-tool-call-handler', {
       tool_name: 'process_cv_orchestrated',

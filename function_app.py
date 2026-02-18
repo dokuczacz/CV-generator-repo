@@ -112,6 +112,9 @@ _SCHEMA_REPAIR_HINTS_BY_STAGE: dict[str, str] = {
 }
 
 
+WORK_ROLE_ALIGNMENT_THRESHOLD = 0.7
+
+
 def _schema_repair_instructions(*, stage: str | None, parse_error: str | None = None) -> str:
     """Build a stage-specific, MCP-like repair instruction for the model."""
     stage_key = (stage or "").strip()
@@ -214,6 +217,33 @@ def _sha256_text(s: str) -> str:
         return hashlib.sha256((s or "").encode("utf-8", errors="ignore")).hexdigest()
     except Exception:
         return ""
+
+
+def _snapshot_session(session_id: str, cv_data: dict, snapshot_type: str = "cv") -> BlobPointer | None:
+    """
+    Upload a timestamped session snapshot to cv-artifacts blob container.
+    
+    Args:
+        session_id: Session ID
+        cv_data: CV data or other snapshot data (skills proposal, etc.)
+        snapshot_type: Type of snapshot ('cv', 'skills_proposal', 'work_proposal', etc.)
+    
+    Returns:
+        BlobPointer if successful, None if error
+    """
+    try:
+        blob_store = CVBlobStore(container="cv-artifacts")
+        pointer = blob_store.upload_session_snapshot(
+            session_id=session_id,
+            cv_data=cv_data,
+            snapshot_type=snapshot_type
+        )
+        logging.info(f"Session snapshot saved: {snapshot_type} for session {session_id[:8]}")
+        return pointer
+    except Exception as e:
+        logging.warning(f"Failed to upload session snapshot: {e}")
+        return None
+
 
 
 def _work_role_lock_key(*, role_index: int) -> str:
@@ -393,6 +423,152 @@ def _find_work_bullet_hard_limit_violations(*, cv_data: dict, hard_limit: int = 
             if blen > int(hard_limit):
                 violations.append(f"work_experience[{i}].bullets[{j}]: {blen} chars (max {hard_limit})")
     return violations
+
+
+def _coerce_alignment_score(value: object) -> float:
+    try:
+        score = float(value)
+    except Exception:
+        score = 0.0
+    if score < 0.0:
+        return 0.0
+    if score > 1.0:
+        return 1.0
+    return score
+
+
+def _split_work_roles_by_alignment(*, roles: list[dict], threshold: float = WORK_ROLE_ALIGNMENT_THRESHOLD) -> tuple[list[dict], list[dict]]:
+    included: list[dict] = []
+    excluded: list[dict] = []
+
+    for raw in roles or []:
+        if not isinstance(raw, dict):
+            continue
+        role = dict(raw)
+        score = _coerce_alignment_score(role.get("alignment_score"))
+        role["alignment_score"] = score
+        reason = str(role.get("exclusion_reason") or "").strip()
+
+        if score < float(threshold):
+            excluded.append(
+                {
+                    "title": str(role.get("title") or "").strip(),
+                    "company": str(role.get("company") or role.get("employer") or "").strip(),
+                    "date_range": str(role.get("date_range") or "").strip(),
+                    "alignment_score": score,
+                    "exclusion_reason": reason or "Low alignment with target job requirements.",
+                }
+            )
+            continue
+
+        included.append(role)
+
+    return included, excluded
+
+
+def _compose_work_alignment_notes(*, base_notes: str, excluded_roles: list[dict], threshold: float = WORK_ROLE_ALIGNMENT_THRESHOLD) -> str:
+    notes = str(base_notes or "").strip()
+    if not excluded_roles:
+        return notes[:500]
+
+    lines = [f"Excluded {len(excluded_roles)} role(s) with alignment score < {threshold:.2f}:"]
+    for role in excluded_roles[:5]:
+        title = str(role.get("title") or "").strip() or "(untitled role)"
+        company = str(role.get("company") or role.get("employer") or "").strip()
+        score = _coerce_alignment_score(role.get("alignment_score"))
+        reason = str(role.get("exclusion_reason") or "").strip() or "Low alignment with target job requirements."
+        label = f"{title} @ {company}" if company else title
+        lines.append(f"- {label} [{score:.2f}]: {reason}")
+
+    summary = "\n".join(lines)
+    merged = f"{notes}\n\n{summary}" if notes else summary
+    return merged[:500]
+
+
+def _exclude_work_roles_from_cv(*, cv_data: dict, excluded_roles: list[dict]) -> dict:
+    cv2 = dict(cv_data or {})
+    work = cv2.get("work_experience") if isinstance(cv2.get("work_experience"), list) else []
+    if not isinstance(work, list) or not work or not excluded_roles:
+        return cv2
+
+    def _clean_one_line(s: str) -> str:
+        return " ".join(str(s or "").replace("\r", " ").replace("\n", " ").split()).strip()
+
+    def _employer(role: dict) -> str:
+        return _clean_one_line(str(role.get("employer") or role.get("company") or ""))
+
+    def _title(role: dict) -> str:
+        return _clean_one_line(str(role.get("title") or role.get("position") or ""))
+
+    def _date_range(role: dict) -> str:
+        return _normalize_date_range_one_line(role.get("date_range") or "")
+
+    primary_keys: set[str] = set()
+    secondary_keys: set[str] = set()
+    for role in excluded_roles:
+        if not isinstance(role, dict):
+            continue
+        employer = _employer(role).casefold()
+        title = _title(role).casefold()
+        date_range = _date_range(role).casefold()
+        primary = "|".join([employer, date_range]).strip("|")
+        secondary = "|".join([title, employer, date_range]).strip("|")
+        if primary:
+            primary_keys.add(primary)
+        if secondary:
+            secondary_keys.add(secondary)
+
+    out: list[dict] = []
+    for raw in work:
+        role = dict(raw) if isinstance(raw, dict) else {}
+        employer = _employer(role).casefold()
+        title = _title(role).casefold()
+        date_range = _date_range(role).casefold()
+        primary = "|".join([employer, date_range]).strip("|")
+        secondary = "|".join([title, employer, date_range]).strip("|")
+        if secondary and secondary in secondary_keys:
+            continue
+        if primary and primary in primary_keys:
+            continue
+        out.append(role)
+
+    cv2["work_experience"] = out
+    return cv2
+
+
+def _reset_metadata_for_new_version(meta: dict) -> dict:
+    """Reset job-scoped artifacts for a new version while keeping translation/cache state."""
+    out = dict(meta or {})
+    out["pdf_generated"] = False
+    out.pop("pdf_refs", None)
+    out.pop("pdf_refs_blob_ref", None)
+    out.pop("latest_pdf_ref", None)
+
+    out.pop("job_reference", None)
+    out.pop("job_reference_status", None)
+    out.pop("job_reference_error", None)
+    out["job_reference_sig"] = ""
+
+    out.pop("work_experience_proposal_block", None)
+    out.pop("work_experience_proposal_error", None)
+    out["work_experience_proposal_sig"] = ""
+    out.pop("work_experience_proposal_base_sig", None)
+
+    out.pop("skills_proposal_block", None)
+    out.pop("skills_proposal_error", None)
+    out["skills_proposal_sig"] = ""
+    out.pop("skills_proposal_base_sig", None)
+
+    out.pop("work_experience_proposal_accepted_at", None)
+    out.pop("skills_proposal_accepted_at", None)
+    out.pop("work_experience_tailored", None)
+    out.pop("it_ai_skills_tailored", None)
+    out.pop("cover_letter_generated", None)
+
+    out.pop("pending_confirmation", None)
+    out.pop("work_selected_index", None)
+    out["new_version_reset_at"] = _now_iso()
+    return out
 
 
 def _apply_work_experience_proposal_with_locks(*, cv_data: dict, proposal_roles: list[dict], meta: dict) -> dict:
@@ -595,6 +771,37 @@ def _apply_work_experience_proposal_with_locks(*, cv_data: dict, proposal_roles:
     return cv2
 
 
+def _overwrite_work_experience_from_proposal_roles(*, cv_data: dict, proposal_roles: list[dict]) -> dict:
+    """Replace entire work_experience section with normalized proposal roles."""
+
+    def _clean_one_line(s: str) -> str:
+        return " ".join(str(s or "").replace("\r", " ").replace("\n", " ").split()).strip()
+
+    cv2 = dict(cv_data or {})
+    out: list[dict] = []
+
+    for raw in (proposal_roles or [])[:12]:
+        if not isinstance(raw, dict):
+            continue
+        rr = _normalize_work_role_from_proposal(raw)
+        if not str(rr.get("employer") or "").strip():
+            continue
+
+        location = _clean_one_line(str(raw.get("location") or raw.get("city") or raw.get("place") or ""))
+        out.append(
+            {
+                "employer": str(rr.get("employer") or "").strip(),
+                "title": str(rr.get("title") or "").strip(),
+                "date_range": str(rr.get("date_range") or "").strip(),
+                "location": location,
+                "bullets": list(rr.get("bullets") or []),
+            }
+        )
+
+    cv2["work_experience"] = out
+    return cv2
+
+
 def _drop_one_work_bullet_bottom_up(*, cv_in: dict, min_bullets_per_role: int) -> tuple[dict, str | None]:
     """Drop exactly one work-experience bullet (bottom-up), keeping a floor per role.
 
@@ -756,6 +963,88 @@ def _fetch_text_from_url(url: str, *, timeout: float = 8.0, max_bytes: int = 200
         return False, "", str(e)
 
 
+def _is_http_url(text: str) -> bool:
+    return bool(re.match(r"^https?://", str(text or "").strip(), re.IGNORECASE))
+
+
+def _looks_like_job_posting_text(text: str) -> tuple[bool, str]:
+    """
+    Deterministic gate for accepting free text as job posting source.
+    Returns (is_valid, reason_code).
+    """
+    raw = str(text or "")
+    s = raw.strip()
+    if len(s) < 80:
+        return False, "too_short"
+
+    low = s.lower()
+
+    job_keywords = [
+        "responsibilities",
+        "requirements",
+        "qualifications",
+        "what you'll do",
+        "what we are looking for",
+        "what we're looking for",
+        "must have",
+        "preferred",
+        "role",
+        "position",
+        "apply",
+        "benefits",
+        "salary",
+        "contract",
+        "experience",
+        "required",
+        "skills",
+        "job id",
+        "responsibility",
+        "duties",
+        "tasks",
+    ]
+    section_markers = [
+        "what you'll do",
+        "what we are looking for",
+        "what we're looking for",
+        "about the role",
+        "key responsibilities",
+        "required qualifications",
+        "requirements:",
+        "responsibilities:",
+    ]
+    note_markers = [
+        "this is refer",
+        "this refers",
+        "my achievements",
+        "my experience",
+        "tailoring notes",
+        "refering to",
+        "in gl solution",
+        "in expondo",
+        "in sumitomo",
+    ]
+
+    keyword_hits = sum(1 for kw in job_keywords if kw in low)
+    section_hits = sum(1 for kw in section_markers if kw in low)
+    note_hits = sum(1 for kw in note_markers if kw in low)
+    first_person_hits = len(re.findall(r"\b(i|my|me|mine)\b", low))
+    bullet_lines = len(re.findall(r"(?m)^\s*[-*•]\s+", s))
+
+    likely_notes = (first_person_hits >= 3) or (note_hits > 0)
+    if likely_notes and keyword_hits < 2 and section_hits == 0:
+        return False, "looks_like_candidate_notes"
+
+    if section_hits >= 1:
+        return True, "ok_section_marker"
+    if keyword_hits >= 2:
+        return True, "ok_keywords"
+    if bullet_lines >= 4 and keyword_hits >= 1:
+        return True, "ok_bullets_with_keywords"
+    if len(s) >= 500 and not likely_notes:
+        return True, "ok_long_text"
+    return False, "not_job_like"
+
+
 def _openai_enabled() -> bool:
     return bool(str(os.environ.get("OPENAI_API_KEY") or "").strip()) and product_config.CV_ENABLE_AI
 
@@ -767,9 +1056,7 @@ def _openai_model() -> str:
 _AI_PROMPT_BASE = (
     "Return JSON only that strictly matches the provided schema. "
     "Preserve facts, names, and date ranges exactly; do not invent. "
-    "Do not add line breaks inside any JSON string values. "
-    "The Candidate CV, Work Experience, Skills, and Tailoring Notes are the sole source of truth for candidate experience. "
-    "The Job Posting is a matching reference only and must not be used as evidence of candidate skills or experience."
+    "Do not add line breaks inside any JSON string values."
 )
 
 # NOTE: Prompts have been extracted to src/prompts/*.txt and are loaded via PromptRegistry.
@@ -825,6 +1112,35 @@ def _coerce_int(val: object, default: int) -> int:
         return int(str(val).strip())
     except Exception:
         return int(default)
+
+
+def _build_bulk_translation_payload(cv_data: dict) -> dict:
+    """Build canonical payload for bulk translation stage."""
+    return {
+        "profile": str(cv_data.get("profile") or ""),
+        "work_experience": cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else [],
+        "further_experience": cv_data.get("further_experience") if isinstance(cv_data.get("further_experience"), list) else [],
+        "education": cv_data.get("education") if isinstance(cv_data.get("education"), list) else [],
+        "it_ai_skills": cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else [],
+        "technical_operational_skills": cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else [],
+        "languages": cv_data.get("languages") if isinstance(cv_data.get("languages"), list) else [],
+        "interests": str(cv_data.get("interests") or ""),
+        "references": str(cv_data.get("references") or ""),
+    }
+
+
+def _hash_bulk_translation_payload(payload: dict) -> str:
+    """Stable hash for translation cache hit detection."""
+    try:
+        return _sha256_text(json.dumps(payload or {}, ensure_ascii=False, sort_keys=True))
+    except Exception:
+        return ""
+
+
+def _bulk_translation_cache_hit(*, meta: dict, target_language: str, source_hash: str) -> bool:
+    cache = meta.get("bulk_translation_cache") if isinstance(meta.get("bulk_translation_cache"), dict) else {}
+    cached = str(cache.get(str(target_language).strip().lower()) or "")
+    return bool(cached and source_hash and cached == source_hash)
 
 
 def _bulk_translation_output_budget(*, user_text: str, requested_tokens: object) -> int:
@@ -1073,54 +1389,12 @@ def _openai_json_schema_call(
                     body_preview,
                 )
 
-                # If dashboard prompt mode is configured but fails (e.g. wrong prompt id / missing variables),
-                # retry once in legacy mode so the pipeline can continue.
-                if prompt_id:
-                    try:
-                        req_fallback = dict(req)
-                        req_fallback.pop("prompt", None)
-                        req_fallback["model"] = model_override or _openai_model()
-                        req_fallback["max_output_tokens"] = req.get("max_output_tokens")
-                        req_fallback["input"] = [
-                            {"role": "developer", "content": system_prompt},
-                            {"role": "user", "content": user_text},
-                        ]
-                        logging.info(
-                            "Retrying OpenAI call in legacy mode stage=%s model=%s attempt=%s/%s",
-                            stage,
-                            req_fallback.get("model"),
-                            attempt,
-                            max_attempts,
-                        )
-                        started_at = time.time()
-                        resp = client.responses.create(**req_fallback)
-                    except Exception as e2:
-                        status2 = getattr(e2, "status_code", None) or getattr(getattr(e2, "response", None), "status_code", None)
-                        last_status = str(status2) if status2 is not None else (str(status) if status is not None else None)
-                        body2 = None
-                        try:
-                            body2 = getattr(getattr(e2, "response", None), "text", None)
-                        except Exception:
-                            body2 = None
-                        body2_preview = (str(body2)[:500] + "…") if body2 else ""
-                        logging.warning(
-                            "OpenAI legacy retry failed stage=%s attempt=%s/%s status=%s err=%s body=%s",
-                            stage,
-                            attempt,
-                            max_attempts,
-                            status2,
-                            str(e2),
-                            body2_preview,
-                        )
-                        last_err = f"openai error (status={status2 or status}): {str(e2) or str(e)}"
-                        if attempt < max_attempts:
-                            continue
-                        return False, None, last_err
-                else:
-                    last_err = f"openai error (status={status}): {str(e)}"
-                    if attempt < max_attempts:
-                        continue
-                    return False, None, last_err
+                # Strict mode: do not fall back from dashboard prompt mode to explicit-model legacy mode.
+                # If a call fails, retry in the same mode only.
+                last_err = f"openai error (status={status}): {str(e)}"
+                if attempt < max_attempts:
+                    continue
+                return False, None, last_err
 
             out = getattr(resp, "output_text", "") or ""
             try:
@@ -1189,7 +1463,13 @@ def _openai_json_schema_call(
                 
                 # Enhanced logging for empty output diagnostics
                 output_items = getattr(resp, "output", []) or []
-                item_types = [item.get('type', 'unknown') for item in output_items] if output_items else []
+                item_types = []
+                if output_items:
+                    for item in output_items:
+                        if isinstance(item, dict):
+                            item_types.append(str(item.get("type") or "unknown"))
+                        else:
+                            item_types.append(str(getattr(item, "type", "unknown") or "unknown"))
                 reasoning_tokens = 0
                 if resp.usage and hasattr(resp.usage, "output_tokens_details"):
                     reasoning_tokens = getattr(resp.usage.output_tokens_details, "reasoning_tokens", 0)
@@ -2191,20 +2471,13 @@ def _run_bulk_translation(
     session_id: str,
     target_language: str,
 ) -> tuple[dict, dict, bool, str]:
-    cv_payload = {
-        "profile": str(cv_data.get("profile") or ""),
-        "work_experience": cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else [],
-        "further_experience": cv_data.get("further_experience") if isinstance(cv_data.get("further_experience"), list) else [],
-        "education": cv_data.get("education") if isinstance(cv_data.get("education"), list) else [],
-        "it_ai_skills": cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else [],
-        "technical_operational_skills": cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else [],
-        "languages": cv_data.get("languages") if isinstance(cv_data.get("languages"), list) else [],
-        "interests": str(cv_data.get("interests") or ""),
-        "references": str(cv_data.get("references") or ""),
-    }
+    cv_payload = _build_bulk_translation_payload(cv_data)
+    source_hash = _hash_bulk_translation_payload(cv_payload)
+    system_prompt = _build_ai_system_prompt(stage="bulk_translation", target_language=target_language)
+    prompt_id_used = _get_openai_prompt_id("bulk_translation")
 
     ok, parsed, err = _openai_json_schema_call(
-        system_prompt=_build_ai_system_prompt(stage="bulk_translation", target_language=target_language),
+        system_prompt=system_prompt,
         user_text=json.dumps(cv_payload, ensure_ascii=False),
         trace_id=trace_id,
         session_id=session_id,
@@ -2287,6 +2560,31 @@ def _run_bulk_translation(
     )
 
     meta2 = dict(meta or {})
+    # Prompt provenance (stateless auditability)
+    prompt_trace = meta2.get("bulk_translation_prompt_trace") if isinstance(meta2.get("bulk_translation_prompt_trace"), list) else []
+    prompt_trace.append(
+        {
+            "ts_utc": _now_iso(),
+            "target_language": target_language,
+            "prompt_id_used": prompt_id_used,
+            "effective_system_prompt_hash": _sha256_text(system_prompt),
+            "user_payload_hash": source_hash,
+            "user_payload_chars": len(json.dumps(cv_payload, ensure_ascii=False)),
+        }
+    )
+    meta2["bulk_translation_prompt_trace"] = prompt_trace[-5:]
+
+    # Preserve original state once (avoid losing state-machine history)
+    if not str(meta2.get("cv_state_original_hash") or ""):
+        try:
+            orig_hash = _sha256_text(json.dumps(cv_data or {}, ensure_ascii=False, sort_keys=True))
+            meta2["cv_state_original_hash"] = orig_hash
+            ptr = _snapshot_session(session_id=session_id, cv_data=(cv_data or {}), snapshot_type="cv_original")
+            if ptr:
+                meta2["cv_state_original_ref"] = f"{ptr.container}/{ptr.blob_name}"
+        except Exception:
+            pass
+
     if ok and isinstance(parsed, dict):
         cv_data2 = dict(cv_data or {})
         cv_data2["profile"] = str(parsed.get("profile") or "")
@@ -2298,8 +2596,24 @@ def _run_bulk_translation(
         cv_data2["languages"] = parsed.get("languages") if isinstance(parsed.get("languages"), list) else []
         cv_data2["interests"] = str(parsed.get("interests") or "")
         cv_data2["references"] = str(parsed.get("references") or "")
+
+        translated_hash = _sha256_text(json.dumps(cv_data2 or {}, ensure_ascii=False, sort_keys=True))
         meta2["bulk_translated_to"] = target_language
         meta2["bulk_translation_status"] = "ok"
+        meta2["bulk_translation_source_hash"] = source_hash
+        cache = meta2.get("bulk_translation_cache") if isinstance(meta2.get("bulk_translation_cache"), dict) else {}
+        cache = dict(cache)
+        cache[str(target_language).strip().lower()] = source_hash
+        meta2["bulk_translation_cache"] = cache
+        meta2["active_cv_state_id"] = f"translated:{target_language}:{translated_hash[:12]}"
+        meta2["active_cv_state_lang"] = target_language
+        meta2["active_cv_state_hash"] = translated_hash
+        refs = meta2.get("cv_state_translated_refs") if isinstance(meta2.get("cv_state_translated_refs"), dict) else {}
+        refs = dict(refs)
+        ptr_tr = _snapshot_session(session_id=session_id, cv_data=cv_data2, snapshot_type=f"cv_translated_{target_language}")
+        if ptr_tr:
+            refs[str(target_language).strip().lower()] = f"{ptr_tr.container}/{ptr_tr.blob_name}"
+            meta2["cv_state_translated_refs"] = refs
         meta2.pop("bulk_translation_error", None)
         return cv_data2, meta2, True, ""
 
@@ -2316,8 +2630,6 @@ def _generate_cover_letter_block_via_openai(
     session_id: str,
     target_language: str,
 ) -> tuple[bool, dict | None, str]:
-    profile = str(cv_data.get("profile") or "").strip()
-
     job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else None
     job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
     job_text = str(meta.get("job_posting_text") or "")
@@ -2330,7 +2642,7 @@ def _generate_cover_letter_block_via_openai(
             trace_id=trace_id,
             session_id=session_id,
             response_format=get_job_reference_response_format(),
-            max_output_tokens=900,
+            max_output_tokens=1200,
             stage="job_posting",
         )
         if ok_jr and isinstance(parsed_jr, dict):
@@ -2346,6 +2658,14 @@ def _generate_cover_letter_block_via_openai(
         else:
             meta["job_reference_error"] = str(err_jr)[:400]
             meta["job_reference_status"] = "call_failed"
+
+    summary_clean = str(job_summary or "").strip()
+    if (not summary_clean) or (summary_clean.lower() == "(no job reference)"):
+        return (
+            False,
+            None,
+            "Job reference is missing. Please provide a valid job posting (responsibilities and requirements) before generating cover letter.",
+        )
 
     # Compact CV excerpt.
     role_blocks: list[str] = []
@@ -2371,7 +2691,6 @@ def _generate_cover_letter_block_via_openai(
     user_text = (
         f"[JOB_REFERENCE]\n{_sanitize_for_prompt(job_summary)}\n\n"
         f"[STYLE_PROFILE]\n{_sanitize_for_prompt(style_profile)}\n\n"
-        f"[CV_PROFILE]\n{_sanitize_for_prompt(profile[:2000])}\n\n"
         f"[WORK_EXPERIENCE]\n{roles_text}\n\n"
         f"[SKILLS]\n{_sanitize_for_prompt(skills_text[:2000])}\n"
     )
@@ -2384,7 +2703,7 @@ def _generate_cover_letter_block_via_openai(
             trace_id=trace_id,
             session_id=session_id,
             response_format=get_cover_letter_proposal_response_format(),
-            max_output_tokens=1200,
+            max_output_tokens=1680,
             stage="cover_letter",
         )
 
@@ -2573,10 +2892,8 @@ def _responses_max_output_tokens(stage: str) -> int:
 
 
 def _context_pack_mode() -> str:
-    mode = product_config.CV_CONTEXT_PACK_MODE
-    if mode in ("mini", "full"):
-        return mode
-    return "mini"
+    """Always return 'full' - no sanitization of CV data."""
+    return "full"
 
 
 def _stage_prompt(stage: str) -> str:
@@ -3015,14 +3332,13 @@ def _run_responses_tool_loop(
         readiness = _compute_readiness(cv_data, session.get("metadata") or {})
 
         # Build context pack text for the model.
-        pack_mode = _context_pack_mode()
         pack = build_context_pack_v2(
             phase=phase,
             cv_data=cv_data,
             job_posting_text=job_posting_text,
             session_metadata=(session.get("metadata") or {}) if isinstance(session.get("metadata"), dict) else {},
-            pack_mode=pack_mode,
-            max_pack_chars=6000 if pack_mode == "mini" else 12000,
+            pack_mode="full",
+            max_pack_chars=16000,  # Increased for full CV data
         )
         capsule_text = format_context_pack_with_delimiters(pack)
 
@@ -3244,7 +3560,7 @@ def _run_responses_tool_loop(
                         tool_payload = pack2 if status == 200 else {"error": pack2.get("error") if isinstance(pack2, dict) else "pack_failed"}
                 elif name == "preview_html":
                     sid = args.get("session_id") or session_id
-                    s = store.get_session(str(sid))
+                    s = store.get_session_with_blob_retrieval(str(sid))
                     if not s:
                         tool_payload = {"error": "Session not found or expired"}
                     else:
@@ -3253,7 +3569,7 @@ def _run_responses_tool_loop(
                 elif name == "generate_cv_from_session":
                     sid = args.get("session_id") or session_id
                     logging.info(f"=== TOOL: generate_cv_from_session (v1) === session_id={sid} trace_id={trace_id}")
-                    s = store.get_session(str(sid))
+                    s = store.get_session_with_blob_retrieval(str(sid))
                     if not s:
                         tool_payload = {"error": "Session not found or expired"}
                         logging.warning(f"=== TOOL: generate_cv_from_session (v1) FAILED === session not found")
@@ -3293,7 +3609,7 @@ def _run_responses_tool_loop(
                 elif name == "generate_cover_letter_from_session":
                     sid = args.get("session_id") or session_id
                     logging.info(f"=== TOOL: generate_cover_letter_from_session (v1) === session_id={sid} trace_id={trace_id}")
-                    s = store.get_session(str(sid))
+                    s = store.get_session_with_blob_retrieval(str(sid))
                     if not s:
                         tool_payload = {"error": "Session not found or expired"}
                         logging.warning("=== TOOL: generate_cover_letter_from_session (v1) FAILED === session not found")
@@ -3605,8 +3921,8 @@ def _run_responses_tool_loop_v2(
         cv_data=cv_data,
         job_posting_text=job_posting_text,
         session_metadata=meta if isinstance(meta, dict) else {},
-        pack_mode=_context_pack_mode(),
-        max_pack_chars=8000 if _context_pack_mode() == "mini" else 12000,
+        pack_mode="full",
+        max_pack_chars=16000,  # Increased for full CV data
     )
     capsule_text = format_context_pack_with_delimiters(pack)
 
@@ -4039,7 +4355,7 @@ def _run_responses_tool_loop_v2(
                 elif name == "generate_cv_from_session":
                     sid = args.get("session_id") or session_id
                     logging.info(f"=== TOOL: generate_cv_from_session (v2) === session_id={sid} trace_id={trace_id}")
-                    s = store.get_session(str(sid))
+                    s = store.get_session_with_blob_retrieval(str(sid))
                     if not s:
                         tool_payload = {"error": "Session not found or expired"}
                         logging.warning(f"=== TOOL: generate_cv_from_session (v2) FAILED === session not found")
@@ -4538,6 +4854,32 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
                 "disable_free_text": True,
             }
 
+        if wizard_stage == "job_posting_invalid_input":
+            reason = str(meta.get("job_input_invalid_reason") or "not_job_like")
+            preview = str(meta.get("job_posting_invalid_draft") or "")[:700]
+            reason_map = {
+                "too_short": "Text is too short to represent a real job posting.",
+                "looks_like_candidate_notes": "Input looks like candidate notes/achievements, not a job offer.",
+                "not_job_like": "Input does not look like a job posting.",
+            }
+            reason_label = reason_map.get(reason, "Input is not suitable for job summary extraction.")
+            return {
+                "kind": "review_form",
+                "stage": "JOB_POSTING",
+                "title": f"Stage 3/{wizard_total} — Job offer (validation)",
+                "text": "The provided input cannot be used as a job posting source. Choose how to proceed.",
+                "fields": [
+                    {"key": "invalid_reason", "label": "Validation", "value": reason_label},
+                    {"key": "invalid_preview", "label": "Detected input (preview)", "value": preview or "(empty)"},
+                ],
+                "actions": [
+                    {"id": "JOB_OFFER_INVALID_FIX_URL", "label": "Correct URL", "style": "secondary"},
+                    {"id": "JOB_OFFER_INVALID_PASTE_TEXT", "label": "Paste proper job text", "style": "primary"},
+                    {"id": "JOB_OFFER_INVALID_CONTINUE_NO_SUMMARY", "label": "Continue without job summary (not recommended)", "style": "tertiary"},
+                ],
+                "disable_free_text": True,
+            }
+
         if wizard_stage == "work_experience":
             work = cv_data.get("work_experience", []) if isinstance(cv_data, dict) else []
             work_list = work if isinstance(work, list) else []
@@ -4711,6 +5053,7 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
         if wizard_stage == "work_tailor_review":
             proposal_block = meta.get("work_experience_proposal_block") if isinstance(meta.get("work_experience_proposal_block"), dict) else None
             proposal = meta.get("work_experience_proposal") if isinstance(meta.get("work_experience_proposal"), list) else []
+            proposal_notes = str((proposal_block or {}).get("notes") or "").strip()
             lines: list[str] = []
             if isinstance(proposal_block, dict):
                 # Display structured roles
@@ -4752,6 +5095,7 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
                 "text": "Review the proposed tailored bullets. Accept to apply to your CV.",
                 "fields": [
                     {"key": "proposal", "label": "Proposed work experience", "value": "\n\n".join(lines) if lines else "(no proposal)"},
+                    {"key": "notes", "label": "Notes", "value": proposal_notes or "(no notes)"},
                 ],
                 "actions": [
                     {"id": "WORK_TAILOR_ACCEPT", "label": "Accept proposal", "style": "primary"},
@@ -5105,22 +5449,40 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
             has_pdf = bool(meta.get("pdf_generated") or (isinstance(pdf_refs, dict) and len(pdf_refs) > 0))
             target_lang = str(meta.get("target_language") or meta.get("language") or "en").strip().lower()
 
-            actions: list[dict] = [
-                {
+            actions: list[dict] = []
+            
+            # Button order (as per plan):
+            # 1. REQUEST_GENERATE_PDF (or regenerate if already generated)
+            # 2. DOWNLOAD_PDF (always visible after PDF generation)
+            # 3. GENERATE_COVER_LETTER (optional, gated)
+            
+            if not has_pdf:
+                # Before PDF generation: show only generate button
+                actions.append({
                     "id": "REQUEST_GENERATE_PDF",
-                    "label": "Pobierz PDF" if has_pdf else "Generate PDF",
+                    "label": "Generate PDF",
                     "style": "primary",
-                }
-            ]
+                })
+            else:
+                # After PDF generation: show download first, then optional regenerate
+                actions.append({
+                    "id": "DOWNLOAD_PDF",
+                    "label": "Pobierz PDF / Download PDF",
+                    "style": "primary",
+                })
+                actions.append({
+                    "id": "REQUEST_GENERATE_PDF",
+                    "label": "Regenerate PDF",
+                    "style": "secondary",
+                })
 
+            # Cover letter action (always after PDF actions)
             if product_config.CV_ENABLE_COVER_LETTER and _openai_enabled() and target_lang in ("en", "de"):
-                actions.append(
-                    {
-                        "id": "COVER_LETTER_PREVIEW",
-                        "label": "Generate Cover Letter",
-                        "style": "secondary",
-                    }
-                )
+                actions.append({
+                    "id": "COVER_LETTER_PREVIEW",
+                    "label": "Generate Cover Letter",
+                    "style": "secondary",
+                })
 
             return {
                 "kind": "review_form",
@@ -5158,7 +5520,7 @@ def _build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict) -> 
                     {"id": "COVER_LETTER_BACK", "label": "Back", "style": "secondary"},
                     {
                         "id": "COVER_LETTER_GENERATE",
-                        "label": "Download Cover Letter PDF" if has_cover else "Generate final Cover Letter PDF",
+                        "label": "Generate final Cover Letter PDF",
                         "style": "primary",
                     },
                 ],
@@ -5240,7 +5602,14 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
     # Validate session exists
     store = _get_session_store()
-    sess = store.get_session(session_id)
+
+    def _session_get(session_id_in: str) -> dict | None:
+        getter = getattr(store, "get_session_with_blob_retrieval", None)
+        if callable(getter):
+            return getter(session_id_in)
+        return store.get_session(session_id_in)
+
+    sess = _session_get(session_id)
     if not sess:
         logging.warning(
             "Session missing before orchestration trace_id=%s session_id=%s",
@@ -5255,7 +5624,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         if meta.get("language") != language:
             meta["language"] = language
             store.update_session(session_id, (sess.get("cv_data") or {}), meta)
-            sess = store.get_session(session_id) or sess
+            sess = _session_get(session_id) or sess
 
     meta = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else {}
     meta = dict(meta) if isinstance(meta, dict) else {}
@@ -5363,10 +5732,51 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 )
             except Exception:
                 pass
-            
-            store.update_session(session_id, cv_out, meta_out)
-            s2 = store.get_session(session_id) or {}
-            m2 = s2.get("metadata") if isinstance(s2.get("metadata"), dict) else meta_out
+
+            persisted = False
+            persisted_meta = dict(meta_out or {})
+            persist_error: Exception | None = None
+
+            # Prefer blob-offload update path to survive large cv_data payloads.
+            update_with_offload = getattr(store, "update_session_with_blob_offload", None)
+            if callable(update_with_offload):
+                try:
+                    persisted = bool(update_with_offload(session_id, cv_out, persisted_meta))
+                except Exception as exc:
+                    persist_error = exc
+
+            # Fallback to legacy direct update when offload path is unavailable/fails.
+            if not persisted:
+                try:
+                    persisted = bool(store.update_session(session_id, cv_out, persisted_meta))
+                except Exception as exc:
+                    persist_error = exc
+
+            # Last-chance shrink fallback for Azure Table 64KB limit issues.
+            if (
+                not persisted
+                and persist_error is not None
+                and "PropertyValueTooLarge" in str(persist_error)
+                and callable(update_with_offload)
+            ):
+                try:
+                    shrunk_meta = _shrink_metadata_for_table(persisted_meta)
+                    persisted = bool(update_with_offload(session_id, cv_out, shrunk_meta))
+                    if persisted:
+                        persisted_meta = shrunk_meta
+                except Exception as exc:
+                    persist_error = exc
+
+            if not persisted:
+                logging.error(
+                    "PERSIST_FAILED session=%s err=%s",
+                    session_id,
+                    str(persist_error)[:400] if persist_error else "unknown",
+                )
+                return dict(cv_out or {}), dict(persisted_meta or {})
+
+            s2 = _session_get(session_id) or {}
+            m2 = s2.get("metadata") if isinstance(s2.get("metadata"), dict) else persisted_meta
             c2 = s2.get("cv_data") if isinstance(s2.get("cv_data"), dict) else cv_out
             
             # DIAGNOSTIC: Log metadata after retrieving from store
@@ -5396,7 +5806,18 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         if job_posting_url:
             meta2["job_posting_url"] = job_posting_url
         if job_posting_text:
-            meta2["job_posting_text"] = str(job_posting_text)[:20000]
+            candidate_text = str(job_posting_text)[:20000]
+            ok_text, reason_text = _looks_like_job_posting_text(candidate_text)
+            if ok_text:
+                meta2["job_posting_text"] = candidate_text
+                meta2["job_input_status"] = "ok"
+                meta2.pop("job_input_invalid_reason", None)
+                meta2.pop("job_posting_invalid_draft", None)
+            else:
+                meta2["job_posting_text"] = ""
+                meta2["job_input_status"] = "invalid"
+                meta2["job_input_invalid_reason"] = reason_text
+                meta2["job_posting_invalid_draft"] = candidate_text[:2000]
 
         # If job text changed, invalidate job-scoped artifacts and cached PDF usage.
         try:
@@ -5449,11 +5870,15 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         except Exception:
             pass
 
-        # Ensure import gate is present when DOCX prefill exists but canonical CV is still empty.
+        # Ensure import gate is present only in early flow stages.
+        stage_hint = _wizard_get_stage(meta2)
+        import_gate_stages = {"language_selection", "import_gate_pending", "contact"}
+
         pc = _get_pending_confirmation(meta2)
         dpu = meta2.get("docx_prefill_unconfirmed")
         if (
-            isinstance(dpu, dict)
+            stage_hint in import_gate_stages
+            and isinstance(dpu, dict)
             and (not cv_data.get("work_experience") and not cv_data.get("education"))
             and not pc
         ):
@@ -5461,8 +5886,14 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             cv_data, meta2 = _persist(cv_data, meta2)
             return _wizard_resp(assistant_text="Please confirm whether to import the DOCX prefill.", meta_out=meta2, cv_out=cv_data)
 
-        # If import gate is pending, always present it (and accept only import actions).
+        # If a stale import gate leaked into later stages, clear it instead of hijacking flow.
         pc = _get_pending_confirmation(meta2)
+        if pc and pc.get("kind") == "import_prefill" and stage_hint not in import_gate_stages:
+            meta2 = _clear_pending_confirmation(meta2)
+            cv_data, meta2 = _persist(cv_data, meta2)
+            pc = None
+
+        # If import gate is pending in early stages, always present it (and accept only import actions).
         if pc and pc.get("kind") == "import_prefill" and user_action_id not in (
             "CONFIRM_IMPORT_PREFILL_YES",
             "CONFIRM_IMPORT_PREFILL_NO",
@@ -5487,6 +5918,28 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         # Action handling (deterministic; no model call).
         if user_action_id:
             aid = user_action_id
+            try:
+                logging.info(
+                    "WIZARD_ACTION aid=%s session=%s stage_before=%s trace_id=%s",
+                    aid,
+                    session_id,
+                    stage_now,
+                    trace_id,
+                )
+            except Exception:
+                pass
+
+            if aid == "NEW_VERSION_RESET":
+                meta2 = _reset_metadata_for_new_version(meta2)
+                # Keep language/translation/cache metadata and canonical CV state intact.
+                # Bring user back to job stage for a fresh tailoring pass.
+                meta2 = _wizard_set_stage(meta2, "job_posting")
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(
+                    assistant_text="New version ready. Translation cache and CV data are kept; tailoring artifacts were reset.",
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
 
             if aid in ("FAST_RUN", "FAST_RUN_TO_PDF"):
                 stage_updates: list[dict] = []
@@ -5533,10 +5986,30 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 if len(job_text.strip()) < 80:
                     stage_updates.append({"step": "job_text", "ok": False, "error": "too_short"})
-                    meta2 = _wizard_set_stage(meta2, "job_posting_paste")
+                    meta2["job_input_status"] = "invalid"
+                    meta2["job_input_invalid_reason"] = "too_short"
+                    meta2["job_posting_invalid_draft"] = str(job_text or "")[:2000]
+                    meta2["job_posting_text"] = ""
+                    meta2 = _wizard_set_stage(meta2, "job_posting_invalid_input")
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(
-                        assistant_text="FAST_RUN: job offer text is too short. Please paste the full description (responsibilities + requirements).",
+                        assistant_text="FAST_RUN: input is too short for a job summary. Choose: correct URL, paste proper job text, or continue without summary.",
+                        meta_out=meta2,
+                        cv_out=cv_data,
+                        stage_updates=stage_updates,
+                    )
+
+                ok_job_text, reason_job_text = _looks_like_job_posting_text(job_text)
+                if not ok_job_text:
+                    stage_updates.append({"step": "job_text", "ok": False, "error": reason_job_text})
+                    meta2["job_input_status"] = "invalid"
+                    meta2["job_input_invalid_reason"] = reason_job_text
+                    meta2["job_posting_invalid_draft"] = str(job_text or "")[:2000]
+                    meta2["job_posting_text"] = ""
+                    meta2 = _wizard_set_stage(meta2, "job_posting_invalid_input")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(
+                        assistant_text="FAST_RUN: input looks like notes, not a job posting. Choose how to proceed.",
                         meta_out=meta2,
                         cv_out=cv_data,
                         stage_updates=stage_updates,
@@ -5620,7 +6093,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         trace_id=trace_id,
                         session_id=session_id,
                         response_format=get_job_reference_response_format(),
-                        max_output_tokens=900,
+                        max_output_tokens=1200,
                         stage="job_posting",
                     )
                     if not ok_jr or not isinstance(parsed_jr, dict):
@@ -5662,8 +6135,11 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         job_summary = format_job_reference_for_display(meta2.get("job_reference")) if isinstance(meta2.get("job_reference"), dict) else ""
                         notes = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
                         feedback = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
-                        profile = str(cv_data.get("profile") or "").strip()
                         target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
+                        alignment_policy = (
+                            f"For EACH role return alignment_score between 0 and 1. "
+                            f"If alignment_score < {WORK_ROLE_ALIGNMENT_THRESHOLD:.2f}, set exclusion_reason and keep bullets factual."
+                        )
 
                         role_blocks = []
                         for r in work_list[:12]:
@@ -5680,9 +6156,9 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                         user_text = (
                             f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
-                            f"[CANDIDATE_PROFILE]\n{_sanitize_for_prompt(profile[:2000])}\n\n"
                             f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
                             f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
+                            f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                             f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                         )
 
@@ -5702,7 +6178,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                 trace_id=trace_id,
                                 session_id=session_id,
                                 response_format=get_work_experience_bullets_proposal_response_format(),
-                                max_output_tokens=1600,
+                                max_output_tokens=2240,
                                 stage="work_experience",
                             )
                             
@@ -5764,6 +6240,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                     bad_roles_text = "\n\n".join(bad_role_blocks) if bad_role_blocks else roles_text
                                     user_text = (
                                         f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
+                                        f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                                         f"[TAILORING_FEEDBACK]\n"
                                         f"MCP_VALIDATION_PAYLOAD: {payload_json} "
                                         f"Reduce ONLY flagged bullets by >= 30 chars and to <= {hard_limit} chars, "
@@ -5781,18 +6258,32 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         elif prop and hasattr(prop, "roles"):
                             try:
                                 roles = prop.roles if hasattr(prop, "roles") else []
+                                serialized_roles = [
+                                    {
+                                        "title": r.title if hasattr(r, "title") else "",
+                                        "company": r.company if hasattr(r, "company") else "",
+                                        "date_range": r.date_range if hasattr(r, "date_range") else "",
+                                        "location": r.location if hasattr(r, "location") else "",
+                                        "bullets": list(r.bullets if hasattr(r, "bullets") else []),
+                                        "alignment_score": _coerce_alignment_score(getattr(r, "alignment_score", 0.0)),
+                                        "exclusion_reason": str(getattr(r, "exclusion_reason", "") or "").strip(),
+                                    }
+                                    for r in (roles or [])[:5]
+                                ]
+                                included_roles, excluded_roles = _split_work_roles_by_alignment(
+                                    roles=serialized_roles,
+                                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                                )
+                                merged_notes = _compose_work_alignment_notes(
+                                    base_notes=str(getattr(prop, "notes", "") or ""),
+                                    excluded_roles=excluded_roles,
+                                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                                )
                                 meta2["work_experience_proposal_block"] = {
-                                    "roles": [
-                                        {
-                                            "title": r.title if hasattr(r, "title") else "",
-                                            "company": r.company if hasattr(r, "company") else "",
-                                            "date_range": r.date_range if hasattr(r, "date_range") else "",
-                                            "location": r.location if hasattr(r, "location") else "",
-                                            "bullets": list(r.bullets if hasattr(r, "bullets") else []),
-                                        }
-                                        for r in (roles or [])[:5]
-                                    ],
-                                    "notes": str(getattr(prop, "notes", "") or "")[:500],
+                                    "roles": included_roles,
+                                    "excluded_roles": excluded_roles,
+                                    "alignment_threshold": WORK_ROLE_ALIGNMENT_THRESHOLD,
+                                    "notes": merged_notes,
                                     "created_at": _now_iso(),
                                 }
                                 meta2["work_experience_proposal_sig"] = job_sig
@@ -5806,12 +6297,32 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 # Apply work proposal to cv_data (silent accept)
                 try:
                     proposal_block = meta2.get("work_experience_proposal_block")
-                    if isinstance(proposal_block, dict) and isinstance(proposal_block.get("roles"), list) and proposal_block.get("roles"):
+                    if isinstance(proposal_block, dict) and isinstance(proposal_block.get("roles"), list):
                         roles = proposal_block.get("roles")
-                        cv_data = _apply_work_experience_proposal_with_locks(cv_data=cv_data, proposal_roles=list(roles or []), meta=meta2)
-                        meta2["work_experience_tailored"] = True
-                        meta2["work_experience_proposal_accepted_at"] = _now_iso()
-                        stage_updates.append({"step": "work_apply", "ok": True})
+                        existing_excluded = proposal_block.get("excluded_roles") if isinstance(proposal_block.get("excluded_roles"), list) else []
+                        included_roles, excluded_from_roles = _split_work_roles_by_alignment(
+                            roles=list(roles or []),
+                            threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                        )
+                        excluded_roles = list(existing_excluded) + list(excluded_from_roles)
+
+                        if not included_roles and not excluded_roles:
+                            stage_updates.append({"step": "work_apply", "ok": False, "error": "no_proposal"})
+                        else:
+                            if included_roles:
+                                cv_data = _overwrite_work_experience_from_proposal_roles(cv_data=cv_data, proposal_roles=included_roles)
+
+                            meta2["work_experience_tailored"] = True
+                            meta2["work_experience_proposal_accepted_at"] = _now_iso()
+                            proposal_block["roles"] = included_roles
+                            proposal_block["excluded_roles"] = excluded_roles
+                            proposal_block["alignment_threshold"] = WORK_ROLE_ALIGNMENT_THRESHOLD
+                            proposal_block["notes"] = _compose_work_alignment_notes(
+                                base_notes=str(proposal_block.get("notes") or ""),
+                                excluded_roles=excluded_roles,
+                                threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                            )
+                            stage_updates.append({"step": "work_apply", "ok": True})
 
                         # Language-aware hard limit for post-apply validation
                         base_limit = product_config.WORK_EXPERIENCE_HARD_LIMIT_CHARS
@@ -5892,7 +6403,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         work_text = "\n\n".join(work_blocks)
                         user_text = (
                             f"[JOB_SUMMARY]\n{job_summary}\n\n"
-                            f"[CANDIDATE_PROFILE]\n{str(cv_data.get('profile') or '')}\n\n"
                             f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
                             f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
                             f"[WORK_TAILORING_PROPOSAL_NOTES]\n{work_prop_notes}\n\n"
@@ -5907,7 +6417,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             trace_id=trace_id,
                             session_id=session_id,
                             response_format=get_skills_unified_proposal_response_format(),
-                            max_output_tokens=900,
+                            max_output_tokens=1200,
                             stage="it_ai_skills",
                         )
                         if not ok_sk or not isinstance(parsed_sk, dict):
@@ -5976,7 +6486,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     session_id=session_id,
                     language=language,
                     client_context=cc,
-                    session=store.get_session(session_id) or {"cv_data": cv_data, "metadata": meta2},
+                    session=store.get_session_with_blob_retrieval(session_id) or {"cv_data": cv_data, "metadata": meta2},
                 )
                 if status != 200 or content_type != "application/pdf" or not isinstance(payload_pdf, dict):
                     stage_updates.append({"step": "pdf_generate", "ok": False, "error": str(payload_pdf.get("error") if isinstance(payload_pdf, dict) else "pdf_failed")})
@@ -6051,11 +6561,12 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 target_lang = str(meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
                 source_lang = str(meta2.get("source_language") or cv_data.get("language") or "en").strip().lower()
                 explicit_target_lang_selected = bool(meta2.get("target_language"))
+                source_hash = _hash_bulk_translation_payload(_build_bulk_translation_payload(cv_data))
                 needs_bulk_translation = (
                     aid == "CONFIRM_IMPORT_PREFILL_YES"
                     and _openai_enabled()
                     and (source_lang != target_lang or explicit_target_lang_selected)
-                    and str(meta2.get("bulk_translated_to") or "") != target_lang
+                    and not _bulk_translation_cache_hit(meta=meta2, target_language=target_lang, source_hash=source_hash)
                 )
 
                 if needs_bulk_translation:
@@ -6195,12 +6706,35 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(assistant_text="Cannot jump forward. Finish the current step first.", meta_out=meta2, cv_out=cv_data)
 
+                # Track stage history for navigation debugging and back/forward support
+                stage_history = meta2.get("stage_history") if isinstance(meta2.get("stage_history"), list) else []
+                if not isinstance(stage_history, list):
+                    stage_history = []
+                
+                # Add current stage to history before transitioning
+                if cur_stage and (not stage_history or stage_history[-1] != cur_stage):
+                    stage_history.append(cur_stage)
+                    # Keep only last 20 stages to prevent unbounded growth
+                    meta2["stage_history"] = stage_history[-20:]
+                
                 major_to_stage = {1: "contact", 2: "education", 3: "job_posting", 4: "work_experience", 5: "it_ai_skills", 6: "review_final"}
-                meta2 = _wizard_set_stage(meta2, major_to_stage.get(tgt_major, cur_stage))
+                target_stage_resolved = major_to_stage.get(tgt_major, cur_stage)
+                meta2 = _wizard_set_stage(meta2, target_stage_resolved)
+                
                 # Clear any per-stage selection to avoid stale UI state.
                 meta2.pop("work_selected_index", None)
                 cv_data, meta2 = _persist(cv_data, meta2)
-                return _wizard_resp(assistant_text="Navigated.", meta_out=meta2, cv_out=cv_data)
+                
+                # Log navigation for debugging
+                try:
+                    logging.info(
+                        "WIZARD_NAV from=%s to=%s (major: %s -> %s) history_len=%s",
+                        cur_stage, target_stage_resolved, cur_major, tgt_major, len(stage_history)
+                    )
+                except Exception:
+                    pass
+                
+                return _wizard_resp(assistant_text=f"Navigated to {target_stage_resolved}.", meta_out=meta2, cv_out=cv_data)
 
             if aid == "CONTACT_CONFIRM":
                 full_name = str(cv_data.get("full_name") or "").strip()
@@ -6303,6 +6837,33 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 meta2 = _wizard_set_stage(meta2, "job_posting_paste")
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(assistant_text="Paste the job offer text below.", meta_out=meta2, cv_out=cv_data)
+
+            if aid in ("JOB_OFFER_INVALID_FIX_URL", "JOB_OFFER_INVALID_PASTE_TEXT"):
+                draft = str(meta2.get("job_posting_invalid_draft") or "")[:20000]
+                if draft:
+                    meta2["job_posting_text"] = draft
+                meta2 = _wizard_set_stage(meta2, "job_posting_paste")
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(
+                    assistant_text="Please correct the URL or paste a full job description, then Analyze.",
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
+
+            if aid == "JOB_OFFER_INVALID_CONTINUE_NO_SUMMARY":
+                meta2["job_posting_text"] = ""
+                meta2["job_input_status"] = "skipped_no_summary"
+                meta2["job_reference_status"] = "skipped_no_job_summary"
+                meta2.pop("job_reference", None)
+                meta2.pop("job_reference_error", None)
+                meta2["job_reference_sig"] = ""
+                meta2 = _wizard_set_stage(meta2, "work_notes_edit")
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(
+                    assistant_text="Continuing without job summary. You can still add tailoring notes manually.",
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
 
             if aid == "INTERESTS_EDIT":
                 meta2 = _wizard_set_stage(meta2, "interests_edit")
@@ -6429,8 +6990,23 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
             if aid == "JOB_OFFER_CONTINUE":
                 # Job offer already present (e.g., fetched from URL). Proceed to tailoring notes.
+                jt = str(meta2.get("job_posting_text") or "")[:20000]
+                if jt:
+                    ok_job_text, reason_job_text = _looks_like_job_posting_text(jt)
+                    if not ok_job_text:
+                        meta2["job_input_status"] = "invalid"
+                        meta2["job_input_invalid_reason"] = reason_job_text
+                        meta2["job_posting_invalid_draft"] = jt[:2000]
+                        meta2["job_posting_text"] = ""
+                        meta2["job_reference_status"] = "invalid_job_input"
+                        meta2 = _wizard_set_stage(meta2, "job_posting_invalid_input")
+                        cv_data, meta2 = _persist(cv_data, meta2)
+                        return _wizard_resp(
+                            assistant_text="Provided text cannot be used as job posting source. Choose how to proceed.",
+                            meta_out=meta2,
+                            cv_out=cv_data,
+                        )
                 if not isinstance(meta2.get("job_reference"), dict) and _openai_enabled():
-                    jt = str(meta2.get("job_posting_text") or "")[:20000]
                     if len(jt) >= 80:
                         ok, parsed, err = _openai_json_schema_call(
                             system_prompt=_build_ai_system_prompt(stage="job_posting"),
@@ -6438,7 +7014,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             trace_id=trace_id,
                             session_id=session_id,
                             response_format=get_job_reference_response_format(),
-                            max_output_tokens=900,
+                            max_output_tokens=1200,
                             stage="job_posting",
                         )
                         if ok and isinstance(parsed, dict):
@@ -6459,7 +7035,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             if aid == "JOB_OFFER_ANALYZE":
                 payload = user_action_payload or {}
                 text = str(payload.get("job_offer_text") or "").strip()
-                is_url = bool(re.match(r"^https?://", text, re.IGNORECASE))
+                is_url = _is_http_url(text)
 
                 if is_url:
                     meta2["job_posting_url"] = text
@@ -6472,16 +7048,38 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             meta_out=meta2,
                             cv_out=cv_data,
                         )
-                    meta2["job_posting_text"] = fetched_text[:20000]
+                    candidate_text = fetched_text[:20000]
                 else:
-                    meta2["job_posting_text"] = text[:20000] if text else ""
+                    candidate_text = text[:20000] if text else ""
+
+                meta2["job_posting_text"] = candidate_text
 
                 job_text_len = len(meta2.get("job_posting_text") or "")
                 if job_text_len < 80:
-                    meta2 = _wizard_set_stage(meta2, "job_posting_paste")
+                    meta2["job_input_status"] = "invalid"
+                    meta2["job_input_invalid_reason"] = "too_short"
+                    meta2["job_posting_invalid_draft"] = str(meta2.get("job_posting_text") or "")[:2000]
+                    meta2["job_posting_text"] = ""
+                    meta2["job_reference_status"] = "invalid_job_input"
+                    meta2 = _wizard_set_stage(meta2, "job_posting_invalid_input")
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(
-                        assistant_text="Job offer text is too short (min 80 chars). Please paste the full description.",
+                        assistant_text="Job input is too short. Choose: correct URL, paste proper job text, or continue without summary.",
+                        meta_out=meta2,
+                        cv_out=cv_data,
+                    )
+
+                ok_job_text, reason_job_text = _looks_like_job_posting_text(str(meta2.get("job_posting_text") or ""))
+                if not ok_job_text:
+                    meta2["job_input_status"] = "invalid"
+                    meta2["job_input_invalid_reason"] = reason_job_text
+                    meta2["job_posting_invalid_draft"] = str(meta2.get("job_posting_text") or "")[:2000]
+                    meta2["job_posting_text"] = ""
+                    meta2["job_reference_status"] = "invalid_job_input"
+                    meta2 = _wizard_set_stage(meta2, "job_posting_invalid_input")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(
+                        assistant_text="Input looks like candidate notes, not a job posting. Choose how to proceed.",
                         meta_out=meta2,
                         cv_out=cv_data,
                     )
@@ -6495,7 +7093,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         trace_id=trace_id,
                         session_id=session_id,
                         response_format=get_job_reference_response_format(),
-                        max_output_tokens=900,
+                        max_output_tokens=1200,
                         stage="job_posting",
                     )
                     if ok and isinstance(parsed, dict):
@@ -6666,8 +7264,11 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 job_text = str(meta2.get("job_posting_text") or "")
                 notes = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
                 feedback = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
-                profile = str(cv_data.get("profile") or "").strip()
                 target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
+                alignment_policy = (
+                    f"For EACH role return alignment_score between 0 and 1. "
+                    f"If alignment_score < {WORK_ROLE_ALIGNMENT_THRESHOLD:.2f}, set exclusion_reason and keep bullets factual."
+                )
 
                 if user_action_payload and "work_tailoring_feedback" in user_action_payload:
                     feedback = _escape_user_input_for_prompt(str(user_action_payload.get("work_tailoring_feedback") or ""))
@@ -6683,7 +7284,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         trace_id=trace_id,
                         session_id=session_id,
                         response_format=get_job_reference_response_format(),
-                        max_output_tokens=900,
+                        max_output_tokens=1200,
                         stage="job_posting",
                     )
                     if ok_jr and isinstance(parsed_jr, dict):
@@ -6716,9 +7317,9 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 user_text = (
                     f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
-                    f"[CANDIDATE_PROFILE]\n{_sanitize_for_prompt(profile[:2000])}\n\n"
                     f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
                     f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
+                    f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                     f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                 )
 
@@ -6757,7 +7358,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         trace_id=trace_id,
                         session_id=session_id,
                         response_format=get_work_experience_bullets_proposal_response_format(),
-                        max_output_tokens=1600,
+                        max_output_tokens=2240,
                         stage="work_experience",
                     )
                     
@@ -6792,8 +7393,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         if attempt < max_attempts:
                             user_text = (
                                 f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
-                                f"[CANDIDATE_PROFILE]\n{_sanitize_for_prompt(profile[:2000])}\n\n"
                                 f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
+                                f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                                 f"[TAILORING_FEEDBACK]\n"
                                 f"FIX_VALIDATION: Shorten bullets to fit hard limit (<= {hard_limit} chars). "
                                 f"Rewrite ONLY affected bullets. Keep 3-4 bullets per role. Do NOT invent facts.\n\n"
@@ -6826,15 +7427,29 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     )
                 
                 roles = prop.roles if hasattr(prop, 'roles') else []
+                serialized_roles = [{
+                    "title": r.title if hasattr(r, 'title') else "",
+                    "company": r.company if hasattr(r, 'company') else "",
+                    "date_range": r.date_range if hasattr(r, 'date_range') else "",
+                    "location": r.location if hasattr(r, 'location') else "",
+                    "bullets": list(r.bullets if hasattr(r, 'bullets') else []),
+                    "alignment_score": _coerce_alignment_score(getattr(r, "alignment_score", 0.0)),
+                    "exclusion_reason": str(getattr(r, "exclusion_reason", "") or "").strip(),
+                } for r in roles[:5]]
+                included_roles, excluded_roles = _split_work_roles_by_alignment(
+                    roles=serialized_roles,
+                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                )
+                merged_notes = _compose_work_alignment_notes(
+                    base_notes=str(prop.notes or ""),
+                    excluded_roles=excluded_roles,
+                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                )
                 meta2["work_experience_proposal_block"] = {
-                    "roles": [{
-                        "title": r.title if hasattr(r, 'title') else "",
-                        "company": r.company if hasattr(r, 'company') else "",
-                        "date_range": r.date_range if hasattr(r, 'date_range') else "",
-                        "location": r.location if hasattr(r, 'location') else "",
-                        "bullets": list(r.bullets if hasattr(r, 'bullets') else [])
-                    } for r in roles[:5]],  # Max 5 roles
-                    "notes": str(prop.notes or "")[:500],
+                    "roles": included_roles,
+                    "excluded_roles": excluded_roles,
+                    "alignment_threshold": WORK_ROLE_ALIGNMENT_THRESHOLD,
+                    "notes": merged_notes,
                     "created_at": _now_iso(),
                 }
                 meta2 = _wizard_set_stage(meta2, "work_tailor_review")
@@ -6857,7 +7472,19 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 # Extract roles from structured proposal
                 roles = proposal_block.get("roles")
-                if not isinstance(roles, list) or not roles:
+                existing_excluded = proposal_block.get("excluded_roles") if isinstance(proposal_block.get("excluded_roles"), list) else []
+                if not isinstance(roles, list):
+                    meta2 = _wizard_set_stage(meta2, "work_experience")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Proposal was empty or invalid. Generate again.", meta_out=meta2, cv_out=cv_data)
+
+                included_roles, excluded_from_roles = _split_work_roles_by_alignment(
+                    roles=list(roles or []),
+                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                )
+                excluded_roles = list(existing_excluded) + list(excluded_from_roles)
+
+                if not included_roles and not excluded_roles:
                     meta2 = _wizard_set_stage(meta2, "work_experience")
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(assistant_text="Proposal was empty or invalid. Generate again.", meta_out=meta2, cv_out=cv_data)
@@ -6868,7 +7495,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 target_lang_guard = str(meta2.get("target_language") or cv_data.get("language") or "en").strip().lower()
                 hard_limit = 250 if target_lang_guard == "de" else 200
                 violations: list[str] = []
-                for role_idx, r in enumerate(roles[:8]):
+                for role_idx, r in enumerate(included_roles[:8]):
                     rr = _normalize_work_role_from_proposal(r) if isinstance(r, dict) else {"employer": "", "bullets": []}
                     if not str(rr.get("employer") or "").strip():
                         violations.append(f"Role {role_idx+1}: missing employer")
@@ -6890,8 +7517,17 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         cv_out=cv_data,
                     )
 
-                # Apply proposal, but keep locked roles unchanged.
-                cv_data = _apply_work_experience_proposal_with_locks(cv_data=cv_data, proposal_roles=roles, meta=meta2)
+                # Apply accepted proposal as replace-all (no preserve of legacy unmatched roles).
+                cv_data = _overwrite_work_experience_from_proposal_roles(cv_data=cv_data, proposal_roles=included_roles)
+
+                proposal_block["roles"] = included_roles
+                proposal_block["excluded_roles"] = excluded_roles
+                proposal_block["alignment_threshold"] = WORK_ROLE_ALIGNMENT_THRESHOLD
+                proposal_block["notes"] = _compose_work_alignment_notes(
+                    base_notes=str(proposal_block.get("notes") or ""),
+                    excluded_roles=excluded_roles,
+                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
+                )
                 meta2["work_experience_tailored"] = True
                 meta2["work_experience_proposal_accepted_at"] = _now_iso()
 
@@ -6969,7 +7605,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                 trace_id=trace_id,
                                 session_id=session_id,
                                 response_format=get_work_experience_bullets_proposal_response_format(),
-                                max_output_tokens=1600,
+                                max_output_tokens=2240,
                                 stage="work_experience",
                             )
                             if not ok_we or not isinstance(parsed_we, dict):
@@ -6986,10 +7622,9 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                 }
                                 for r in (roles or [])[:5]
                             ]
-                            cv_candidate = _apply_work_experience_proposal_with_locks(
+                            cv_candidate = _overwrite_work_experience_from_proposal_roles(
                                 cv_data=cv_data,
                                 proposal_roles=proposal_roles,
-                                meta=meta2,
                             )
                             violations_retry = _find_work_bullet_hard_limit_violations(
                                 cv_data=cv_candidate,
@@ -7001,6 +7636,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                 meta2["work_experience_proposal_accepted_at"] = _now_iso()
                                 meta2 = _wizard_set_stage(meta2, "it_ai_skills")
                                 cv_data, meta2 = _persist(cv_data, meta2)
+                                # Snapshot: Work experience proposal accepted (retry path)
+                                _snapshot_session(session_id, cv_data, snapshot_type="work_accepted")
                                 return _wizard_resp(
                                     assistant_text="Proposal applied. Moving to skills.",
                                     meta_out=meta2,
@@ -7022,6 +7659,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 meta2 = _wizard_set_stage(meta2, "it_ai_skills")
                 cv_data, meta2 = _persist(cv_data, meta2)
+                # Snapshot: Work experience proposal accepted (main path)
+                _snapshot_session(session_id, cv_data, snapshot_type="work_accepted")
                 return _wizard_resp(assistant_text="Proposal applied. Moving to skills.", meta_out=meta2, cv_out=cv_data)
 
             # Legacy: Technical projects (Stage 5a) actions are deprecated; keep a soft landing.
@@ -7131,6 +7770,109 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 meta2.pop("work_selected_index", None)
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(assistant_text="Review your work experience roles below.", meta_out=meta2, cv_out=cv_data)
+
+            # ====== WORK EXPERIENCE REORDERING/REMOVAL ACTIONS ======
+            if aid == "MOVE_WORK_EXPERIENCE_UP":
+                payload = user_action_payload or {}
+                try:
+                    position_index = int(payload.get("position_index", -1))
+                except Exception:
+                    position_index = -1
+                
+                work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                if position_index > 0 and position_index < len(work):
+                    # Swap with the previous position
+                    work[position_index], work[position_index - 1] = work[position_index - 1], work[position_index]
+                    cv_data["work_experience"] = work
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="work_reordered")
+                    return _wizard_resp(assistant_text=f"Moved position {position_index + 1} up.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cannot move: position is already at the top or invalid.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "MOVE_WORK_EXPERIENCE_DOWN":
+                payload = user_action_payload or {}
+                try:
+                    position_index = int(payload.get("position_index", -1))
+                except Exception:
+                    position_index = -1
+                
+                work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                if position_index >= 0 and position_index < len(work) - 1:
+                    # Swap with the next position
+                    work[position_index], work[position_index + 1] = work[position_index + 1], work[position_index]
+                    cv_data["work_experience"] = work
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="work_reordered")
+                    return _wizard_resp(assistant_text=f"Moved position {position_index + 1} down.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cannot move: position is already at the bottom or invalid.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "REMOVE_WORK_EXPERIENCE":
+                payload = user_action_payload or {}
+                try:
+                    position_index = int(payload.get("position_index", -1))
+                except Exception:
+                    position_index = -1
+                
+                work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                if 0 <= position_index < len(work):
+                    removed_employer = work[position_index].get("employer", "position") if isinstance(work[position_index], dict) else "position"
+                    work.pop(position_index)
+                    cv_data["work_experience"] = work
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="work_removed")
+                    return _wizard_resp(assistant_text=f"Removed {removed_employer}.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Invalid position index.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "REMOVE_WORK_EXPERIENCE_BULLET":
+                payload = user_action_payload or {}
+                try:
+                    position_index = int(payload.get("position_index", -1))
+                    bullet_index = int(payload.get("bullet_index", -1))
+                except Exception:
+                    position_index = -1
+                    bullet_index = -1
+                
+                work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                if 0 <= position_index < len(work):
+                    role = work[position_index] if isinstance(work[position_index], dict) else {}
+                    bullets = role.get("bullets") if isinstance(role.get("bullets"), list) else []
+                    if 0 <= bullet_index < len(bullets):
+                        bullets.pop(bullet_index)
+                        role["bullets"] = bullets
+                        work[position_index] = role
+                        cv_data["work_experience"] = work
+                        cv_data, meta2 = _persist(cv_data, meta2)
+                        _snapshot_session(session_id, cv_data, snapshot_type="bullet_removed")
+                        return _wizard_resp(assistant_text=f"Removed bullet {bullet_index + 1} from position {position_index + 1}.", meta_out=meta2, cv_out=cv_data)
+                
+                cv_data, meta2 = _persist(cv_data, meta2)
+                return _wizard_resp(assistant_text="Invalid position or bullet index.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "CLEAR_WORK_EXPERIENCE_BULLETS":
+                payload = user_action_payload or {}
+                try:
+                    position_index = int(payload.get("position_index", -1))
+                except Exception:
+                    position_index = -1
+                
+                work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                if 0 <= position_index < len(work):
+                    role = work[position_index] if isinstance(work[position_index], dict) else {}
+                    role["bullets"] = []
+                    work[position_index] = role
+                    cv_data["work_experience"] = work
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="bullets_cleared")
+                    return _wizard_resp(assistant_text=f"Cleared all bullets from position {position_index + 1}.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Invalid position index.", meta_out=meta2, cv_out=cv_data)
 
             # ====== FURTHER EXPERIENCE (TECHNICAL PROJECTS) ACTIONS ======
             if aid == "FURTHER_ADD_NOTES":
@@ -7507,7 +8249,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 user_text = (
                     f"[JOB_SUMMARY]\n{job_summary}\n\n"
-                    f"[CANDIDATE_PROFILE]\n{str(cv_data.get('profile') or '')}\n\n"
                     f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
                     f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
                     f"[WORK_TAILORING_PROPOSAL_NOTES]\n{work_prop_notes}\n\n"
@@ -7522,7 +8263,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     trace_id=trace_id,
                     session_id=session_id,
                     response_format=get_skills_unified_proposal_response_format(),
-                    max_output_tokens=1200,
+                    max_output_tokens=1680,
                     stage="it_ai_skills",
                 )
                 if not ok or not isinstance(parsed, dict):
@@ -7617,7 +8358,100 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 meta2 = _wizard_set_stage(meta2, "review_final")
                 cv_data, meta2 = _persist(cv_data, meta2)
+                # Snapshot: Skills proposal accepted
+                _snapshot_session(session_id, cv_data, snapshot_type="skills_accepted")
                 return _wizard_resp(assistant_text="Proposal applied. Ready to generate PDF.", meta_out=meta2, cv_out=cv_data)
+
+            # ====== SKILLS REORDERING/REMOVAL ACTIONS ======
+            if aid == "REMOVE_SKILL_IT_AI":
+                payload = user_action_payload or {}
+                try:
+                    skill_index = int(payload.get("skill_index", -1))
+                except Exception:
+                    skill_index = -1
+                
+                skills = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
+                if 0 <= skill_index < len(skills):
+                    removed_skill = skills.pop(skill_index)
+                    cv_data["it_ai_skills"] = skills
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="skill_removed")
+                    return _wizard_resp(assistant_text=f"Removed '{removed_skill}' from IT & AI skills.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Invalid skill index.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "REORDER_SKILLS_IT_AI":
+                payload = user_action_payload or {}
+                try:
+                    from_index = int(payload.get("from_index", -1))
+                    to_index = int(payload.get("to_index", -1))
+                except Exception:
+                    from_index = -1
+                    to_index = -1
+                
+                skills = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
+                if 0 <= from_index < len(skills) and 0 <= to_index < len(skills):
+                    skill = skills.pop(from_index)
+                    skills.insert(to_index, skill)
+                    cv_data["it_ai_skills"] = skills
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="skills_reordered")
+                    return _wizard_resp(assistant_text="IT & AI skills reordered.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Invalid skill indices.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "CLEAR_SKILLS_IT_AI":
+                cv_data["it_ai_skills"] = []
+                cv_data, meta2 = _persist(cv_data, meta2)
+                _snapshot_session(session_id, cv_data, snapshot_type="skills_cleared")
+                return _wizard_resp(assistant_text="Cleared all IT & AI skills.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "REMOVE_SKILL_TECHNICAL_OPERATIONAL":
+                payload = user_action_payload or {}
+                try:
+                    skill_index = int(payload.get("skill_index", -1))
+                except Exception:
+                    skill_index = -1
+                
+                skills = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
+                if 0 <= skill_index < len(skills):
+                    removed_skill = skills.pop(skill_index)
+                    cv_data["technical_operational_skills"] = skills
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="skill_removed")
+                    return _wizard_resp(assistant_text=f"Removed '{removed_skill}' from Technical & Operational skills.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Invalid skill index.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "REORDER_SKILLS_TECHNICAL_OPERATIONAL":
+                payload = user_action_payload or {}
+                try:
+                    from_index = int(payload.get("from_index", -1))
+                    to_index = int(payload.get("to_index", -1))
+                except Exception:
+                    from_index = -1
+                    to_index = -1
+                
+                skills = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
+                if 0 <= from_index < len(skills) and 0 <= to_index < len(skills):
+                    skill = skills.pop(from_index)
+                    skills.insert(to_index, skill)
+                    cv_data["technical_operational_skills"] = skills
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    _snapshot_session(session_id, cv_data, snapshot_type="skills_reordered")
+                    return _wizard_resp(assistant_text="Technical & Operational skills reordered.", meta_out=meta2, cv_out=cv_data)
+                else:
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Invalid skill indices.", meta_out=meta2, cv_out=cv_data)
+
+            if aid == "CLEAR_SKILLS_TECHNICAL_OPERATIONAL":
+                cv_data["technical_operational_skills"] = []
+                cv_data, meta2 = _persist(cv_data, meta2)
+                _snapshot_session(session_id, cv_data, snapshot_type="skills_cleared")
+                return _wizard_resp(assistant_text="Cleared all Technical & Operational skills.", meta_out=meta2, cv_out=cv_data)
 
             if aid == "WORK_CONFIRM_STAGE":
                 meta2 = _wizard_set_stage(meta2, "further_experience")
@@ -7631,6 +8465,16 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             if aid == "COVER_LETTER_PREVIEW":
                 target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
                 allowed_langs = {"en", "de"}
+                try:
+                    logging.info(
+                        "COVER_ACTION aid=%s session=%s stage_before=%s target_lang=%s",
+                        aid,
+                        session_id,
+                        stage_now,
+                        target_lang,
+                    )
+                except Exception:
+                    pass
                 if not product_config.CV_ENABLE_COVER_LETTER:
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(assistant_text="Cover letter is disabled.", meta_out=meta2, cv_out=cv_data)
@@ -7666,45 +8510,50 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 return _wizard_resp(assistant_text="Back to PDF generation.", meta_out=meta2, cv_out=cv_data)
 
             if aid == "COVER_LETTER_GENERATE":
-                # Download if already generated; otherwise render + persist 1-page PDF from the current draft.
-                existing_ref = meta2.get("cover_letter_pdf_ref") if isinstance(meta2.get("cover_letter_pdf_ref"), str) else ""
-                if existing_ref:
-                    status, payload, content_type = _tool_get_pdf_by_ref(
-                        session_id=session_id,
-                        pdf_ref=existing_ref,
-                        session=store.get_session(session_id) or {"cv_data": cv_data, "metadata": meta2},
+                # Always regenerate cover letter from current CV state.
+                target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
+                allowed_langs = {"en", "de"}
+                try:
+                    logging.info(
+                        "COVER_ACTION aid=%s session=%s stage_before=%s target_lang=%s mode=always_regenerate",
+                        aid,
+                        session_id,
+                        stage_now,
+                        target_lang,
                     )
-                    if status == 200 and content_type == "application/pdf" and isinstance(payload, (bytes, bytearray)):
-                        meta2 = _wizard_set_stage(meta2, "cover_letter_review")
-                        cv_data, meta2 = _persist(cv_data, meta2)
-                        return _wizard_resp(assistant_text="Cover letter PDF ready.", meta_out=meta2, cv_out=cv_data, pdf_bytes=bytes(payload))
+                except Exception:
+                    pass
+                if target_lang not in allowed_langs:
+                    meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(
+                        assistant_text="Cover letter is available only for English (EN) or German (DE) for now.",
+                        meta_out=meta2,
+                        cv_out=cv_data,
+                    )
+                if not product_config.CV_ENABLE_COVER_LETTER:
+                    meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="Cover letter is disabled.", meta_out=meta2, cv_out=cv_data)
+                if not _openai_enabled():
+                    meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text="AI is not configured. Cover letter generation is unavailable.", meta_out=meta2, cv_out=cv_data)
 
-                cl = meta2.get("cover_letter_block") if isinstance(meta2.get("cover_letter_block"), dict) else None
-                if not isinstance(cl, dict):
-                    target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
-                    allowed_langs = {"en", "de"}
-                    if target_lang not in allowed_langs:
-                        meta2 = _wizard_set_stage(meta2, "cover_letter_review")
-                        cv_data, meta2 = _persist(cv_data, meta2)
-                        return _wizard_resp(
-                            assistant_text="Cover letter is available only for English (EN) or German (DE) for now.",
-                            meta_out=meta2,
-                            cv_out=cv_data,
-                        )
-                    ok_cl, cl_block, err_cl = _generate_cover_letter_block_via_openai(
-                        cv_data=cv_data,
-                        meta=meta2,
-                        trace_id=trace_id,
-                        session_id=session_id,
-                        target_language=target_lang,
-                    )
-                    if not ok_cl or not isinstance(cl_block, dict):
-                        meta2["cover_letter_error"] = str(err_cl)[:400]
-                        meta2 = _wizard_set_stage(meta2, "review_final")
-                        cv_data, meta2 = _persist(cv_data, meta2)
-                        return _wizard_resp(assistant_text=_friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
-                    cl = cl_block
-                    meta2["cover_letter_block"] = cl
+                ok_cl, cl_block, err_cl = _generate_cover_letter_block_via_openai(
+                    cv_data=cv_data,
+                    meta=meta2,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    target_language=target_lang,
+                )
+                if not ok_cl or not isinstance(cl_block, dict):
+                    meta2["cover_letter_error"] = str(err_cl)[:400]
+                    meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text=_friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
+                cl = cl_block
+                meta2["cover_letter_block"] = cl
 
                 ok2, errs2 = _validate_cover_letter_block(block=cl, cv_data=cv_data)
                 if not ok2:
@@ -7739,8 +8588,44 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 meta2.pop("cover_letter_error", None)
                 meta2.pop("cover_letter_error_details", None)
                 meta2 = _wizard_set_stage(meta2, "cover_letter_review")
+                try:
+                    logging.info(
+                        "COVER_ACTION_RESULT aid=%s session=%s stage_after=%s pdf_ref=%s",
+                        aid,
+                        session_id,
+                        _wizard_get_stage(meta2),
+                        pdf_ref,
+                    )
+                except Exception:
+                    pass
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(assistant_text="Cover letter PDF generated.", meta_out=meta2, cv_out=cv_data, pdf_bytes=pdf_bytes)
+
+            if aid == "DOWNLOAD_PDF":
+                # Download previously generated PDF (no regeneration)
+                status, payload, content_type = _tool_generate_cv_from_session(
+                    session_id=session_id,
+                    language=language,
+                    client_context=client_context,
+                    session=store.get_session_with_blob_retrieval(session_id) or {"cv_data": cv_data, "metadata": meta2},
+                )
+                
+                if (
+                    status == 200
+                    and content_type == "application/pdf"
+                    and isinstance(payload, dict)
+                    and isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
+                ):
+                    pdf_bytes = bytes(payload["pdf_bytes"])
+                    return 200, {"success": True, "pdf_bytes": pdf_bytes, "trace_id": trace_id}, "application/pdf"
+                else:
+                    # PDF not available - fallback to error response
+                    err_msg = "PDF not yet generated or unavailable"
+                    if isinstance(payload, dict) and payload.get("error"):
+                        err_msg = str(payload.get("error"))[:400]
+                    meta2 = _wizard_set_stage(meta2, "review_final")
+                    cv_data, meta2 = _persist(cv_data, meta2)
+                    return _wizard_resp(assistant_text=err_msg, meta_out=meta2, cv_out=cv_data)
 
             if aid == "REQUEST_GENERATE_PDF":
                 # Generate on first click (avoid the "clicked but nothing happened" UX).
@@ -7754,7 +8639,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         session_id=session_id,
                         language=language,
                         client_context=cc,
-                        session=store.get_session(session_id) or {"cv_data": cv_data, "metadata": meta2},
+                        session=_session_get(session_id) or {"cv_data": cv_data, "metadata": meta2},
                     )
 
                 pdf_bytes = None
@@ -7802,7 +8687,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             pm = payload.get("pdf_metadata") if isinstance(payload.get("pdf_metadata"), dict) else None
                             if pm and pm.get("download_error"):
                                 err = f"{err or 'PDF generation failed'} (download_error={pm.get('download_error')})"
-                        meta_after = store.get_session(session_id) or {}
+                        meta_after = _session_get(session_id) or {}
                         meta_after = meta_after.get("metadata") if isinstance(meta_after.get("metadata"), dict) else meta2
                         meta2_final = _wizard_set_stage(meta_after, "review_final")
                         cv_data, meta2_final = _persist(cv_data, meta2_final)
@@ -7824,7 +8709,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         cv_out=cv_data,
                     )
                 
-                sess_after = store.get_session(session_id) or {}
+                sess_after = _session_get(session_id) or {}
                 meta_after = sess_after.get("metadata") if isinstance(sess_after.get("metadata"), dict) else meta2
                 cv_after = sess_after.get("cv_data") if isinstance(sess_after.get("cv_data"), dict) else cv_data
                 
@@ -7843,22 +8728,13 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         # Auto-processing: bulk translation gate (no user action required).
         if stage_now == "bulk_translation":
             target_lang = str(meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
-            if str(meta2.get("bulk_translated_to") or "").strip().lower() == target_lang:
+            source_hash = _hash_bulk_translation_payload(_build_bulk_translation_payload(cv_data))
+            if _bulk_translation_cache_hit(meta=meta2, target_language=target_lang, source_hash=source_hash):
                 meta2 = _wizard_set_stage(meta2, "contact")
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(assistant_text="Translation completed. Review your contact details below.", meta_out=meta2, cv_out=cv_data)
 
-            cv_payload = {
-                "profile": str(cv_data.get("profile") or ""),
-                "work_experience": cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else [],
-                "further_experience": cv_data.get("further_experience") if isinstance(cv_data.get("further_experience"), list) else [],
-                "education": cv_data.get("education") if isinstance(cv_data.get("education"), list) else [],
-                "it_ai_skills": cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else [],
-                "technical_operational_skills": cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else [],
-                "languages": cv_data.get("languages") if isinstance(cv_data.get("languages"), list) else [],
-                "interests": str(cv_data.get("interests") or ""),
-                "references": str(cv_data.get("references") or ""),
-            }
+            cv_payload = _build_bulk_translation_payload(cv_data)
 
             has_content = bool(
                 cv_payload.get("profile")
@@ -7874,122 +8750,35 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             if not has_content:
                 meta2["bulk_translated_to"] = target_lang
                 meta2["bulk_translation_status"] = "skipped_empty"
+                meta2["bulk_translation_source_hash"] = source_hash
+                cache = meta2.get("bulk_translation_cache") if isinstance(meta2.get("bulk_translation_cache"), dict) else {}
+                cache = dict(cache)
+                cache[target_lang] = source_hash
+                meta2["bulk_translation_cache"] = cache
                 meta2.pop("bulk_translation_error", None)
                 meta2 = _wizard_set_stage(meta2, "contact")
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(assistant_text="No content to translate. Review your contact details below.", meta_out=meta2, cv_out=cv_data)
 
-            ok, parsed, err = _openai_json_schema_call(
-                system_prompt=_build_ai_system_prompt(stage="bulk_translation", target_language=target_lang),
-                user_text=json.dumps(cv_payload, ensure_ascii=False),
+            cv_data, meta2, ok_bt, err_bt = _run_bulk_translation(
+                cv_data=cv_data,
+                meta=meta2,
                 trace_id=trace_id,
                 session_id=session_id,
-                response_format={
-                    "type": "json_schema",
-                    "name": "bulk_translation",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "profile": {"type": "string"},
-                            "work_experience": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "employer": {"type": "string"},
-                                        "title": {"type": "string"},
-                                        "date_range": {"type": "string"},
-                                        "location": {"type": "string"},
-                                        "bullets": {"type": "array", "items": {"type": "string"}},
-                                    },
-                                    "required": ["employer", "title", "date_range", "location", "bullets"],
-                                },
-                            },
-                            "further_experience": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "title": {"type": "string"},
-                                        "organization": {"type": "string"},
-                                        "date_range": {"type": "string"},
-                                        "location": {"type": "string"},
-                                        "bullets": {"type": "array", "items": {"type": "string"}},
-                                    },
-                                    "required": ["title", "organization", "date_range", "location", "bullets"],
-                                },
-                            },
-                            "education": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "title": {"type": "string"},
-                                        "institution": {"type": "string"},
-                                        "date_range": {"type": "string"},
-                                        "specialization": {"type": "string"},
-                                        "details": {"type": "array", "items": {"type": "string"}},
-                                        "location": {"type": "string"},
-                                    },
-                                    "required": ["title", "institution", "date_range", "specialization", "details", "location"],
-                                },
-                            },
-                            "it_ai_skills": {"type": "array", "items": {"type": "string"}},
-                            "technical_operational_skills": {"type": "array", "items": {"type": "string"}},
-                            "languages": {"type": "array", "items": {"type": "string"}},
-                            "interests": {"type": "string"},
-                            "references": {"type": "string"},
-                        },
-                        "required": [
-                            "profile",
-                            "work_experience",
-                            "further_experience",
-                            "education",
-                            "it_ai_skills",
-                            "technical_operational_skills",
-                            "languages",
-                            "interests",
-                            "references",
-                        ],
-                    },
-                },
-                max_output_tokens=product_config.CV_BULK_TRANSLATION_MAX_OUTPUT_TOKENS,
-                stage="bulk_translation",
+                target_language=target_lang,
             )
-
-            if not (ok and isinstance(parsed, dict)):
-                meta2["bulk_translation_status"] = "call_failed"
-                meta2["bulk_translation_error"] = str(err or "").strip()[:400]
+            if not ok_bt:
                 cv_data, meta2 = _persist(cv_data, meta2)
                 return _wizard_resp(
                     assistant_text=(
-                        _friendly_schema_error_message(str(err))
-                        if str(err or "").strip()
+                        _friendly_schema_error_message(str(err_bt))
+                        if str(err_bt or "").strip()
                         else "AI failed: empty model output. Please try again."
                     ),
                     meta_out=meta2,
                     cv_out=cv_data,
                 )
 
-            cv_data2 = dict(cv_data or {})
-            cv_data2["profile"] = str(parsed.get("profile") or "")
-            cv_data2["work_experience"] = parsed.get("work_experience") if isinstance(parsed.get("work_experience"), list) else []
-            cv_data2["further_experience"] = parsed.get("further_experience") if isinstance(parsed.get("further_experience"), list) else []
-            cv_data2["education"] = parsed.get("education") if isinstance(parsed.get("education"), list) else []
-            cv_data2["it_ai_skills"] = parsed.get("it_ai_skills") if isinstance(parsed.get("it_ai_skills"), list) else []
-            cv_data2["technical_operational_skills"] = parsed.get("technical_operational_skills") if isinstance(parsed.get("technical_operational_skills"), list) else []
-            cv_data2["languages"] = parsed.get("languages") if isinstance(parsed.get("languages"), list) else []
-            cv_data2["interests"] = str(parsed.get("interests") or "")
-            cv_data2["references"] = str(parsed.get("references") or "")
-            cv_data = cv_data2
-            meta2["bulk_translated_to"] = target_lang
-            meta2["bulk_translation_status"] = "ok"
-            meta2.pop("bulk_translation_error", None)
             meta2 = _wizard_set_stage(meta2, "contact")
             cv_data, meta2 = _persist(cv_data, meta2)
             return _wizard_resp(assistant_text="Translation completed. Review your contact details below.", meta_out=meta2, cv_out=cv_data)
@@ -8310,7 +9099,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
     if stage == "generate_pdf" and not pdf_bytes and not skip_fallback:
         try:
-            sess2 = store.get_session(session_id) or {}
+            sess2 = store.get_session_with_blob_retrieval(session_id) or {}
             meta2 = sess2.get("metadata") or {}
             cv2 = sess2.get("cv_data") or {}
             readiness2 = _compute_readiness(cv2 if isinstance(cv2, dict) else {}, meta2 if isinstance(meta2, dict) else {})
@@ -8554,9 +9343,18 @@ def _tool_extract_and_store_cv(*, docx_base64: str, language: str, extract_photo
         # Add job fetch status tracking
         metadata["job_fetch_status"] = "pending"
     if job_posting_text:
-        metadata["job_posting_text"] = str(job_posting_text)[:20000]
-        if job_posting_url:
-            metadata["job_fetch_status"] = "manual"  # User provided text manually
+        candidate_text = str(job_posting_text)[:20000]
+        ok_text, reason_text = _looks_like_job_posting_text(candidate_text)
+        if ok_text:
+            metadata["job_posting_text"] = candidate_text
+            metadata["job_input_status"] = "ok"
+            if job_posting_url:
+                metadata["job_fetch_status"] = "manual"  # User provided text manually
+        else:
+            metadata["job_posting_text"] = ""
+            metadata["job_input_status"] = "invalid"
+            metadata["job_input_invalid_reason"] = reason_text
+            metadata["job_posting_invalid_draft"] = candidate_text[:2000]
 
     try:
         session_id = store.create_session(cv_data, metadata)
@@ -8578,10 +9376,22 @@ def _tool_extract_and_store_cv(*, docx_base64: str, language: str, extract_photo
                 if session:
                     meta_update = session.get("metadata") or {}
                     if ok and fetched_text.strip():
-                        meta_update["job_posting_text"] = fetched_text[:20000]
-                        meta_update["job_fetch_status"] = "success"
-                        meta_update["job_fetch_timestamp"] = _now_iso()
-                        logging.info(f"Job URL fetch successful: {len(fetched_text)} chars")
+                        candidate_text = fetched_text[:20000]
+                        ok_text, reason_text = _looks_like_job_posting_text(candidate_text)
+                        if ok_text:
+                            meta_update["job_posting_text"] = candidate_text
+                            meta_update["job_fetch_status"] = "success"
+                            meta_update["job_fetch_timestamp"] = _now_iso()
+                            meta_update["job_input_status"] = "ok"
+                            logging.info(f"Job URL fetch successful: {len(fetched_text)} chars")
+                        else:
+                            meta_update["job_posting_text"] = ""
+                            meta_update["job_fetch_status"] = "failed"
+                            meta_update["job_fetch_error"] = f"fetched_text_invalid:{reason_text}"[:400]
+                            meta_update["job_fetch_timestamp"] = _now_iso()
+                            meta_update["job_input_status"] = "invalid"
+                            meta_update["job_input_invalid_reason"] = reason_text
+                            logging.warning(f"Job URL fetch text rejected by gate: {reason_text}")
                     else:
                         meta_update["job_fetch_status"] = "failed"
                         meta_update["job_fetch_error"] = str(err)[:400]
@@ -9088,18 +9898,31 @@ def _tool_generate_cv_from_session(*, session_id: str, language: str | None, cli
         persisted = False
         persist_error = None
         try:
-            persisted = bool(store.update_session(session_id, cv_data, metadata))
+            # Use blob offload method to handle large cv_data automatically
+            persisted = bool(store.update_session_with_blob_offload(session_id, cv_data, metadata))
         except Exception as exc:
             persist_error = str(exc)
             logging.warning("Failed to persist pdf metadata for session %s (will retry shrink): %s", session_id, exc)
         if not persisted:
             try:
                 metadata2 = _shrink_metadata_for_table(metadata)
-                persisted = bool(store.update_session(session_id, cv_data, metadata2))
+                persisted = bool(store.update_session_with_blob_offload(session_id, cv_data, metadata2))
                 metadata = metadata2
             except Exception as exc:
                 persist_error = str(exc)
                 logging.warning("Failed to persist pdf metadata after shrink for session %s: %s", session_id, exc)
+        
+        # Post-write verification: ensure pdf_generated and pdf_refs are persisted
+        if persisted:
+            verify_ok, verify_errors = store.verify_pdf_metadata_persisted(session_id, pdf_ref)
+            if not verify_ok:
+                logging.error(
+                    "PDF metadata verification failed for session %s: %s",
+                    session_id,
+                    "; ".join(verify_errors)
+                )
+                # Don't fail the request, but log for monitoring
+                run_summary["pdf_metadata_verification_errors"] = verify_errors
         logging.info(
             "=== PDF GENERATION SUCCESS === session_id=%s pdf_ref=%s size=%d bytes render_ms=%d pages=%d",
             session_id,
@@ -9338,7 +10161,11 @@ def cv_tool_call_handler(req: func.HttpRequest) -> func.HttpResponse:
     # Most tools require session lookup; do it once.
     try:
         store = _get_session_store()
-        session = store.get_session(session_id)
+        getter = getattr(store, "get_session_with_blob_retrieval", None)
+        if callable(getter):
+            session = getter(session_id)
+        else:
+            session = store.get_session(session_id)
     except Exception as e:
         return _json_response({"error": "Failed to retrieve session", "details": str(e)}, status_code=500)
 
