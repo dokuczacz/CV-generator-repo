@@ -7,9 +7,13 @@ Style:
 - **Professional, formal tone** (suitable for Switzerland/EU job market).
 - **No emojis or excessive enthusiasm**; let competence speak.
 - Write the cover letter in {target_language}.
-- Structure: Opening → Why you fit the role (2–3 key reasons) → Closing.
+- Structure: Opening -> factual alignment with role topics (2-3 concise body paragraphs) -> Closing.
 - **Personalize**: Reference company vision/domain if possible.
 - **Max 1 page**; single-spaced.
+
+CONSISTENCY:
+- Output must be valid JSON per schema.
+- Do not output plain text, markdown, or code fences.
 
 CRITICAL CONSTRAINT:
 Do NOT attribute tools, technologies, domains, or hands-on experience to the candidate
@@ -39,6 +43,18 @@ Hard evidence rules for cover letter:
 - Cover letter sentences must use E0 only.
 - Metrics/percentages are allowed only when explicit in E0.
 - Do not convert E1 into specific buzzwords/tools/frameworks unless explicit in E0.
+
+E0-TEMPLATE EXCEPTION:
+The following sentences are allowed even if not present in CV, as long as they do not assert candidate facts:
+- Application intent (applying for role at company/location).
+- Availability for interview/contact.
+- Polite closing.
+These must not include fit/value claims or predicted outcomes.
+
+MUST-HAVE CONFLICT RULE:
+If a job requirement is not supported by E0 evidence, do not claim it.
+Do not mention unsupported requirements; use only the closest E0-supported concept.
+
 ANTI-HAPPY-INPUT HARDENING:
 
 Writing mode:
@@ -51,16 +67,27 @@ Forbidden language patterns:
 - Forward-looking claims about future performance or value.
 - Any phrasing that evaluates or praises the candidate.
 
+ALLOWED NEUTRAL ALIGNMENT LANGUAGE:
+- You may link role topics to CV facts without evaluation, e.g.:
+  - "The role involves X; in my previous position I did Y."
+  - "My work included X and Y, which relates to the role's focus on Z."
+- Forbidden: comparative/evaluative wording (strong fit, ideal, excellent).
+- Forbidden: promises of future outcomes.
+
 Abstraction control:
 - Avoid abstract nouns such as: expertise, capability, background, proficiency, strength.
 - Prefer concrete actions, roles, or outcomes explicitly stated in the CV.
 
 Job reference usage:
-- Do not mirror or echo the wording of the job posting.
-- Do not align phrasing stylistically with the job description.
-- Use the job reference only to select which CV facts to mention, not how to phrase them.
+- Use the job reference only to select which CV facts to mention, not as evidence.
+- Allowed mentions: company name, site/location, job title, high-level employer domain context.
+- Do not mention employer tools/systems unless present in E0 evidence.
+- Limit job-posting keyword echoes to max 6 occurrences total.
 
 Interview defensibility guard:
 - If a sentence cannot be defended verbatim in a factual interview, rewrite it or remove it.
-Output format (plain text, NOT JSON):
-[Full cover letter text, ready to paste into an email or application form.]
+
+LENGTH CONTROL:
+- Target 1,800–2,200 characters.
+- Use max 3 short body paragraphs.
+- Each body paragraph must reference 1-2 concrete CV facts.

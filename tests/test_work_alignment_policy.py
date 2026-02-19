@@ -3,7 +3,7 @@ import pytest
 from src.work_experience_proposal import parse_work_experience_bullets_proposal
 
 
-def test_parse_work_role_requires_3_4_bullets():
+def test_parse_work_role_requires_4_5_bullets():
     payload = {
         "roles": [
             {
@@ -14,6 +14,7 @@ def test_parse_work_role_requires_3_4_bullets():
                 "bullets": [
                     "Built internal tooling.",
                     "Maintained CI pipelines.",
+                    "Improved deployment reliability through release checks.",
                 ],
             }
         ],
@@ -36,6 +37,7 @@ def test_parse_work_role_accepts_no_alignment_fields():
                     "Led quality governance for multi-plant operations.",
                     "Reduced customer claims by 70% through corrective actions.",
                     "Standardized workflows and cut warehouse process steps by half.",
+                    "Introduced KPI reviews and clarified escalation paths.",
                 ],
             }
         ],
@@ -45,4 +47,29 @@ def test_parse_work_role_accepts_no_alignment_fields():
     parsed = parse_work_experience_bullets_proposal(payload)
     assert len(parsed.roles) == 1
     assert parsed.roles[0].company == "Sumitomo"
-    assert len(parsed.roles[0].bullets) == 3
+    assert len(parsed.roles[0].bullets) == 4
+
+
+def test_parse_work_role_accepts_5_bullets():
+    payload = {
+        "roles": [
+            {
+                "title": "Operations Manager",
+                "company": "Sumitomo",
+                "date_range": "2019-01 - 2022-12",
+                "location": "Zurich, Switzerland",
+                "bullets": [
+                    "Led quality governance for multi-plant operations.",
+                    "Reduced customer claims by 70% through corrective actions.",
+                    "Standardized workflows and cut warehouse process steps by half.",
+                    "Introduced KPI reviews and clarified escalation paths.",
+                    "Coordinated cross-site readiness reviews ahead of major audits.",
+                ],
+            }
+        ],
+        "notes": "test",
+    }
+
+    parsed = parse_work_experience_bullets_proposal(payload)
+    assert len(parsed.roles) == 1
+    assert len(parsed.roles[0].bullets) == 5

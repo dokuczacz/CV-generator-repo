@@ -601,7 +601,7 @@ def _build_execution_context(
     # Hard limits (for self-validation)
     context['hard_limits'] = {
         'work_experience_max': 5,
-        'work_bullets_per_entry_max': 4,
+        'work_bullets_per_entry_max': 5,
         # Soft limits: bullet wrapping is allowed; page-fit is the DoD.
         'work_bullet_chars_soft': 99,
         'work_bullet_chars_hard': 180,
@@ -913,10 +913,10 @@ def _build_validation_checklist(cv_data: Dict[str, Any]) -> List[Dict[str, Any]]
     if work:
         max_bullets = max(len(w.get('bullets', [])) for w in work)
         checklist.append({
-            'check': 'work_bullets_per_entry <= 4',
-            'passed': max_bullets <= 4,
+            'check': 'work_bullets_per_entry <= 5',
+            'passed': max_bullets <= 5,
             'current_value': max_bullets,
-            'action_if_failed': 'Trim bullets to max 4 per position'
+            'action_if_failed': 'Trim bullets to max 5 per position'
         })
 
     # Check education count

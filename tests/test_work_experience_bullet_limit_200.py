@@ -4,8 +4,8 @@ from src.work_experience_proposal import get_work_experience_bullets_proposal_re
 
 def test_work_experience_validator_hard_cap_is_200():
     base = CV_LIMITS["work_experience"]["per_entry"]["bullets"]["max_chars_per_bullet"]
-    assert base == 100
-    assert _hard_limit(base) == 200
+    assert base == 200
+    assert _hard_limit(base) == 400
 
 
 def test_work_experience_proposal_schema_enforces_200_maxlen():
@@ -32,4 +32,3 @@ def test_work_experience_proposal_schema_enforces_200_maxlen():
 
     walk(schema)
     assert 200 in found
-

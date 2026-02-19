@@ -86,6 +86,7 @@ class _OpenAICapture:
                                 "Led road and infrastructure projects for public and private contracts.",
                                 "Managed subcontractors and compliance across multi-site execution.",
                                 "Built schedules and budgets and optimized on-site delivery workflows.",
+                                "Improved delivery predictability through tighter milestone controls.",
                             ],
                             "alignment_breakdown": {
                                 "core_responsibilities_match": 0.35,
@@ -160,6 +161,7 @@ def _base_cv_data() -> dict[str, Any]:
                     "Planned and coordinated infrastructure projects.",
                     "Supervised sites and subcontractors.",
                     "Prepared schedules and budgets.",
+                    "Drove corrective actions from field quality findings.",
                 ],
             }
         ],

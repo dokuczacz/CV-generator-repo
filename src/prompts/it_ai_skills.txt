@@ -27,6 +27,8 @@ Canonicalization and normalization:
 - Normalize skill names to concise ATS-friendly canonical labels.
 - Merge synonyms/near-duplicates into one label (e.g., "Continuous Improvement" + "Kaizen mindset" -> "KAIZEN / Continuous Improvement").
 - Avoid redundant variants across or within sections.
+- Prefer recruiter-friendly wording: clear, business-readable labels over niche technical jargon when both are accurate.
+- Keep labels understandable for non-technical hiring stakeholders.
 
 Prioritization logic:
 - Rank candidate skills by: (1) evidence strength, (2) recency, (3) relevance to job context.
@@ -49,7 +51,7 @@ Language:
 
 Hard rules:
 - Keep JSON keys exactly: it_ai_skills, technical_operational_skills, notes.
-- Max 5-8 skills per section.
+- Max 6 skills per section.
 - No duplication across sections.
 - Include only CV-evidenced capabilities; never invent.
 - Skills should be short, canonical ATS labels.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sanity test: Run skills proposal with increased output tokens and verify it returns 5-8 items per section.
+Sanity test: Run skills proposal with increased output tokens and verify it returns up to 6 items per section.
 """
 
 import json
@@ -97,23 +97,23 @@ Sumitomo Process Improvement: international shop floor standardisation and KAIZE
     tech_op_count = len(proposal.technical_operational_skills)
     
     print(f"\n✅ Validation:")
-    if 5 <= it_ai_count <= 8:
-        print(f"   ✓ IT & AI Skills: {it_ai_count} items (target: 5-8)")
+    if 1 <= it_ai_count <= 6:
+        print(f"   ✓ IT & AI Skills: {it_ai_count} items (target: 1-6)")
     else:
-        print(f"   ✗ IT & AI Skills: {it_ai_count} items (expected 5-8)")
-    
-    if 5 <= tech_op_count <= 8:
-        print(f"   ✓ Technical & Operational Skills: {tech_op_count} items (target: 5-8)")
+        print(f"   ✗ IT & AI Skills: {it_ai_count} items (expected 1-6)")
+
+    if 1 <= tech_op_count <= 6:
+        print(f"   ✓ Technical & Operational Skills: {tech_op_count} items (target: 1-6)")
     else:
-        print(f"   ✗ Technical & Operational Skills: {tech_op_count} items (expected 5-8)")
-    
-    success = (5 <= it_ai_count <= 8) and (5 <= tech_op_count <= 8)
+        print(f"   ✗ Technical & Operational Skills: {tech_op_count} items (expected 1-6)")
+
+    success = (1 <= it_ai_count <= 6) and (1 <= tech_op_count <= 6)
     
     print("\n" + "=" * 80)
     if success:
-        print("✅ SANITY TEST PASSED: Skills proposal returns 5-8 items per section")
+        print("✅ SANITY TEST PASSED: Skills proposal returns up to 6 items per section")
     else:
-        print("❌ SANITY TEST FAILED: Skills proposal does not meet 5-8 target")
+        print("❌ SANITY TEST FAILED: Skills proposal does not meet 1-6 target")
     print("=" * 80)
     
     return success

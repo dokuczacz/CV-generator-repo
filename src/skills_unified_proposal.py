@@ -20,11 +20,11 @@ class SkillsUnifiedProposal(BaseModel):
 
     it_ai_skills: List[str] = Field(
         ...,
-        description="IT & AI skills: digital tools, automation, AI usage, data-driven systems, reporting (5-8 items)",
+        description="IT & AI skills: digital tools, automation, AI usage, data-driven systems, reporting (up to 6 items, recruiter-friendly labels)",
     )
     technical_operational_skills: List[str] = Field(
         ...,
-        description="Technical & Operational skills: quality systems, process improvement, project delivery, production, construction, operational governance (5-8 items)",
+        description="Technical & Operational skills: quality systems, process improvement, project delivery, production, construction, operational governance (up to 6 items, recruiter-friendly labels)",
     )
     notes: str = Field(
         "",

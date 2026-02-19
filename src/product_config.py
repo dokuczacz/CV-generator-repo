@@ -51,7 +51,7 @@ from typing import Any
 WORK_EXPERIENCE_HARD_LIMIT_CHARS: int = 200
 
 # Maximum bullets per work role (cannot be overridden).
-MAX_BULLETS_PER_ROLE: int = 4
+MAX_BULLETS_PER_ROLE: int = 5
 
 # Minimum bullets per work role (don't drop below this when compressing).
 MIN_BULLETS_PER_ROLE: int = 1

@@ -25,9 +25,9 @@ class WorkExperienceRoleProposal(BaseModel):
     location: str = Field("", description="City, Country (optional)")
     bullets: List[str] = Field(
         ...,
-        min_items=3,
-        max_items=4,
-        description="Achievement bullets for this role (3-4 bullets)",
+        min_items=4,
+        max_items=5,
+        description="Achievement bullets for this role (4-5 bullets)",
     )
 
     @validator("bullets", pre=True)
@@ -43,7 +43,7 @@ class WorkExperienceRoleProposal(BaseModel):
 class WorkExperienceBulletsProposal(BaseModel):
     """Proposed work experience section with role-by-role structure."""
 
-    roles: List[WorkExperienceRoleProposal] = Field(..., description="Proposed work experience roles (3-4 most recent/relevant)")
+    roles: List[WorkExperienceRoleProposal] = Field(..., description="Proposed work experience roles (most recent/relevant)")
     notes: str = Field("", description="Short explanation of what changed (no sensitive data)")
 
 

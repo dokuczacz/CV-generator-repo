@@ -95,7 +95,8 @@ _SCHEMA_REPAIR_HINTS_BY_STAGE: dict[str, str] = {
     "it_ai_skills": (
         "Return ONLY valid JSON (no markdown/code fences, no prose). "
         "Do not include literal newline characters inside JSON strings; use spaces instead. "
-        "Ensure both it_ai_skills and technical_operational_skills are arrays of strings (5-8 items each). "
+        "Ensure both it_ai_skills and technical_operational_skills are arrays of strings (max 6 items each). "
+        "Use short recruiter-friendly labels that are easy for non-technical reviewers to scan. "
         "Do not duplicate skills between the two sections."
     ),
     "bulk_translation": (
@@ -403,7 +404,7 @@ def _normalize_work_role_from_proposal(raw: dict) -> dict:
         return {"employer": "", "title": "", "date_range": "", "location": "", "bullets": []}
 
     bullets_in = raw.get("bullets", []) if isinstance(raw.get("bullets"), list) else []
-    bullets = [_clean_one_line(str(b)) for b in bullets_in if _clean_one_line(str(b))][:4]
+    bullets = [_clean_one_line(str(b)) for b in bullets_in if _clean_one_line(str(b))][:5]
     employer = _clean_one_line(str(raw.get("company") or raw.get("employer") or ""))
     title = _clean_one_line(str(raw.get("title") or ""))
 
@@ -916,7 +917,7 @@ def _apply_work_experience_proposal_with_locks(*, cv_data: dict, proposal_roles:
 
         bullets = cand.get("bullets") if isinstance(cand.get("bullets"), list) else []
         bullets_clean = [_clean_one_line(b) for b in bullets if _clean_one_line(b)]
-        bullets_clean = bullets_clean[:4]
+        bullets_clean = bullets_clean[:5]
 
         # Never truncate bullets in backend. If the proposal violates hard limits,
         # skip applying this role to avoid silently corrupting content.
@@ -6774,7 +6775,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                         f"[TAILORING_FEEDBACK]\n"
                                         f"MCP_VALIDATION_PAYLOAD: {payload_json} "
                                         f"Reduce ONLY flagged bullets by >= 30 chars and to <= {hard_limit} chars, "
-                                        f"without changing tone/meaning/logic. Keep 3-4 bullets per role. Do NOT invent facts.\n"
+                                        f"without changing tone/meaning/logic. Keep 4-5 bullets per role. Do NOT invent facts.\n"
                                         f"E0_POLICY_ERRORS: {'; '.join(validation_errors[:6])}\n\n"
                                         f"[CURRENT_WORK_EXPERIENCE]\n{bad_roles_text}\n"
                                     )
@@ -7888,7 +7889,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                 f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
                                 f"[TAILORING_FEEDBACK]\n"
                                 f"FIX_VALIDATION: Shorten bullets to fit hard limit (<= {hard_limit} chars). "
-                                f"Rewrite ONLY affected bullets. Keep 3-4 bullets per role. Do NOT invent facts.\n"
+                                f"Rewrite ONLY affected bullets. Keep 4-5 bullets per role. Do NOT invent facts.\n"
                                 f"E0_POLICY_ERRORS: {'; '.join(validation_errors[:6])}\n\n"
                                 f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                             )
@@ -8063,7 +8064,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             f"[TAILORING_FEEDBACK]\n"
                             f"MCP_VALIDATION_PAYLOAD: {payload_json} "
                             f"Reduce ONLY flagged bullets by >= 30 chars and to <= {hard_limit} chars, "
-                            f"without changing tone/meaning/logic. Keep 3-4 bullets per role. Do NOT invent facts.\n\n"
+                            f"without changing tone/meaning/logic. Keep 4-5 bullets per role. Do NOT invent facts.\n\n"
                             f"[CURRENT_WORK_EXPERIENCE]\n{bad_roles_text}\n"
                         )
 

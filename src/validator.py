@@ -76,7 +76,7 @@ CV_LIMITS = {
                 "reason": "Job title/position"
             },
             "bullets": {
-                "max_count": 4,
+                "max_count": 5,
                 "max_chars_per_bullet": 200,  # Aligned with AI proposal schema
                 "soft_limit": 100,  # Guide AI toward concise bullets
                 "height_mm_per_bullet": 4.5,
@@ -417,7 +417,7 @@ class CVValidator:
                         limit="non-empty list",
                         excess=None,
                         message=f"Work experience entry {i} must contain at least one bullet",
-                        suggestion="Add 1–4 concise achievement bullets for this role.",
+                        suggestion="Add 1-5 concise achievement bullets for this role.",
                     )
                 )
             

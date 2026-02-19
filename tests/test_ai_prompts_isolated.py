@@ -243,7 +243,7 @@ class TestAIPromptsIsolated:
             "[INSTRUCTIONS]\n"
             "- Translate CURRENT_WORK_EXPERIENCE to OUTPUT_LANGUAGE.\n"
             "- Preserve meaning and factual content (no inventions).\n"
-            "- Keep role structure; keep bullets concise; max 4 bullets per role.\n"
+            "- Keep role structure; keep bullets concise; target 4-5 bullets per role.\n"
             "- Do not include any German words in the output when OUTPUT_LANGUAGE is English.\n\n"
             f"[CURRENT_WORK_EXPERIENCE]\n{RAW_WORK_EXPERIENCE_DE}\n"
         )

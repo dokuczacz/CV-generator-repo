@@ -102,7 +102,7 @@ def diagnose_session_size(session_id: str) -> None:
         sp_size = len(json.dumps(metadata["skills_proposal_block"])) * 2
         print(f"  • skills_proposal_block: {format_size(sp_size)}")
         print(f"    → Currently: {metadata['skills_proposal_block']}")
-        print(f"    → ✅ Verify it actually contains 5-8 items per section")
+        print(f"    → ✅ Verify it contains concise ranked items (target up to 6 per section)")
         if isinstance(metadata['skills_proposal_block'], dict):
             it_ai = metadata['skills_proposal_block'].get('it_ai_skills', [])
             tech_op = metadata['skills_proposal_block'].get('technical_operational_skills', [])

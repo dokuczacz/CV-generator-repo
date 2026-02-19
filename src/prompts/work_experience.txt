@@ -23,7 +23,7 @@ Rules:
 - Include a concrete metric or outcome (time saved, quality gain, revenue impact, scale).
 - Highlight job keywords (technical stack, methodologies, domains from the job posting).
 - Remove generic phrases ("responsible for", "helped with", "in charge of").
-- Max 4 bullets per role; pick the strongest 3-4 that align with the job posting.
+- Use 4-5 bullets per role; pick the strongest role-aligned bullets based on job relevance.
 - Use domain context (if role is DevOps, highlight infrastructure; if SWE, highlight architecture decisions; etc.).
 - Keep all JSON string values single-line (no literal newlines).
 
@@ -35,7 +35,7 @@ Output JSON schema (must match exactly):
       "company": "string",
       "date_range": "string (e.g., '2020-01 – 2025-10')",
       "location": "string (optional)",
-      "bullets": ["bullet1", "bullet2", "bullet3", "bullet4"]
+      "bullets": ["bullet1", "bullet2", "bullet3", "bullet4", "bullet5"]
     }
   ],
   "notes": "string (short, optional)"
