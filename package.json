@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "CV generator with Playwright visual regression testing",
   "scripts": {
+    "run:local": "pwsh -NoProfile -File scripts/run-local.ps1",
     "pretest": "python tests/smoke_prompt_builder.py && python tests/smoke_json_repair.py && python tests/generate_test_artifacts.py",
     "test": "playwright test",
     "test:openai": "pwsh -NoProfile -File scripts/test-openai-e2e.ps1 -Workers 1",

@@ -6,6 +6,7 @@ Usage:
     python scripts/diagnose_session.py <session_id>
     python scripts/diagnose_session.py --latest
     python scripts/diagnose_session.py --list
+    python scripts/diagnose_session.py --session-id <session_id>  # Extract scenario pack
 """
 
 import json
@@ -216,6 +217,57 @@ def list_sessions() -> None:
         print(f"Error listing sessions: {e}")
 
 
+def extract_scenario(session_id: str, output_dir: str = "docs/scenarios") -> None:
+    """Extract session data and create a frozen scenario pack."""
+    store = CVSessionStore()
+    session = store.get_session(session_id)
+
+    if not session:
+        print(f"Session not found: {session_id}")
+        return
+
+    # Create output directory if needed
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Build scenario pack
+    scenario = {
+        "scenario_id": session_id,
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+        "cv_data": session.get("cv_data") or {},
+        "metadata": session.get("metadata") or {},
+        "job_posting": session.get("metadata", {}).get("job_posting") or "",
+        "artifacts": {
+            "photo_blob": session.get("metadata", {}).get("photo_blob"),
+            "pdf_refs": session.get("metadata", {}).get("pdf_refs") or [],
+            "skills_json_path": None,  # To be filled if available
+        },
+        "template_version": "CV_template_2pages_2025",
+        "dod_commands": [
+            f"python scripts/diagnose_session.py {session_id}",
+            "npm run pretest",
+            "pytest tests/test_*.py -v",
+            "npm run test"
+        ]
+    }
+
+    # Save scenario pack
+    scenario_file = output_path / f"scenario_{session_id[:8]}.json"
+    with open(scenario_file, "w", encoding="utf-8") as f:
+        json.dump(scenario, f, indent=2, ensure_ascii=False)
+
+    print(f"\n{'='*60}")
+    print(f"SCENARIO PACK EXTRACTED")
+    print(f"{'='*60}")
+    print(f"Output: {scenario_file}")
+    print(f"Session ID: {session_id}")
+    print(f"CV Data Fields: {len(scenario['cv_data'])}")
+    print(f"Job Posting: {len(scenario['job_posting'])} chars")
+    print(f"Photo Blob: {'Yes' if scenario['artifacts']['photo_blob'] else 'No'}")
+    print(f"{'='*60}\n")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -223,7 +275,19 @@ def main():
 
     arg = sys.argv[1]
 
-    if arg == "--list":
+    # Check for --session-id flag
+    session_id = None
+    extract_mode = False
+    
+    if "--session-id" in sys.argv:
+        idx = sys.argv.index("--session-id")
+        if idx + 1 < len(sys.argv):
+            session_id = sys.argv[idx + 1]
+            extract_mode = True
+
+    if extract_mode and session_id:
+        extract_scenario(session_id)
+    elif arg == "--list":
         list_sessions()
     elif arg == "--latest":
         # Find the most recent session

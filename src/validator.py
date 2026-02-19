@@ -77,9 +77,10 @@ CV_LIMITS = {
             },
             "bullets": {
                 "max_count": 4,
-                "max_chars_per_bullet": 100,
+                "max_chars_per_bullet": 200,  # Aligned with AI proposal schema
+                "soft_limit": 100,  # Guide AI toward concise bullets
                 "height_mm_per_bullet": 4.5,
-                "reason": "Achievement bullets"
+                "reason": "Achievement bullets (200 hard, 100 soft recommended)"
             }
         }
     },
@@ -426,30 +427,31 @@ class CVValidator:
                     bullets = entry.get(field, [])
                     max_bullets = field_limits["max_count"]
                     max_chars = field_limits["max_chars_per_bullet"]
+                    soft_limit = field_limits.get("soft_limit", max_chars)  # Use soft_limit if defined
                     
                     if len(bullets) > max_bullets:
                         warnings.append(
                             f"work_experience[{i}].bullets: {len(bullets)} bullets (recommended max {max_bullets})"
                         )
 
-                    soft = _soft_limit(max_chars)
-                    hard = _hard_limit(max_chars)
                     for j, bullet in enumerate(bullets):
                         blen = len(bullet)
-                        if blen > hard:
+                        # Hard error only for extreme outliers (>200 chars)
+                        if blen > max_chars:
                             errors.append(
                                 ValidationError(
                                     field=f"work_experience[{i}].bullets[{j}]",
                                     current_value=blen,
-                                    limit=hard,
-                                    excess=blen - hard,
-                                    message=f"Entry {i}, bullet {j}: {blen} chars exceeds hard limit {hard}",
-                                    suggestion=f"Shorten: '{bullet[:40]}...' by {blen - hard} chars",
+                                    limit=max_chars,
+                                    excess=blen - max_chars,
+                                    message=f"Entry {i}, bullet {j}: {blen} chars exceeds {max_chars}-char hard limit",
+                                    suggestion=f"Reduce by {blen - max_chars} characters",
                                 )
                             )
-                        elif blen > soft:
+                        # Soft warning for verbose bullets (100-200 chars)
+                        elif blen > soft_limit:
                             warnings.append(
-                                f"work_experience[{i}].bullets[{j}]: {blen} chars (soft cap {soft}, hard cap {hard})"
+                                f"work_experience[{i}].bullets[{j}]: {blen} chars (verbose but OK; recommended <{soft_limit} for conciseness)"
                             )
                 else:
                     value = entry.get(field, "")

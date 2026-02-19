@@ -177,6 +177,26 @@ Live LLM tests must be opt-in and isolated:
 - Keep the suite serial and low-worker.
 - Treat these tests as **canaries**, not default CI blockers.
 
+## Optional overlay parity (`omniflow-test-operator`)
+
+When the optional test overlay is used, keep validation stage-aware:
+
+1. **Planning/no code changes:** define acceptance signal(s), do not run tests yet.
+2. **Local iteration after change:** run one focused test/repro nearest to the change.
+3. **Milestone/review:** run focused test(s) + smallest smoke subset.
+4. **CI failure triage:** run failing subset first; avoid whole-suite by default.
+
+For backend/orchestration checks, include a JSON contract gate where applicable:
+- Responses are JSON (`Content-Type: application/json`)
+- Invalid JSON is rejected with JSON error payload
+- Schema-invalid JSON is rejected deterministically
+- `schema_version` is present where contract requires it
+
+Prefer concise output shape in reports:
+- test target
+- exact command(s)
+- one-line success signal
+
 - **One test per scenario:** Don't test multiple things in one test.
 - **Clear assertions:** Use specific assertions, not just `expect(something).toBeTruthy()`.
 - **Wait for elements:** Use `page.waitForSelector()`, not arbitrary `page.waitForTimeout()`.

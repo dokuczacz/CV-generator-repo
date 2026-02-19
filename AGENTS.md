@@ -14,6 +14,21 @@ If you need the full runbooks/templates, open:
 - Prefer **deterministic micro-checks** over repo-wide scans.
 - No secrets inline; use env vars / local settings templates.
 
+## Instruction precedence
+- **Primary authority:** repository Copilot instructions (`AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/*.md`) govern implementation behavior.
+- **Codex overlay policy:** Codex-style skills are optional overlays only for:
+	- `omniflow-execplan`
+	- `omniflow-llm-orchestration`
+	- `omniflow-test-operator`
+- If any external skill guidance conflicts with repo instructions, **repo instructions win**.
+
+## Overlay allowlist and deprecations
+- Active optional overlays: `execplan`, `llm-orchestration`, `test-operator`.
+- Other Codex operational skills are reflected in repo docs as either:
+	- core built-in behavior (e.g., Unknown Sea, stall escalation, efficiency guard), or
+	- deprecated overlays rerouted to core repo instructions.
+- Mapping source of truth: `docs/agent_skills_reference.md`.
+
 ## Planning gate (stop-the-line)
 - Before executing non-trivial work, follow: `.github/instructions/planning-gate.instructions.md`
 - If the gate fails (no stable scenario pack / no DoD / deterministic constraints missing fallback), stop and use the stall-escalation pattern to request the missing artifacts/decisions.
@@ -43,8 +58,10 @@ If blocked or correctness depends on missing inputs, stop and output only:
 ## Intent triggers (router)
 - `status/progress/counts` → strict progress table (verified numbers + Source)
 - `plan/execplan` or >3 steps → write `tmp/<task>_execplan.md` and link it
-- `run/cmd/background` → copy/paste PowerShell commands (non-blocking)
-- `git/commit/push/pr` → safe “inspect → stage explicitly → commit → push” commands- `test/verify/CI/pytest` → route test scope + commands via test-operator skill (see `docs/skills/test-operator.md`); avoid ad-hoc test plans- `done/final/DoD` → 3-line step endcap (WU target / Done now / Next)
+- `orchestration/prompt/capsule/context pack/phase/stage/intention/payload matrix` → apply `omniflow-llm-orchestration`
+- `test/verify/CI/pytest` → route test scope + commands via `omniflow-test-operator`; avoid ad-hoc test plans
+- `run/cmd/background` and `git/commit/push/pr` → use core operator guidance in `docs/agent_skills_reference.md` (not Codex overlays)
+- `done/final/DoD` → 3-line step endcap (WU target / Done now / Next)
 
 ## Efficiency guard
 Ask before anything likely >2m (broad scans, long test suites, destructive ops) when a cheaper L0/L1 check exists.

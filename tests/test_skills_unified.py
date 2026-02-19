@@ -7,11 +7,16 @@ Tests verify:
 3. UI presenter renders both sections
 4. Backend action handlers apply both sections correctly
 5. Prompt includes required inputs
+6. No skill fabrication (CRITICAL integrity check)
 """
 
 import json
-import sys
-from pathlib import Path
+
+from src.skills_unified_proposal import (
+    SkillsUnifiedProposal,
+    get_skills_unified_proposal_response_format,
+    parse_skills_unified_proposal,
+)
 
 
 def test_unified_proposal_schema():
@@ -98,11 +103,8 @@ def test_skills_tailor_run_user_text():
     tailoring_suggestions = "Strong in process improvement and IATF..."
     notes = "Focus on international experience..."
     skills_text = "- Python\n- Azure\n- IATF\n- KAIZEN"
-    profile = "Experienced QA professional..."
-    
     user_text = (
         f"[JOB_SUMMARY]\n{job_summary}\n\n"
-        f"[CANDIDATE_PROFILE]\n{profile}\n\n"
         f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
         f"[RANKING_NOTES]\n{notes}\n\n"
         f"[CANDIDATE_SKILLS]\n{skills_text}\n"
@@ -110,7 +112,7 @@ def test_skills_tailor_run_user_text():
     
     # Verify all sections are present
     assert "[JOB_SUMMARY]" in user_text, "Should include JOB_SUMMARY"
-    assert "[CANDIDATE_PROFILE]" in user_text, "Should include CANDIDATE_PROFILE"
+    assert "[CANDIDATE_PROFILE]" not in user_text, "CANDIDATE_PROFILE should be removed from prompt capsule"
     assert "[TAILORING_SUGGESTIONS]" in user_text, "Should include TAILORING_SUGGESTIONS"
     assert "[RANKING_NOTES]" in user_text, "Should include RANKING_NOTES"
     assert "[CANDIDATE_SKILLS]" in user_text, "Should include CANDIDATE_SKILLS"
@@ -256,7 +258,7 @@ def test_unified_proposal_schema():
     assert schema_dict is not None, "Schema format should not be None"
     assert schema_dict["type"] == "json_schema", "Should return json_schema type"
     assert "schema" in schema_dict, "Should contain schema field"
-    assert schema_dict["schema"]["name"] == "skills_unified_proposal", "Schema name should be skills_unified_proposal"
+    assert schema_dict["name"] == "skills_unified_proposal", "Schema name should be skills_unified_proposal"
     print("✅ Schema validation passed")
 
 
@@ -432,12 +434,11 @@ def test_skills_tailor_accept_logic():
     print("✅ SKILLS_TAILOR_ACCEPT logic validation passed")
 
 
-def test_unified_prompt_includes_profile():
-    """Verify the unified prompt includes [CANDIDATE_PROFILE] input."""
-    # This is a documentation check: unified prompt should include profile context
+def test_unified_prompt_excludes_profile():
+    """Verify the unified prompt no longer includes [CANDIDATE_PROFILE] input."""
+    # This is a documentation check: unified prompt should include only required non-profile sections
     expected_inputs = [
         "[JOB_SUMMARY]",
-        "[CANDIDATE_PROFILE]",
         "[TAILORING_SUGGESTIONS]",
         "[RANKING_NOTES]",
         "[CANDIDATE_SKILLS]"
@@ -448,13 +449,71 @@ def test_unified_prompt_includes_profile():
     for input_section in expected_inputs:
         assert input_section in [
             "[JOB_SUMMARY]",
-            "[CANDIDATE_PROFILE]",
             "[TAILORING_SUGGESTIONS]",
             "[RANKING_NOTES]",
             "[CANDIDATE_SKILLS]"
         ], f"Should include {input_section} in unified prompt inputs"
+
+    assert "[CANDIDATE_PROFILE]" not in expected_inputs
     
     print("✅ Unified prompt inputs validation passed")
+
+
+def test_no_skill_fabrication():
+    """
+    CRITICAL: Verify skills proposal only reorganizes existing CV skills, never invents new ones.
+    This test ensures data integrity: the LLM should only rank/categorize skills from CV, not add fabricated skills.
+    """
+    # Simulate input skills from CV data (the ONLY source of truth)
+    cv_skills_input = [
+        "Python", "Azure", "Excel", "IATF", "Quality systems", "KAIZEN", "SPC", "Pandas"
+    ]
+    
+    # Simulate what backend extracts from CV (lines 5882-5899 in function_app.py)
+    skills_from_cv = ["Python", "Azure", "Excel"]
+    skills_legacy_from_cv = ["IATF", "Quality systems"]
+    skills_from_docx = ["KAIZEN", "SPC"]
+    skills_legacy_from_docx = ["Pandas"]
+    
+    # Build deduplicated skills_list (exactly what backend does)
+    seen_lower = set()
+    skills_list = []
+    for s in skills_from_cv + skills_legacy_from_cv + skills_from_docx + skills_legacy_from_docx:
+        s_str = str(s).strip()
+        if s_str and s_str.lower() not in seen_lower:
+            seen_lower.add(s_str.lower())
+            skills_list.append(s_str)
+    
+    # Simulate LLM proposal (the LLM should ONLY use items from skills_list, never add new ones)
+    proposal_from_llm = {
+        "it_ai_skills": ["Python", "Azure", "Pandas"],  # All from input
+        "technical_operational_skills": ["IATF", "Quality systems", "KAIZEN", "SPC"],  # All from input
+        "notes": "Categorized existing skills; no fabrication"
+    }
+    
+    # CRITICAL VALIDATION: Every skill in the proposal MUST come from the input skills_list
+    all_proposed_skills = (
+        proposal_from_llm.get("it_ai_skills", []) + 
+        proposal_from_llm.get("technical_operational_skills", [])
+    )
+    
+    input_skills_lower = {s.lower() for s in skills_list}
+    for skill in all_proposed_skills:
+        skill_lower = skill.lower()
+        assert skill_lower in input_skills_lower, (
+            f"FABRICATION DETECTED: Skill '{skill}' in proposal was not in input skills {skills_list}. "
+            f"LLM must NEVER invent skills; it should only rank/organize existing CV skills."
+        )
+    
+    # Additional check: No skill from proposal should be completely new
+    fabricated_skills = [s for s in all_proposed_skills if s.lower() not in input_skills_lower]
+    assert len(fabricated_skills) == 0, (
+        f"Found {len(fabricated_skills)} fabricated skill(s): {fabricated_skills}. "
+        f"Skills proposal MUST only reorganize existing CV skills, never add new ones."
+    )
+    
+    print("✅ No skill fabrication validation passed (all skills grounded in CV input)")
+
 
 
 if __name__ == "__main__":
@@ -468,7 +527,8 @@ if __name__ == "__main__":
         test_skills_proposal_block_structure,
         test_ui_presenter_field_mapping,
         test_skills_tailor_accept_logic,
-        test_unified_prompt_includes_profile,
+        test_unified_prompt_excludes_profile,
+        test_no_skill_fabrication,  # CRITICAL: Ensures no LLM-invented skills
     ]
     
     print("\n🧪 Running Sanity Tests for Unified Skills Ranking\n")

@@ -133,6 +133,23 @@ https://platform.openai.com/assistants
 
 ## Development
 
+### Quick Start (Windows)
+
+**One-click launcher (recommended):**
+```bash
+# Double-click or run from terminal:
+run_local.cmd
+```
+
+This automatically:
+- Stops processes on ports 7071, 3000, 10000-10002
+- Starts Azurite (blob storage emulator)
+- Starts Next.js UI (http://localhost:3000)
+- Starts Azure Functions backend (http://localhost:7071)
+- Logs saved to `tmp/logs/`
+
+**Manual startup:**
+
 ### Start Frontend
 ```bash
 cd ui

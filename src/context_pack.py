@@ -46,7 +46,6 @@ def compute_cv_section_hashes(cv_data: Dict[str, Any]) -> Dict[str, str]:
         'languages',
         'it_ai_skills',
         'interests',
-        'profile',
         'further_experience'
     ]
     hashes = {}
@@ -159,7 +158,6 @@ def build_context_pack(
         "phone",
         "address_lines",
         "nationality",
-        "profile",
         "work_experience",
         "education",
         "languages",
@@ -474,7 +472,6 @@ def build_context_pack_v2_delta(
     pack['languages'] = _pack_section_delta('languages', normalized.get('languages'))
     pack['it_ai_skills'] = _pack_section_delta('it_ai_skills', normalized.get('it_ai_skills'))
     pack['interests'] = _pack_section_delta('interests', normalized.get('interests'))
-    pack['profile'] = _pack_section_delta('profile', normalized.get('profile'))
     pack['further_experience'] = _pack_section_delta('further_experience', normalized.get('further_experience'))
     
     # Contact: always send if changed (critical)
@@ -541,22 +538,18 @@ def _build_preparation_context(
             'note': 'Analyze deeply: extract explicit/implicit requirements, must-have vs nice-to-have, ambiguities, culture signals.'
         }
 
-    # CV structured data (for mapping)
-    context['cv_data'] = _extract_cv_structured_mini(cv_data) if pack_mode == "mini" else _extract_cv_structured_compact(cv_data)
+    # CV structured data (for mapping) - ALWAYS FULL (no sanitization)
+    context['cv_data'] = _extract_cv_structured_compact(cv_data)
 
     # Unconfirmed DOCX extraction snapshot (reference only).
     # Sessions now start empty; this helps the agent re-populate required fields quickly and explicitly.
     if isinstance(session_metadata, dict) and session_metadata.get("docx_prefill_unconfirmed"):
-        if pack_mode == "mini":
-            context["docx_prefill_summary"] = _summarize_docx_prefill(session_metadata.get("docx_prefill_unconfirmed"))
-        else:
-            context["docx_prefill_unconfirmed"] = session_metadata.get("docx_prefill_unconfirmed")
+        context["docx_prefill_unconfirmed"] = session_metadata.get("docx_prefill_unconfirmed")
 
     # Proposal history (from session metadata) - keep last 3 only
     if session_metadata and 'proposal_history' in session_metadata:
-        if pack_mode != "mini":
-            proposals = session_metadata['proposal_history']
-            context['proposal_history'] = _trim_proposal_history(proposals, max_turns=3)
+        proposals = session_metadata['proposal_history']
+        context['proposal_history'] = _trim_proposal_history(proposals, max_turns=3)
 
     return context
 
@@ -816,7 +809,7 @@ def _extract_cv_structured_compact(cv_data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract compact CV structure (omit empty sections)."""
     keep_keys = [
         'full_name', 'email', 'phone', 'address_lines',
-        'profile', 'work_experience', 'education',
+        'work_experience', 'education',
         'languages', 'it_ai_skills', 'interests'
     ]
 

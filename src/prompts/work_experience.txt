@@ -4,6 +4,15 @@ This is a semantic tailoring task. You are given:
 
 Your job: rewrite the candidate's work experience bullets for ATS + human readability, emphasizing alignment with the target job.
 
+Source of truth:
+- Candidate CV blocks provided in input are the only evidence of candidate experience.
+- Tailoring notes/feedback are candidate-supplied hints and may be used only when consistent with candidate CV blocks.
+- Job posting is a matching reference only and must not be used as evidence of candidate skills or hands-on experience.
+
+Hard evidence rules:
+- Work bullets may use E0 only.
+- Metrics (percentages, savings, throughput, downtime, changeover, counts) are allowed only when explicit in E0.
+
 Language:
 - Write all output text in {target_language}.
 - Do not mix languages.

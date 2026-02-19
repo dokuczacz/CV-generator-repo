@@ -4,6 +4,31 @@ This file exists to keep the always-loaded instructions (AGENTS.md, copilot-inst
 
 If you are using a skill system (e.g., `.codex/skills/*/SKILL.md`) these sections mirror that “thin router, thick skills” approach.
 
+## Policy status (Copilot-primary)
+
+- Source of truth for implementation behavior: repo Copilot instructions (`AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/*.md`).
+- Optional Codex overlays allowed in this repo: `omniflow-execplan`, `omniflow-llm-orchestration`, `omniflow-test-operator`.
+- All other Codex operational instructions are reflected below as core behavior or deprecated overlays rerouted to core docs.
+
+## Codex operational mapping matrix
+
+| Codex operational instruction | Status in this repo | Canonical location |
+|---|---|---|
+| `omniflow-execplan` | Active optional overlay | `AGENTS.md` (Intent triggers), `.github/instructions/planning-gate.instructions.md` |
+| `omniflow-llm-orchestration` | Active optional overlay | `AGENTS.md` (Intent triggers), `.github/instructions/llm-orchestration.instructions.md` |
+| `omniflow-test-operator` | Active optional overlay | `AGENTS.md` (Intent triggers), `.github/instructions/tests.instructions.md` |
+| `omniflow-stall-escalation` | Core built-in behavior (not optional overlay) | `AGENTS.md` (Safety gates), `.github/instructions/planning-gate.instructions.md` |
+| `omniflow-progress-table-strict` | Core reporting convention | `AGENTS.md` (Intent triggers), this file (`PROGRESS_TABLE_STRICT`) |
+| `omniflow-step-endcap` | Core reporting convention | `AGENTS.md` (Intent triggers), this file (`STEP_ENDCAP`) |
+| `omniflow-operator-commands` | Deprecated overlay, rerouted to core operator guidance | `AGENTS.md` (Intent triggers), this file (`OPERATOR_COMMANDS`) |
+| `omniflow-github-operator` | Deprecated overlay, rerouted to core operator guidance | `AGENTS.md` (Intent triggers), this file (`GIT_HYGIENE`) |
+| `omniflow-data-operator` | Deprecated overlay, rerouted to core operator guidance | this file (`DATA_OPERATOR`) |
+| `omniflow-azure-blob-ops` | Deprecated overlay, rerouted to core operator guidance | this file (`AZURE_BLOB_OPS`) |
+| `omniflow-self-learner-mini` | Deprecated overlay, rerouted to concise core explanation style | `AGENTS.md` (Defaults), this file (`CONTEXT_MODE`) |
+| Unknown Sea protocol | Core built-in behavior | `AGENTS.md` (Safety gates), this file (`UNKNOWN_SEA_PROTOCOL`) |
+| Efficiency guard | Core built-in behavior | `AGENTS.md` (Efficiency guard), this file (`EFFICIENCY_GUARD`) |
+| Context mode (`hot_only`) | Core built-in behavior | `AGENTS.md` (Defaults), this file (`CONTEXT_MODE`) |
+
 ---
 
 ## STALL_ESCALATION

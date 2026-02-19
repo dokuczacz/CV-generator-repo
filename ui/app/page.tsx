@@ -1,56 +1,16 @@
 'use client';
 
+import type { HTMLAttributes, InputHTMLAttributes } from 'react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { downloadPDF } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  pdfBase64?: string;
-}
-
-interface UIActionButton {
-  id: string;
-  label: string;
-  style?: 'primary' | 'secondary' | 'tertiary';
-}
-
-interface UIActionField {
-  key: string;
-  label: string;
-  value: string;
-  type?: 'text' | 'textarea';
-  editable?: boolean;
-  placeholder?: string;
-}
-
-interface UIAction {
-  kind: string;
-  stage?: string;
-  title?: string;
-  text?: string;
-  actions?: UIActionButton[];
-  fields?: UIActionField[];
-  disable_free_text?: boolean;
-}
-
-type StageUpdate = {
-  step: string;
-  ok?: boolean;
-  mode?: string;
-  error?: string;
-  [key: string]: any;
-};
-
-type CVSessionPreview = {
-  cv_data: any;
-  metadata: any;
-  readiness: any;
-};
+import { UploadStartSection } from './cv/sections/UploadStartSection';
+import { WizardStageSection } from './cv/sections/WizardStageSection';
+import { CvPreviewSection } from './cv/sections/CvPreviewSection';
+import { OpsSection } from './cv/sections/OpsSection';
+import { useProcessCvClient } from './cv/hooks/useProcessCvClient';
+import type { CVSessionPreview, Message, StageUpdate, StepperItem, UIAction, WizardStep } from './cv/types';
 
 const SESSION_ID_KEY = 'cvgen:session_id';
 const JOB_URL_KEY = 'cvgen:job_posting_url';
@@ -65,6 +25,7 @@ const INITIAL_ASSISTANT_MESSAGE: Message = {
 };
 
 export default function CVGenerator() {
+  const { postProcessCv } = useProcessCvClient();
   const [messages, setMessages] = useState<Message[]>([INITIAL_ASSISTANT_MESSAGE]);
   const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -74,8 +35,7 @@ export default function CVGenerator() {
   const [jobPostingText, setJobPostingText] = useState<string | null>(null);
   const [fastPathProfile, setFastPathProfile] = useState(true);
   const [uiAction, setUiAction] = useState<UIAction | null>(null);
-  const [showSessionDialog, setShowSessionDialog] = useState(false);
-  const [pendingSession, setPendingSession] = useState<{ id: string; timestamp: string } | null>(null);
+  const [resumeFailed, setResumeFailed] = useState<string | null>(null);
   const [latestPdfBase64, setLatestPdfBase64] = useState<string | null>(null);
   const [latestPdfFilename, setLatestPdfFilename] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
@@ -100,6 +60,7 @@ export default function CVGenerator() {
     setStageUpdates([]);
     setCvPreview(null);
     setCvPreviewError(null);
+    setResumeFailed(null);
     try {
       window.localStorage.removeItem(SESSION_ID_KEY);
       window.localStorage.removeItem(JOB_URL_KEY);
@@ -110,28 +71,86 @@ export default function CVGenerator() {
     }
   };
 
+  const resumeStoredSession = useCallback(
+    async (storedSessionId: string, opts?: { silent?: boolean }) => {
+      const silent = !!opts?.silent;
+      try {
+        setIsLoading(true);
+        setResumeFailed(null);
+
+        const response = await postProcessCv({
+          message: 'continue',
+          session_id: storedSessionId,
+          job_posting_url: jobPostingUrl || '',
+          job_posting_text: jobPostingText || '',
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status} - ${response.text.substring(0, 200)}`);
+        }
+
+        const result = response.json;
+        if (Array.isArray(result.stage_updates)) {
+          setStageUpdates(result.stage_updates as StageUpdate[]);
+        }
+        if (typeof result?.trace_id === 'string' && result.trace_id.trim()) {
+          setLastTraceId(result.trace_id);
+        }
+        if (typeof result?.stage === 'string' && result.stage.trim()) {
+          setLastStage(result.stage);
+        }
+        if (result?.ui_action) {
+          setUiAction(result.ui_action as UIAction);
+        }
+        if (result?.session_id && typeof result.session_id === 'string') {
+          setSessionId(result.session_id);
+        }
+
+        if (!silent) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'assistant', content: result?.response || '✅ Wznowiono poprzednią sesję.' },
+          ]);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setResumeFailed(errorMessage);
+        clearLocalSession();
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: `⚠️ Nie udało się wznowić sesji: ${errorMessage}` },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [jobPostingText, jobPostingUrl, postProcessCv]
+  );
+
   useEffect(() => {
     try {
       const storedSessionId = window.localStorage.getItem(SESSION_ID_KEY);
-      const storedTimestamp = window.localStorage.getItem(SESSION_TIMESTAMP_KEY);
       const storedFastProfile = window.localStorage.getItem(FAST_PROFILE_KEY);
 
       if (storedSessionId) {
-        // Found a previous session - ask user if they want to continue or start fresh
-        setPendingSession({
-          id: storedSessionId,
-          timestamp: storedTimestamp || 'unknown',
-        });
-        setShowSessionDialog(true);
+        setSessionId(storedSessionId);
+        try {
+          const jobUrl = window.localStorage.getItem(JOB_URL_KEY);
+          if (jobUrl) setJobPostingUrl(jobUrl);
+          const jobText = window.localStorage.getItem(JOB_TEXT_KEY);
+          if (jobText) setJobPostingText(jobText);
+        } catch {
+          // ignore
+        }
+        void resumeStoredSession(storedSessionId, { silent: true });
       }
       if (storedFastProfile === '0' || storedFastProfile === '1') {
         setFastPathProfile(storedFastProfile === '1');
       }
-      // Job URL/text are only loaded if user chooses to continue session
     } catch {
       // ignore
     }
-  }, []);
+  }, [resumeStoredSession]);
 
   const loadCvPreview = useCallback(async () => {
     if (!sessionId) return;
@@ -195,36 +214,6 @@ export default function CVGenerator() {
     if (!sessionId) return;
     loadCvPreview();
   }, [sessionId, lastStage, loadCvPreview]);
-
-  const handleContinueSession = () => {
-    if (pendingSession) {
-      setSessionId(pendingSession.id);
-      try {
-        const jobUrl = window.localStorage.getItem(JOB_URL_KEY);
-        if (jobUrl) setJobPostingUrl(jobUrl);
-        const jobText = window.localStorage.getItem(JOB_TEXT_KEY);
-        if (jobText) setJobPostingText(jobText);
-      } catch {
-        // ignore
-      }
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `✅ Kontynuuję poprzednią sesję. Możesz kontynuować edycję CV lub wrzuć nowy plik, żeby zacząć od nowa.`,
-        },
-      ]);
-    }
-    setShowSessionDialog(false);
-    setPendingSession(null);
-  };
-
-  const handleStartFresh = () => {
-    // Clear all stored session data
-    clearLocalSession();
-    setShowSessionDialog(false);
-    setPendingSession(null);
-  };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -309,18 +298,12 @@ export default function CVGenerator() {
         user_action: actionPayload ? { id: actionId, payload: actionPayload } : { id: actionId },
       };
 
-      const response = await fetch('/api/process-cv', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      const text = await response.text();
+      const response = await postProcessCv(requestBody);
       if (!response.ok) {
         if (response.status === 409) {
           let errJson: any = null;
           try {
-            errJson = JSON.parse(text || '{}');
+            errJson = response.json;
           } catch {
             // ignore
           }
@@ -334,10 +317,10 @@ export default function CVGenerator() {
           ]);
           return;
         }
-        throw new Error(`Server error: ${response.status} - ${text.substring(0, 200)}`);
+        throw new Error(`Server error: ${response.status} - ${response.text.substring(0, 200)}`);
       }
 
-      const result = JSON.parse(text || '{}');
+      const result = response.json;
       if (Array.isArray(result.stage_updates)) {
         setStageUpdates(result.stage_updates as StageUpdate[]);
       } else {
@@ -394,6 +377,11 @@ export default function CVGenerator() {
       }
 
       if (result.success) {
+        if (actionId === 'NEW_VERSION_RESET') {
+          setLatestPdfBase64(null);
+          setLatestPdfFilename(null);
+        }
+
         const assistantMsg: Message = {
           role: 'assistant',
           content:
@@ -431,6 +419,7 @@ export default function CVGenerator() {
           'CONTACT_CONFIRM_LOCK',
           'EDU_CONFIRM_LOCK',
           'EDUCATION_CONFIRM_LOCK',
+          'NEW_VERSION_RESET',
         ]);
         if (actionId && (refreshActions.has(actionId) || actionId.endsWith('_ACCEPT'))) {
           void loadCvPreview();
@@ -500,25 +489,20 @@ export default function CVGenerator() {
           throw new Error('Nie udało się odczytać pliku (base64). Spróbuj ponownie.');
         }
 
-        const response = await fetch('/api/process-cv', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: '',
-            docx_base64,
-            session_id: '',
-            job_posting_url: jobPostingUrl || '',
-            job_posting_text: jobPostingText || '',
-            client_context: {
-              fast_path_profile: fastPathProfile,
-            },
-          }),
+        const response = await postProcessCv({
+          message: '',
+          docx_base64,
+          session_id: '',
+          job_posting_url: jobPostingUrl || '',
+          job_posting_text: jobPostingText || '',
+          client_context: {
+            fast_path_profile: fastPathProfile,
+          },
         });
 
-        const text = await response.text();
-        if (!response.ok) throw new Error(`Server error: ${response.status} - ${text.substring(0, 200)}`);
+        if (!response.ok) throw new Error(`Server error: ${response.status} - ${response.text.substring(0, 200)}`);
 
-        const result = JSON.parse(text || '{}');
+        const result = response.json;
         if (Array.isArray(result.stage_updates)) setStageUpdates(result.stage_updates as StageUpdate[]);
         else setStageUpdates([]);
 
@@ -550,7 +534,7 @@ export default function CVGenerator() {
         setIsLoading(false);
       }
     },
-    [isLoading, sessionId, jobPostingUrl, jobPostingText, fastPathProfile]
+    [isLoading, sessionId, jobPostingUrl, jobPostingText, fastPathProfile, postProcessCv]
   );
 
   useEffect(() => {
@@ -572,23 +556,6 @@ export default function CVGenerator() {
       setFormDraft(next);
     }
   }, [uiAction?.kind, uiAction?.fields]);
-
-  // Format timestamp for display
-  const formatSessionTime = (isoString: string) => {
-    if (isoString === 'unknown') return 'nieznany czas';
-    try {
-      const date = new Date(isoString);
-      return date.toLocaleString('pl-PL', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return 'nieznany czas';
-    }
-  };
 
   const wizardStep = (() => {
     const title = String(uiAction?.title || '');
@@ -658,731 +625,140 @@ export default function CVGenerator() {
     return map[key] || key;
   };
 
+  const dropzoneRootProps = getRootProps() as HTMLAttributes<HTMLDivElement>;
+  const dropzoneInputProps = getInputProps() as InputHTMLAttributes<HTMLInputElement>;
+  const hasGeneratedPdf = !!(cvPreview?.metadata as Record<string, unknown> | undefined)?.pdf_generated;
+
+  const handleHardNewSession = () => {
+    clearLocalSession();
+    setCvFile(null);
+    setMessages([INITIAL_ASSISTANT_MESSAGE]);
+    setExpandedMessages({});
+  };
+
+  const handleNewVersion = () => {
+    void handleSendUserAction('NEW_VERSION_RESET');
+  };
+
+  const handleFastPathChange = (value: boolean) => {
+    setFastPathProfile(value);
+    try {
+      window.localStorage.setItem(FAST_PROFILE_KEY, value ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleJobPostingTextChange = (value: string) => {
+    setJobPostingText(value);
+  };
+
+  const handleCopyCvJson = () => {
+    void copyText(JSON.stringify({ cv_data: cvPreview?.cv_data, readiness: cvPreview?.readiness, metadata: cvPreview?.metadata }, null, 2), 'CV JSON');
+  };
+
+  const handleDownloadLatestPdf = () => {
+    if (!latestPdfBase64) return;
+    downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`);
+  };
+
+  const handleToggleWorkLock = (roleIndex: number) => {
+    setActionNotice('Aktualizuję lock…');
+    setCvPreview((prev) => {
+      if (!prev) return prev;
+      const prevMeta = (prev.metadata || {}) as Record<string, unknown>;
+      const prevLocks = (prevMeta.work_role_locks || {}) as Record<string, boolean>;
+      const locks = { ...prevLocks };
+      const key = String(roleIndex);
+      if (locks[key]) delete locks[key];
+      else locks[key] = true;
+      return { ...prev, metadata: { ...prevMeta, work_role_locks: locks } as Record<string, unknown> };
+    });
+    void handleSendUserAction('WORK_TOGGLE_LOCK', { role_index: roleIndex });
+  };
+
   return (
     <div className="flex h-screen bg-slate-50 p-4 gap-4">
-      {/* Session Resume Dialog */}
-      {showSessionDialog && pendingSession && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 max-w-md mx-4 shadow-xl border border-slate-200">
-            <h3 className="text-base font-semibold text-slate-900 mb-2">Znaleziono poprzednią sesję</h3>
-            <p className="text-sm text-slate-600 mb-4">
-              Masz zapisaną sesję CV z {formatSessionTime(pendingSession.timestamp)}.
-              <br />
-              Czy chcesz kontynuować poprzednią pracę czy zacząć od nowa?
-            </p>
-            <div className="flex gap-3">
-              <Button className="flex-1" onClick={handleContinueSession}>
-                Kontynuuj
-              </Button>
-              <Button className="flex-1" variant="secondary" onClick={handleStartFresh}>
-                Zacznij od nowa
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Wizard (Step 1 = upload, then run as wizard) */}
       {!sessionId ? (
-        <Card className="flex-1 flex flex-col overflow-hidden">
-          <div className="p-6 border-b border-slate-200 bg-white">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">CV Generator</div>
-                <div className="mt-1 text-xs text-slate-600">Krok 1/6 — wgraj CV (DOCX/PDF), potem przejdziesz przez kreator.</div>
-              </div>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() => {
-                  clearLocalSession();
-                  setCvFile(null);
-                  setMessages([INITIAL_ASSISTANT_MESSAGE]);
-                  setExpandedMessages({});
-                }}
-                data-testid="new-session"
-              >
-                Nowa sesja
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            <div
-              {...getRootProps()}
-              data-testid="cv-upload-dropzone"
-              className={`border border-dashed rounded-xl p-10 text-center cursor-pointer transition flex items-center justify-center ${
-                isDragActive ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50'
-              }`}
-            >
-              <input {...getInputProps()} />
-              <div className="space-y-2">
-                <div className="text-sm font-semibold text-slate-900">{isDragActive ? 'Upuść tutaj' : 'Wgraj CV'}</div>
-                <div className="text-xs text-slate-600">DOCX lub PDF</div>
-              </div>
-            </div>
-
-            {cvFile ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="text-xs font-semibold text-slate-700">Załadowane CV</div>
-                <div className="mt-1 text-sm text-slate-900 break-words">{cvFile.name}</div>
-                <div className="mt-1 text-xs text-slate-600">{(cvFile.size / 1024).toFixed(1)} KB</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => void startWizardFromUpload(cvFile)}
-                    loading={isLoading}
-                    disabled={isLoading}
-                    data-testid="use-loaded-cv"
-                  >
-                    Użyj tego CV
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setCvFile(null)}
-                    disabled={isLoading}
-                    data-testid="change-cv-file"
-                  >
-                    Zmień plik
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
-            <div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={fastPathProfile}
-                  onChange={(e) => {
-                    const v = !!e.target.checked;
-                    setFastPathProfile(v);
-                    try {
-                      window.localStorage.setItem(FAST_PROFILE_KEY, v ? '1' : '0');
-                    } catch {
-                      // ignore
-                    }
-                  }}
-                  disabled={isLoading}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                Fast path: użyj zapisanego profilu (kontakt, edukacja, zainteresowania, język)
-              </label>
-              <div className="mt-1 text-[11px] text-slate-600">
-                Pozostałe sekcje zawsze są dostosowywane pod konkretną ofertę.
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Link do oferty (opcjonalnie)</label>
-              <input
-                value={jobPostingUrl || ''}
-                onChange={(e) => handleJobUrlChange(e.target.value)}
-                placeholder="https://…"
-                disabled={isLoading}
-                data-testid="job-url-input"
-                className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
-              />
-              <div className="text-[11px] text-slate-600 mt-1">Jeśli backend nie pobierze treści, poprosi o wklejenie tekstu.</div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Treść / skrót oferty (opcjonalnie)</label>
-              <textarea
-                value={jobPostingText || ''}
-                onChange={(e) => setJobPostingText(e.target.value)}
-                placeholder="Wklej opis stanowiska albo krótki skrót wymagań (min. kilka zdań)…"
-                disabled={isLoading}
-                data-testid="job-text-input"
-                className="w-full min-h-[120px] text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 resize-y"
-              />
-              <div className="text-[11px] text-slate-600 mt-1">To pole przyspiesza analizę (nie musisz czekać na pobranie z URL).</div>
-            </div>
-          </div>
-        </Card>
+        <UploadStartSection
+          resumeFailed={resumeFailed}
+          isDragActive={isDragActive}
+          dropzoneRootProps={dropzoneRootProps}
+          dropzoneInputProps={dropzoneInputProps}
+          cvFile={cvFile}
+          isLoading={isLoading}
+          fastPathProfile={fastPathProfile}
+          jobPostingUrl={jobPostingUrl}
+          jobPostingText={jobPostingText}
+          onUseLoadedCv={() => {
+            if (!cvFile) return;
+            void startWizardFromUpload(cvFile);
+          }}
+          onChangeFile={() => setCvFile(null)}
+          onFastPathChange={handleFastPathChange}
+          onJobUrlChange={handleJobUrlChange}
+          onJobPostingTextChange={handleJobPostingTextChange}
+          onNewSession={handleHardNewSession}
+        />
       ) : null}
 
-      {/* Stage panel (desktop) */}
-      <div className={`${!sessionId ? 'hidden' : ''} w-[420px] shrink-0`}>
-        <Card className="h-full flex flex-col">
-          <div className="border-b border-slate-200 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Krok</div>
-                <div className="mt-1 text-xs text-slate-600">Aktualny etap kreatora i akcje.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    handleStartFresh();
-                    setMessages((prev) => [
-                      ...prev,
-                      { role: 'assistant', content: '✅ Nowa wersja: zaczynam nową sesję (plik CV pozostaje ten sam).' },
-                    ]);
-                  }}
-                  title="Zaczyna nową sesję dla tego samego CV"
-                >
-                  Nowa wersja
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    clearLocalSession();
-                    setCvFile(null);
-                    setMessages([INITIAL_ASSISTANT_MESSAGE]);
-                    setExpandedMessages({});
-                  }}
-                >
-                  Zmień plik
-                </Button>
-              </div>
-            </div>
-          </div>
+      <WizardStageSection
+        sessionId={sessionId}
+        uiAction={uiAction}
+        lastStage={lastStage}
+        lastTraceId={lastTraceId}
+        wizardStep={wizardStep as WizardStep}
+        stepper={stepper as readonly StepperItem[] | null}
+        isLoading={isLoading}
+        latestPdfBase64={latestPdfBase64}
+        latestPdfFilename={latestPdfFilename}
+        latestPdfDownloadName={latestPdfDownloadName}
+        hasGeneratedPdf={hasGeneratedPdf}
+        formDraft={formDraft}
+        stageUpdates={stageUpdates}
+        messages={messages}
+        onFormDraftChange={(key, value) => setFormDraft((prev) => ({ ...prev, [key]: value }))}
+        onSendUserAction={handleSendUserAction}
+        onStartFresh={handleNewVersion}
+        onChangeFile={handleHardNewSession}
+        onRefresh={loadCvPreview}
+        cvPreviewLoading={cvPreviewLoading}
+      />
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {uiAction ? (
-              <div className="space-y-4" data-testid="stage-panel" data-stage={uiAction.stage || ''} data-wizard-stage={lastStage || ''}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-sm font-semibold text-slate-900">{uiAction.title || 'Aktualny krok'}</div>
-                  {uiAction.stage ? <Badge variant="accent">{uiAction.stage}</Badge> : null}
-                </div>
-                {wizardStep ? (
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: wizardStep.total }).map((_, i) => {
-                        const active = i < wizardStep.current;
-                        return <span key={i} className={`h-2 w-2 rounded-full ${active ? 'bg-indigo-600' : 'bg-slate-200'}`} aria-hidden="true" />;
-                      })}
-                    </div>
-                    <div className="text-xs text-slate-600">
-                      Krok {wizardStep.current}/{wizardStep.total}
-                    </div>
-                  </div>
-                ) : null}
+      <CvPreviewSection
+        cvFile={cvFile}
+        sessionId={sessionId}
+        cvPreview={cvPreview}
+        cvPreviewError={cvPreviewError}
+        cvPreviewLoading={cvPreviewLoading}
+        showCvJson={showCvJson}
+        copyNotice={copyNotice}
+        actionNotice={actionNotice}
+        latestPdfBase64={latestPdfBase64}
+        latestPdfFilename={latestPdfFilename}
+        latestPdfDownloadName={latestPdfDownloadName}
+        isLoading={isLoading}
+        onToggleShowCvJson={() => setShowCvJson((v) => !v)}
+        onCopyCvJson={handleCopyCvJson}
+        onRefresh={loadCvPreview}
+        onDownloadPdf={handleDownloadLatestPdf}
+        onScrollToStagePanel={scrollToStagePanel}
+        onToggleWorkLock={handleToggleWorkLock}
+        describeMissing={describeMissing}
+        requiredLabel={requiredLabel}
+      />
 
-                {stepper ? (
-                  <div className="rounded-lg border border-slate-200 bg-white p-2">
-                    <div className="text-[11px] font-semibold text-slate-700">Nawigacja</div>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {stepper.map((s) => {
-                        const isCurrent = wizardStep?.current === s.n;
-                        const isPast = (wizardStep?.current || 0) > s.n;
-                        const isFuture = (wizardStep?.current || 0) < s.n;
-                        return (
-                          <Button
-                            key={s.n}
-                            size="sm"
-                            variant={isCurrent ? 'primary' : 'secondary'}
-                            disabled={!isPast}
-                            title={isFuture ? 'Dokończ bieżący krok, aby przejść dalej.' : isCurrent ? 'Bieżący krok' : 'Wróć do kroku'}
-                            onClick={() => {
-                              if (!isPast) return;
-                              void handleSendUserAction('WIZARD_GOTO_STAGE', { target_stage: s.targetWizardStage });
-                            }}
-                          >
-                            {s.n}. {s.label}
-                          </Button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-2 text-[11px] text-slate-600">
-                      Możesz wracać do poprzednich kroków. Przyszłe kroki są zablokowane.
-                    </div>
-                  </div>
-                ) : null}
-
-                {uiAction.text ? <div className="text-sm text-slate-700 whitespace-pre-wrap">{uiAction.text}</div> : null}
-
-                {Array.isArray(uiAction.fields) && uiAction.fields.length ? (
-                  <div className="space-y-2">
-                    {uiAction.fields.map((f) => (
-                      <div key={f.key} className="rounded-lg border border-slate-200 bg-white p-3">
-                        <div className="text-xs font-semibold text-slate-600">{f.label}</div>
-                        {uiAction.kind === 'edit_form' || f.editable ? (
-                          f.type === 'textarea' ? (
-                            <textarea
-                              value={formDraft[f.key] ?? ''}
-                              onChange={(e) => setFormDraft((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                              disabled={isLoading}
-                              className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
-                              rows={8}
-                              placeholder={f.placeholder}
-                            />
-                          ) : (
-                            <input
-                              value={formDraft[f.key] ?? ''}
-                              onChange={(e) => setFormDraft((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                              disabled={isLoading}
-                              className="mt-2 w-full rounded-md border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
-                              placeholder={f.placeholder}
-                            />
-                          )
-                        ) : (
-                          <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">{f.value || ''}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {uiAction.actions?.length ? (
-                  (() => {
-                    const actions = uiAction.actions || [];
-                    const fields = Array.isArray(uiAction.fields) ? uiAction.fields : [];
-                    const hasEditable = uiAction.kind === 'edit_form' || fields.some((f) => !!f?.editable);
-                    const keepInline = new Set(['COVER_LETTER_PREVIEW']);
-                    const primaryRaw = actions.filter((a) => !(a.style === 'secondary' || a.style === 'tertiary'));
-                    const primary = primaryRaw.length > 1 ? primaryRaw.slice(0, 1) : primaryRaw;
-                    const inlineSecondary = actions.filter(
-                      (a) => (a.style === 'secondary' || a.style === 'tertiary') && keepInline.has(a.id)
-                    );
-                    const advanced = actions.filter(
-                      (a) => (a.style === 'secondary' || a.style === 'tertiary') && !keepInline.has(a.id)
-                    );
-                    const demotedPrimary = primaryRaw.length > 1 ? primaryRaw.slice(1).map((a) => ({ ...a, style: 'secondary' as const })) : [];
-
-                    const isLanguageSelection = String(uiAction.stage || '').toUpperCase() === 'LANGUAGE_SELECTION';
-                    const enabledLanguageActions = new Set(['LANGUAGE_SELECT_EN', 'LANGUAGE_SELECT_DE']);
-                    const languageNote =
-                      isLanguageSelection
-                        ? 'Wersje językowe są niezależne (możesz później zrobić osobny przebieg dla DE/PL).'
-                        : null;
-
-                    const renderButtons = (items: UIActionButton[]) => (
-                      <div className="flex flex-wrap gap-2">
-                        {items.map((a) => {
-                          const isSecondary = a.style === 'secondary' || a.style === 'tertiary';
-                          const isCancel = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK');
-                          const payload = hasEditable && !isCancel ? formDraft : undefined;
-                          const isLangDisabled = isLanguageSelection && !enabledLanguageActions.has(a.id);
-                          const wantsDownload =
-                            a.id === 'REQUEST_GENERATE_PDF' &&
-                            (latestPdfBase64 || Boolean((cvPreview?.metadata as any)?.pdf_generated));
-
-                          const label = (() => {
-                            if (isLangDisabled) return `${a.label} (Coming soon)`;
-                            if (a.id === 'REQUEST_GENERATE_PDF') return wantsDownload ? 'Pobierz PDF' : 'Generuj PDF';
-                            return a.label;
-                          })();
-                          return (
-                            <Button
-                              key={a.id}
-                              variant={isSecondary ? 'secondary' : 'primary'}
-                              disabled={isLangDisabled}
-                              title={isLangDisabled ? 'Coming soon — najpierw dopracuj wersję EN.' : undefined}
-                              onClick={() => {
-                                // If we already have a PDF in memory and the action is effectively "download",
-                                // download directly instead of round-tripping through the backend.
-                                if (wantsDownload && latestPdfBase64) {
-                                  downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`);
-                                  return;
-                                }
-                                void handleSendUserAction(a.id, payload);
-                              }}
-                              loading={isLoading}
-                              data-testid={`action-${a.id}`}
-                            >
-                              {label}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    );
-
-                    return (
-                      <div className="space-y-2">
-                        {languageNote ? <div className="text-xs text-slate-600">{languageNote}</div> : null}
-                        {primary.length ? renderButtons([...primary, ...inlineSecondary]) : renderButtons(actions)}
-                        {advanced.length || demotedPrimary.length ? (
-                          <details className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                            <summary className="cursor-pointer text-xs font-semibold text-slate-800">Więcej akcji</summary>
-                            <div className="mt-2">{renderButtons([...demotedPrimary, ...advanced])}</div>
-                          </details>
-                        ) : null}
-                      </div>
-                    );
-                  })()
-                ) : null}
-
-                {uiAction.disable_free_text ? (
-                  <div className="text-xs text-slate-600">W tym kroku wiadomości są wyłączone — użyj akcji powyżej.</div>
-                ) : null}
-
-                <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <summary className="cursor-pointer text-sm font-semibold text-slate-800">Debug</summary>
-                  <div className="mt-2 space-y-1 text-xs text-slate-700">
-                    <div>
-                      stage: <span className="font-mono">{lastStage || '(brak)'}</span>
-                    </div>
-                    <div>
-                      trace_id: <span className="font-mono">{lastTraceId || '(brak)'}</span>
-                    </div>
-                  </div>
-                </details>
-              </div>
-            ) : (
-              <div
-                className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700"
-                data-testid="stage-panel"
-                data-stage=""
-                data-wizard-stage={lastStage || ''}
-              >
-                Brak aktywnego kroku. Wgraj CV lub wyślij wiadomość.
-              </div>
-            )}
-
-            {stageUpdates.length ? (
-              <details className="rounded-lg border border-slate-200 bg-white p-3" open>
-                <summary className="cursor-pointer text-sm font-semibold text-slate-900">Ostatnie kroki</summary>
-                <div className="mt-2 space-y-1 text-xs text-slate-700">
-                  {stageUpdates.slice(0, 32).map((s, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <span className={`mt-0.5 inline-block h-2 w-2 rounded-full ${s.ok === false ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                      <div className="flex-1">
-                        <div className="font-mono">{String(s.step || '').slice(0, 60)}</div>
-                        {s.mode ? <div className="text-slate-600">mode: {String(s.mode).slice(0, 24)}</div> : null}
-                        {s.error ? <div className="text-rose-700">error: {String(s.error).slice(0, 140)}</div> : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-
-            <details className="rounded-lg border border-slate-200 bg-white p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-900">Historia</summary>
-              <div className="mt-3 space-y-2">
-                {messages.slice(-20).map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`rounded-lg border p-2 text-xs ${
-                      msg.role === 'user' ? 'border-indigo-200 bg-indigo-50 text-indigo-900' : 'border-slate-200 bg-slate-50 text-slate-900'
-                    }`}
-                  >
-                    <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-                  </div>
-                ))}
-              </div>
-            </details>
-          </div>
-        </Card>
-      </div>
-
-      {/* CV panel (desktop) */}
-      <div className={`${!cvFile && !sessionId ? 'hidden' : ''} flex-1 min-w-[520px]`}>
-        <Card className="h-full flex flex-col">
-          <div className="border-b border-slate-200 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">CV</div>
-                  <div className="mt-1 text-xs text-slate-600">Podgląd danych CV i gotowość do PDF.</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {copyNotice ? <span className="text-xs text-emerald-700">{copyNotice}</span> : null}
-                  {actionNotice ? <span className="text-xs text-indigo-700">{actionNotice}</span> : null}
-                  <Button size="sm" variant="secondary" onClick={() => setShowCvJson((v) => !v)}>
-                    {showCvJson ? 'Widok' : 'JSON'}
-                  </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    copyText(
-                      JSON.stringify({ cv_data: cvPreview?.cv_data, readiness: cvPreview?.readiness, metadata: cvPreview?.metadata }, null, 2),
-                      'CV JSON'
-                    )
-                  }
-                  disabled={!cvPreview}
-                >
-                  Kopiuj
-                </Button>
-                <Button size="sm" variant="secondary" onClick={loadCvPreview} loading={cvPreviewLoading} disabled={!sessionId}>
-                  Odśwież
-                </Button>
-                {latestPdfBase64 ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`)}
-                    data-testid="download-pdf"
-                  >
-                    Pobierz PDF
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4">
-            {!sessionId ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Brak aktywnej sesji.</div>
-            ) : cvPreviewError ? (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">Nie udało się pobrać danych sesji: {cvPreviewError}</div>
-            ) : cvPreviewLoading && !cvPreview ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Ładowanie…</div>
-            ) : cvPreview ? (
-              showCvJson ? (
-                <pre className="overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-800">
-                  {JSON.stringify({ cv_data: cvPreview.cv_data, readiness: cvPreview.readiness, metadata: cvPreview.metadata }, null, 2)}
-                </pre>
-              ) : (
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-slate-600">Gotowość</div>
-                    {(() => {
-                      const r = cvPreview.readiness || {};
-                      const required = r.required_present || {};
-                      const confirmed = r.confirmed_flags || {};
-                      const missing: string[] = Array.isArray(r.missing) ? r.missing : [];
-                      const items = Object.entries(required).filter(([, v]) => typeof v === 'boolean') as Array<[string, boolean]>;
-                      const canGenerate = !!r.can_generate;
-                      const strict = !!r.strict_template;
-                      return (
-                        <div className="mt-2 space-y-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {canGenerate ? <Badge variant="success">Gotowe do PDF</Badge> : <Badge variant="warning">Nie gotowe</Badge>}
-                            {strict ? <Badge>strict_template</Badge> : null}
-                            {confirmed?.contact_confirmed ? <Badge variant="success">Kontakt potwierdzony</Badge> : <Badge variant="warning">Kontakt niepotwierdzony</Badge>}
-                            {confirmed?.education_confirmed ? <Badge variant="success">Edukacja potwierdzona</Badge> : <Badge variant="warning">Edukacja niepotwierdzona</Badge>}
-                          </div>
-
-                          {items.length ? (
-                            <div className="space-y-1 text-sm text-slate-900">
-                              {items.map(([k, ok]) => (
-                                <div key={k} className="flex items-center justify-between gap-3">
-                                  <span className="text-slate-700">{requiredLabel(k)}</span>
-                                  <span className={ok ? 'text-emerald-700' : 'text-rose-700'}>{ok ? 'OK' : 'Brak'}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-slate-700">(brak danych readiness)</div>
-                          )}
-
-                          {missing.length ? (
-                            <div className="space-y-2">
-                              <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
-                                Braki: {missing.map((m) => describeMissing(m).label).join(', ')}
-                              </div>
-                              <div className="rounded-md border border-slate-200 bg-white p-2">
-                                <div className="text-xs font-semibold text-slate-700">Co zrobić</div>
-                                <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-slate-700">
-                                  {Array.from(new Set(missing)).slice(0, 10).map((m) => {
-                                    const d = describeMissing(m);
-                                    return (
-                                      <li key={m}>
-                                        <span className="font-semibold text-slate-900">{d.label}:</span> {d.hint}
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                                <div className="mt-2">
-                                  <Button size="sm" variant="secondary" onClick={scrollToStagePanel}>
-                                    Otwórz krok
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  <details className="rounded-lg border border-slate-200 bg-white p-3" open>
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">Kontakt</summary>
-                    <div className="mt-2 text-sm text-slate-900 whitespace-pre-wrap break-words">
-                      {(() => {
-                        const d = cvPreview.cv_data || {};
-                        const ci = d.contact_information || {};
-                        const name = ci.full_name ?? d.full_name ?? '';
-                        const email = ci.email ?? d.email ?? '';
-                        const phone = ci.phone ?? d.phone ?? '';
-                        const addr = Array.isArray(d.address_lines) ? d.address_lines.join('\n') : d.address ?? '';
-                        const parts = [
-                          name ? `Imię i nazwisko: ${name}` : null,
-                          email ? `Email: ${email}` : null,
-                          phone ? `Telefon: ${phone}` : null,
-                          addr ? `Adres: ${addr}` : null,
-                        ].filter(Boolean);
-                        return parts.length ? parts.join('\n') : '(brak)';
-                      })()}
-                    </div>
-                  </details>
-
-                  <details className="rounded-lg border border-slate-200 bg-white p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">Profil</summary>
-                    <div className="mt-2 text-sm text-slate-900 whitespace-pre-wrap break-words">
-                      {String(cvPreview.cv_data?.profile || '') || '(brak)'}
-                    </div>
-                  </details>
-
-                  <details className="rounded-lg border border-slate-200 bg-white p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">Doświadczenie</summary>
-                    <div className="mt-2 space-y-2 text-sm text-slate-900">
-                      {Array.isArray(cvPreview.cv_data?.work_experience) && cvPreview.cv_data.work_experience.length ? (
-                        cvPreview.cv_data.work_experience.slice(0, 12).map((r: any, i: number) => (
-                          <div key={i} className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="font-semibold">
-                                {String(r.title || r.position || '').trim() || '(bez tytułu)'}{' '}
-                                {String(r.company || r.employer || '').trim() ? `— ${String(r.company || r.employer)}` : ''}
-                                {(() => {
-                                  const loc = String(r.location || r.city || r.place || '').trim();
-                                  return loc ? `, ${loc}` : '';
-                                })()}
-                              </div>
-                              {(() => {
-                                const locks = cvPreview?.metadata?.work_role_locks || {};
-                                const isLocked = !!locks?.[String(i)];
-                                return (
-                                  <Button
-                                    size="sm"
-                                    variant={isLocked ? 'secondary' : 'primary'}
-                                    onClick={() => {
-                                      setActionNotice('Aktualizuję lock…');
-                                      setCvPreview((prev) => {
-                                        if (!prev) return prev;
-                                        const locks = { ...(prev.metadata?.work_role_locks || {}) };
-                                        const k = String(i);
-                                        if (locks[k]) delete locks[k];
-                                        else locks[k] = true;
-                                        return { ...prev, metadata: { ...(prev.metadata || {}), work_role_locks: locks } };
-                                      });
-                                      void handleSendUserAction('WORK_TOGGLE_LOCK', { role_index: i });
-                                    }}
-                                    disabled={isLoading}
-                                    data-testid={`work-role-lock-${i}`}
-                                  >
-                                    {isLocked ? 'Unlock' : 'Lock'}
-                                  </Button>
-                                );
-                              })()}
-                            </div>
-                            <div className="text-xs text-slate-600">{String(r.date_range || '').trim()}</div>
-                            {Array.isArray(r.bullets) && r.bullets.length ? (
-                              <ul className="mt-2 list-disc space-y-1 pl-5">
-                                {r.bullets.slice(0, 6).map((b: any, bi: number) => (
-                                  <li key={bi}>{String(b)}</li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </div>
-                        ))
-                      ) : (
-                        <div>(brak)</div>
-                      )}
-                    </div>
-                  </details>
-
-                  <details className="rounded-lg border border-slate-200 bg-white p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">Edukacja</summary>
-                    <div className="mt-2 space-y-2 text-sm text-slate-900">
-                      {Array.isArray(cvPreview.cv_data?.education) && cvPreview.cv_data.education.length ? (
-                        cvPreview.cv_data.education.map((e: any, i: number) => (
-                          <div key={i} className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                            <div className="font-semibold">{String(e.title || '').trim() || '(bez tytułu)'}</div>
-                            <div className="text-xs text-slate-600">
-                              {[e.institution || e.school, e.date_range].filter(Boolean).map((x: any) => String(x)).join(' — ')}
-                            </div>
-                            {e.details ? <div className="mt-2 whitespace-pre-wrap">{String(e.details)}</div> : null}
-                          </div>
-                        ))
-                      ) : (
-                        <div>(brak)</div>
-                      )}
-                    </div>
-                  </details>
-
-                  <details className="rounded-lg border border-slate-200 bg-white p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">Umiejętności</summary>
-                    <div className="mt-2 text-sm text-slate-900 whitespace-pre-wrap break-words">
-                      {(() => {
-                        const d = cvPreview.cv_data || {};
-                        const it = Array.isArray(d.it_ai_skills) ? d.it_ai_skills : [];
-                        const ops = Array.isArray(d.technical_operational_skills) ? d.technical_operational_skills : [];
-                        const parts = [
-                          it.length ? `IT & AI: ${it.join(', ')}` : null,
-                          ops.length ? `Techniczne & operacyjne: ${ops.join(', ')}` : null,
-                        ].filter(Boolean);
-                        return parts.length ? parts.join('\n') : '(brak)';
-                      })()}
-                    </div>
-                  </details>
-                </div>
-              )
-            ) : (
-              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Brak danych.</div>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* Right panel: logs / admin / user (desktop) */}
-      <div className="hidden xl:block w-[420px] shrink-0">
-        <Card className="h-full flex flex-col overflow-hidden">
-          <div className="border-b border-slate-200 p-4">
-            <div className="text-sm font-semibold text-slate-900">Panel</div>
-            <div className="mt-1 text-xs text-slate-600">Status, logi, historia i ustawienia.</div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {lastStage ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
-                stage: <span className="font-mono">{lastStage}</span>
-              </div>
-            ) : null}
-            {lastTraceId ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 flex items-center justify-between gap-2">
-                <span>
-                  trace_id: <span className="font-mono">{lastTraceId}</span>
-                </span>
-                <Button size="sm" variant="secondary" onClick={() => copyText(lastTraceId, 'trace_id')}>
-                  Kopiuj
-                </Button>
-              </div>
-            ) : null}
-
-            {stageUpdates.length ? (
-              <details className="rounded-lg border border-slate-200 bg-white p-3" open>
-                <summary className="cursor-pointer text-sm font-semibold text-slate-900">Ostatnie kroki</summary>
-                <div className="mt-2 space-y-1 text-xs text-slate-700">
-                  {stageUpdates.slice(0, 32).map((s, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <span className={`mt-0.5 inline-block h-2 w-2 rounded-full ${s.ok === false ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                      <div className="flex-1">
-                        <div className="font-mono">{String(s.step || '').slice(0, 60)}</div>
-                        {s.mode ? <div className="text-slate-600">mode: {String(s.mode).slice(0, 24)}</div> : null}
-                        {s.error ? <div className="text-rose-700">error: {String(s.error).slice(0, 140)}</div> : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-
-            <details className="rounded-lg border border-slate-200 bg-white p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-900">Historia</summary>
-              <div className="mt-3 space-y-2">
-                {messages.slice(-20).map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`rounded-lg border p-2 text-xs ${
-                      msg.role === 'user' ? 'border-indigo-200 bg-indigo-50 text-indigo-900' : 'border-slate-200 bg-slate-50 text-slate-900'
-                    }`}
-                  >
-                    <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-                  </div>
-                ))}
-              </div>
-            </details>
-          </div>
-        </Card>
-      </div>
-
+      <OpsSection
+        visible={Boolean(sessionId || cvFile)}
+        lastStage={lastStage}
+        lastTraceId={lastTraceId}
+        stageUpdates={stageUpdates}
+        messages={messages}
+        onCopyTraceId={() => {
+          if (!lastTraceId) return;
+          void copyText(lastTraceId, 'trace_id');
+        }}
+      />
     </div>
   );
 }

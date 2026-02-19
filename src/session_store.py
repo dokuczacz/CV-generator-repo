@@ -6,6 +6,7 @@ Enables stateful CV processing across conversation turns
 import logging
 import json
 import uuid
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from azure.data.tables import TableServiceClient, TableEntity
@@ -344,3 +345,200 @@ class CVSessionStore:
                 deleted += 1
         logging.info(f"Deleted {deleted} session(s) via delete_all_sessions()")
         return deleted
+
+    def update_session_with_blob_offload(
+        self,
+        session_id: str,
+        cv_data: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None,
+        *,
+        max_table_size: int = 50000  # Conservative limit (Azure Table limit is 64KB per property)
+    ) -> bool:
+        """
+        Update session with automatic blob offloading for large cv_data.
+        
+        If cv_data exceeds max_table_size, it is stored in blob storage
+        and replaced with a reference in the table entity.
+        
+        Args:
+            session_id: Session identifier
+            cv_data: Updated CV data (may be large)
+            metadata: Optional updated metadata
+            max_table_size: Maximum size in bytes before offloading to blob
+        
+        Returns:
+            True if updated, False if session not found
+        """
+        try:
+            entity = self.table_client.get_entity(partition_key="cv", row_key=session_id)
+        except ResourceNotFoundError:
+            logging.warning(f"Session {session_id} not found for update")
+            return False
+        
+        # Estimate cv_data size
+        cv_data_json = json.dumps(cv_data, ensure_ascii=False)
+        cv_data_bytes = len(cv_data_json.encode('utf-8'))
+        
+        if cv_data_bytes > max_table_size:
+            # Offload cv_data to blob storage
+            logging.info(
+                f"CV data size ({cv_data_bytes} bytes) exceeds table limit ({max_table_size} bytes). "
+                f"Offloading to blob storage for session {session_id}"
+            )
+            
+            blob_ref = self._offload_cv_data_to_blob(session_id, cv_data)
+            
+            # Store only a reference in table
+            entity["cv_data_json"] = json.dumps({
+                "__blob_ref__": blob_ref,
+                "__offloaded__": True,
+                "size_bytes": cv_data_bytes
+            })
+            
+            # Also add blob reference to metadata for tracking
+            if metadata is None:
+                metadata_str = entity.get("metadata_json", "{}")
+                metadata = json.loads(metadata_str) if metadata_str else {}
+            
+            metadata["cv_data_blob_ref"] = blob_ref
+            metadata["cv_data_offloaded_at"] = datetime.utcnow().isoformat()
+        else:
+            # Store directly in table (normal path)
+            entity["cv_data_json"] = cv_data_json
+        
+        if metadata is not None:
+            entity["metadata_json"] = json.dumps(metadata, ensure_ascii=False)
+        
+        entity["updated_at"] = datetime.utcnow().isoformat()
+        entity["version"] = entity.get("version", 1) + 1
+        
+        self.table_client.update_entity(entity, mode="replace")
+        logging.info(f"Updated session {session_id}, version {entity['version']}")
+        return True
+
+    def _offload_cv_data_to_blob(self, session_id: str, cv_data: Dict[str, Any]) -> str:
+        """
+        Upload cv_data to blob storage and return blob reference.
+        
+        Args:
+            session_id: Session identifier
+            cv_data: CV data to offload
+        
+        Returns:
+            Blob reference string (format: 'container/blob_name')
+        """
+        from .blob_store import CVBlobStore
+        
+        # Use cv-artifacts container for session data snapshots
+        container = os.environ.get("STORAGE_CONTAINER_ARTIFACTS", "cv-artifacts")
+        blob_store = CVBlobStore(container=container)
+        
+        # Create blob name with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        blob_name = f"{session_id}/cv_data_{timestamp}.json"
+        
+        # Upload cv_data as JSON blob
+        pointer = blob_store.upload_json_snapshot(
+            blob_name=blob_name,
+            data=cv_data,
+            metadata={
+                'session_id': session_id,
+                'snapshot_type': 'cv_data_offload',
+                'timestamp': timestamp
+            }
+        )
+        
+        return f"{pointer.container}/{pointer.blob_name}"
+
+    def get_session_with_blob_retrieval(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get session data, automatically retrieving cv_data from blob if offloaded.
+        
+        Args:
+            session_id: Session identifier
+        
+        Returns:
+            Session data with cv_data restored from blob if necessary, or None if not found
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        
+        cv_data = session.get("cv_data")
+        
+        # Check if cv_data was offloaded to blob
+        if isinstance(cv_data, dict) and cv_data.get("__offloaded__"):
+            blob_ref = cv_data.get("__blob_ref__")
+            if blob_ref:
+                logging.info(f"Retrieving offloaded cv_data from blob for session {session_id}")
+                cv_data = self._retrieve_cv_data_from_blob(blob_ref)
+                session["cv_data"] = cv_data
+        
+        return session
+
+    def _retrieve_cv_data_from_blob(self, blob_ref: str) -> Dict[str, Any]:
+        """
+        Retrieve cv_data from blob storage.
+        
+        Args:
+            blob_ref: Blob reference string (format: 'container/blob_name')
+        
+        Returns:
+            CV data retrieved from blob
+        """
+        from .blob_store import CVBlobStore, BlobPointer
+        
+        parts = blob_ref.split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid blob reference format: {blob_ref}")
+        
+        container, blob_name = parts
+        blob_store = CVBlobStore(container=container)
+        
+        pointer = BlobPointer(container=container, blob_name=blob_name, content_type="application/json")
+        return blob_store.download_json_snapshot(pointer)
+
+    def verify_pdf_metadata_persisted(self, session_id: str, pdf_ref: str) -> tuple[bool, list[str]]:
+        """
+        Verify that PDF metadata was successfully persisted to session storage.
+        
+        Args:
+            session_id: Session identifier
+            pdf_ref: PDF reference to verify
+        
+        Returns:
+            Tuple of (success: bool, errors: list[str])
+        """
+        errors = []
+        
+        try:
+            session = self.get_session_with_blob_retrieval(session_id)
+            if not session:
+                errors.append(f"Session {session_id} not found after PDF generation")
+                return False, errors
+            
+            metadata = session.get("metadata", {})
+            
+            # Check pdf_generated flag
+            if not metadata.get("pdf_generated"):
+                errors.append("pdf_generated flag not set in metadata")
+            
+            # Check pdf_refs contains the new PDF
+            pdf_refs = metadata.get("pdf_refs", {})
+            if not isinstance(pdf_refs, dict):
+                errors.append(f"pdf_refs is not a dict: {type(pdf_refs)}")
+            elif pdf_ref not in pdf_refs:
+                errors.append(f"PDF reference '{pdf_ref}' not found in pdf_refs. Available: {list(pdf_refs.keys())}")
+            else:
+                # Verify PDF ref has required fields
+                pdf_entry = pdf_refs[pdf_ref]
+                required_fields = ["container", "blob_name", "created_at", "sha256", "size_bytes"]
+                missing = [f for f in required_fields if f not in pdf_entry]
+                if missing:
+                    errors.append(f"PDF entry missing fields: {missing}")
+            
+            return len(errors) == 0, errors
+        
+        except Exception as exc:
+            errors.append(f"Verification failed with exception: {exc}")
+            return False, errors

@@ -17,9 +17,6 @@ from src.skills_unified_proposal import get_skills_unified_proposal_response_for
 def run_skills_sanity_test():
     """Test skills proposal with full candidate profile from opis do cv.txt"""
     
-    # Candidate info from opis do cv.txt
-    profile = """Projekt- und Betriebsleiter mit über 10 Jahren Erfahrung in Qualitätssystemen, technischen Prozessverbesserungen und Infrastrukturprojekten. Nachgewiesene Führung interdisziplinärer Teams, Aufbau von Greenfield-Standorten sowie Umsetzung komplexer Projekte in öffentlichen und privaten Bereichen. Starker Hintergrund in der Produktions- und Qualitätsingenieurtechnik mit zunehmender Spezialisierung auf Automatisierung und KI-gestützte Produktivitätstools (GPT). Fliessend in Englisch, muttersprachlich Polnisch, Deutschkenntnisse auf Mittelstufenniveau. Auf der Suche nach neuen Herausforderungen."""
-    
     skills_list = [
         "Design and deployment of AI-augmented productivity tools (GPT) for reporting and efficiency gains",
         "CAPEX/OPEX technical project management and budget control",
@@ -45,7 +42,6 @@ Sumitomo Process Improvement: international shop floor standardisation and KAIZE
     
     user_text = (
         f"[JOB_SUMMARY]\n{job_summary}\n\n"
-        f"[CANDIDATE_PROFILE]\n{profile}\n\n"
         f"[TAILORING_SUGGESTIONS]\n\n\n"
         f"[RANKING_NOTES]\n{ranking_notes}\n\n"
         f"[CANDIDATE_SKILLS]\n{skills_text}\n"
@@ -57,7 +53,6 @@ Sumitomo Process Improvement: international shop floor standardisation and KAIZE
     print(f"\n📊 Input:")
     print(f"   Skills provided: {len(skills_list)}")
     print(f"   User text length: {len(user_text)} chars")
-    print(f"   Profile length: {len(profile)} chars")
     
     # Call OpenAI with increased max_output_tokens
     system_prompt = _build_ai_system_prompt(stage="it_ai_skills", target_language="en")

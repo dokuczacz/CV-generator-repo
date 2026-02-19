@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Dict, Any
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient, ContentSettings
@@ -104,3 +106,83 @@ class CVBlobStore:
             container_client.delete_blob(blob)
             deleted += 1
         return deleted
+
+    def upload_json_snapshot(
+        self,
+        *,
+        blob_name: str,
+        data: Dict[str, Any],
+        metadata: Optional[Dict[str, str]] = None
+    ) -> BlobPointer:
+        """
+        Upload JSON data as a blob snapshot (for session artifacts, CV snapshots, etc.).
+        
+        Args:
+            blob_name: Path/name for the blob (e.g., 'cv-artifacts/session_id/cv_snapshot.json')
+            data: JSON-serializable dictionary
+            metadata: Optional blob metadata (key-value pairs)
+        
+        Returns:
+            BlobPointer to the uploaded JSON blob
+        """
+        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        json_bytes = json_str.encode('utf-8')
+        
+        blob = self.client.get_blob_client(container=self.container, blob=blob_name)
+        blob.upload_blob(
+            json_bytes,
+            overwrite=True,
+            content_settings=ContentSettings(content_type='application/json'),
+            metadata=metadata
+        )
+        return BlobPointer(container=self.container, blob_name=blob_name, content_type='application/json')
+
+    def download_json_snapshot(self, pointer: BlobPointer) -> Dict[str, Any]:
+        """
+        Download and parse a JSON blob snapshot.
+        
+        Args:
+            pointer: BlobPointer to the JSON blob
+        
+        Returns:
+            Parsed JSON dictionary
+        
+        Raises:
+            FileNotFoundError: If blob not found
+            json.JSONDecodeError: If blob content is not valid JSON
+        """
+        json_bytes = self.download_bytes(pointer)
+        json_str = json_bytes.decode('utf-8')
+        return json.loads(json_str)
+
+    def upload_session_snapshot(
+        self,
+        session_id: str,
+        cv_data: Dict[str, Any],
+        snapshot_type: str = "cv"
+    ) -> BlobPointer:
+        """
+        Upload a timestamped session snapshot to cv-artifacts container.
+        
+        Args:
+            session_id: Session ID
+            cv_data: CV data or skills proposal data
+            snapshot_type: Type of snapshot ('cv', 'skills_proposal', etc.)
+        
+        Returns:
+            BlobPointer to the uploaded snapshot
+        """
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        blob_name = f"{session_id}/{snapshot_type}_{timestamp}.json"
+        
+        metadata = {
+            'session_id': session_id,
+            'snapshot_type': snapshot_type,
+            'timestamp': timestamp
+        }
+        
+        return self.upload_json_snapshot(
+            blob_name=blob_name,
+            data=cv_data,
+            metadata=metadata
+        )

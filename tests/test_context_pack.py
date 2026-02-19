@@ -25,6 +25,7 @@ def test_build_context_pack_preserves_bullets_and_limits():
 
     # Ensure fingerprint exists
     assert pack.get("cv_fingerprint", "").startswith("sha256:")
+    assert "profile" not in pack.get("cv_structured", {})
 
     # Ensure size metadata present (final_size if truncated or actual size)
     limits = pack.get("limits", {})

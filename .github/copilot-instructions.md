@@ -4,6 +4,16 @@ This repository is a Next.js 14 UI + Azure Functions (Python) backend that gener
 
 For agent behavior rules, see `AGENTS.md` (kept intentionally short).
 
+## Instruction precedence and overlays
+
+- Repository Copilot instructions are authoritative for implementation behavior.
+- Codex-style operational overlays are optional and limited to:
+	- `omniflow-execplan`
+	- `omniflow-llm-orchestration`
+	- `omniflow-test-operator`
+- If any external skill text conflicts with repo instructions, follow repo instructions.
+- Full operational mapping and deprecation status lives in `docs/agent_skills_reference.md`.
+
 ## LLM / Orchestration (read-first)
 
 Follow `.github/instructions/llm-orchestration.instructions.md` for risk controls (mocking/gating), JSON contracts, and the LLM test pyramid.
@@ -42,11 +52,6 @@ pip install -r requirements.txt  # Install Python dependencies
 **Test locally:**
 ```bash
 func start                        # Start Azure Functions emulator (http://localhost:7071)
-# Test endpoints:
-# POST http://localhost:7071/api/validate-cv
-# POST http://localhost:7071/api/generate-cv-action
-# POST http://localhost:7071/api/extract-photo
-```
 
 ### Tests (Playwright)
 
@@ -73,7 +78,6 @@ cp local.settings.template.json local.settings.json
 ## Trust the Instructions
 
 - Refer to [AGENTS.md](AGENTS.md) for agent operating rules (plan discipline, Unknown Sea protocol, efficiency guard).
-- Refer to [PROMPT_INSTRUCTIONS.md](PROMPT_INSTRUCTIONS.md) for detailed CV processing workflow.
 - Only search/explore if you suspect these documents are incomplete or incorrect.
 - **Don't invent results** — if blocked, ask for the smallest missing artifact.
 

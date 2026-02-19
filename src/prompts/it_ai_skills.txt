@@ -1,22 +1,66 @@
-Your task is to derive two complementary skill sections from the candidate's CV + job posting:
-1. **Technical Skills** (programming languages, frameworks, tools, cloud platforms, databases).
-2. **AI / ML Skills** (if relevant to job: prompt engineering, model fine-tuning, LLMs, data science, etc.).
+Your task is to derive two complementary skill sections from the candidate's CV + job posting using semantic, evidence-driven inference.
+
+Evidence policy (strict):
+- Candidate CV content in input is the only evidence of possessed capabilities.
+- Infer skills from concrete CV evidence: actions performed, outcomes delivered, tools/methods used, scope/ownership, and repeated practice.
+- Do not treat the job posting as evidence of possession.
+
+Evidence levels (quality fuse):
+- E0 = explicit in source (CV text / user payload)
+- E1 = implied from role context, without specific tool/buzzword claims
+- E2 = unsupported
+
+Hard evidence rules:
+- Skills output must contain only E0-backed capabilities.
+- Do not upgrade E1 into specific tool/framework labels unless that label is explicit in E0.
+- If evidence is E1/E2, use broader neutral capability wording or omit.
+
+Role of the job posting:
+- Use the job posting only as a ranking/alignment signal to prioritize which CV-evidenced skills should appear first.
+- If a requested job skill is not evidenced in CV, do not claim it as possessed.
+
+Anti-parroting:
+- Do not mirror exact job-posting phrases unless there is clear CV evidence for that capability.
+- Prefer paraphrased, evidence-grounded labels over copied keyword strings.
+
+Canonicalization and normalization:
+- Normalize skill names to concise ATS-friendly canonical labels.
+- Merge synonyms/near-duplicates into one label (e.g., "Continuous Improvement" + "Kaizen mindset" -> "KAIZEN / Continuous Improvement").
+- Avoid redundant variants across or within sections.
+
+Prioritization logic:
+- Rank candidate skills by: (1) evidence strength, (2) recency, (3) relevance to job context.
+- Evidence strength is higher when CV shows repeated use, measurable outcomes, leadership/ownership, or delivery impact.
+
+Ambiguity handling:
+- If evidence is weak or indirect, prefer broader capability wording over specific tool claims.
+- Example: use "Cloud Platforms" instead of naming a specific cloud service unless explicitly evidenced.
+
+Section definitions:
+1) IT & AI Skills:
+- Digital tools, automation, data systems, cloud, programming, AI/GPT usage, dashboards, analytics, technical frameworks.
+
+2) Technical & Operational Skills:
+- Quality systems (e.g., IATF, VDA, Formel-Q), process improvement (KAIZEN, VSM, CI), manufacturing/production operations, problem-solving methods (FMEA, 5 Whys, PDCA), efficiency/changeover/downtime optimization, governance, CAPEX/OPEX delivery.
 
 Language:
 - Write all output text in {target_language}.
 - Do not mix languages.
 
-Rules:
-- **Max 8-10 skills per section**.
-- List only skills **backed by CV experience** (not wishful thinking).
-- **Prioritize alignment with job posting** keywords (e.g., if job asks for PyTorch, rank PyTorch high).
-- For AI/ML: only include if CV shows substantive experience (not "took an online course").
-- Use **short, ATS-friendly names** (Python, JavaScript, React, Kubernetes, PostgreSQL, etc.).
+Hard rules:
+- Keep JSON keys exactly: it_ai_skills, technical_operational_skills, notes.
+- Max 5-8 skills per section.
+- No duplication across sections.
+- Include only CV-evidenced capabilities; never invent.
+- Skills should be short, canonical ATS labels.
 
-Output JSON:
+Output JSON schema:
 {
-  "technical_skills": ["skill1", "skill2", ...],
-  "ai_ml_skills": ["skill1", "skill2", ...],
-  "expert_level": ["skill1 (10+ yrs)"],
-  "gap_note": "string (if any critical job skill is missing from CV)"
+  "it_ai_skills": ["skill1", "skill2", "..."],
+  "technical_operational_skills": ["skill1", "skill2", "..."],
+  "notes": "Brief evidence-based summary of categorization and ranking logic, including job-alignment rationale without claiming non-evidenced skills (max 500 chars)"
 }
+
+Return format:
+- Return only a strict JSON object.
+- No markdown, no code fences, no extra commentary.

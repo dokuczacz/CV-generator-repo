@@ -186,7 +186,6 @@ class TestAIPromptsIsolated:
         # Build prompt following function_app.py WORK_TAILOR_RUN pattern
         user_text = (
             f"[JOB_SUMMARY]\n{job_summary}\n\n"
-            f"[CANDIDATE_PROFILE]\n\n"
             f"[TAILORING_SUGGESTIONS]\n{TAILORING_NOTES}\n\n"
             f"[TAILORING_FEEDBACK]\n\n"
             f"[CURRENT_WORK_EXPERIENCE]\n{RAW_WORK_EXPERIENCE_EN}\n"

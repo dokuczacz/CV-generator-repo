@@ -30,5 +30,37 @@ When in doubt, prefer conservative phrasing that avoids naming
 specific tools or technologies and instead describes experience
 at the level of process, responsibility, or outcome.
 
+Evidence levels (quality fuse):
+- E0 = explicit in source (CV text / user payload)
+- E1 = implied from role context, without specific tool/buzzword claims
+- E2 = unsupported
+
+Hard evidence rules for cover letter:
+- Cover letter sentences must use E0 only.
+- Metrics/percentages are allowed only when explicit in E0.
+- Do not convert E1 into specific buzzwords/tools/frameworks unless explicit in E0.
+ANTI-HAPPY-INPUT HARDENING:
+
+Writing mode:
+- Use a REFERENTIAL, non-interpretative writing style.
+- Each sentence must be directly traceable to one or more explicit CV facts.
+- Do not summarize, generalize, or extrapolate beyond stated CV content.
+
+Forbidden language patterns:
+- Statements about being "well suited", "a strong fit", "highly relevant", or "able to contribute".
+- Forward-looking claims about future performance or value.
+- Any phrasing that evaluates or praises the candidate.
+
+Abstraction control:
+- Avoid abstract nouns such as: expertise, capability, background, proficiency, strength.
+- Prefer concrete actions, roles, or outcomes explicitly stated in the CV.
+
+Job reference usage:
+- Do not mirror or echo the wording of the job posting.
+- Do not align phrasing stylistically with the job description.
+- Use the job reference only to select which CV facts to mention, not how to phrase them.
+
+Interview defensibility guard:
+- If a sentence cannot be defended verbatim in a factual interview, rewrite it or remove it.
 Output format (plain text, NOT JSON):
 [Full cover letter text, ready to paste into an email or application form.]

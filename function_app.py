@@ -112,7 +112,30 @@ _SCHEMA_REPAIR_HINTS_BY_STAGE: dict[str, str] = {
 }
 
 
-WORK_ROLE_ALIGNMENT_THRESHOLD = 0.7
+WORK_ROLE_ALIGNMENT_THRESHOLD = 0.5
+
+ALIGNMENT_RUBRIC_LIMITS: dict[str, float] = {
+    "core_responsibilities_match": 0.40,
+    "methods_tools_match": 0.25,
+    "context_match": 0.15,
+    "seniority_scope": 0.10,
+    "language_requirements_match": 0.10,
+}
+
+_EVIDENCE_STRICT_TERMS = [
+    "smed",
+    "oee",
+    "ppap",
+    "apqp",
+    "fmea",
+    "8d",
+    "six sigma",
+    "dmaic",
+    "vsm",
+    "rca",
+    "kaizen",
+    "iatf",
+]
 
 
 def _schema_repair_instructions(*, stage: str | None, parse_error: str | None = None) -> str:
@@ -434,7 +457,150 @@ def _coerce_alignment_score(value: object) -> float:
         return 0.0
     if score > 1.0:
         return 1.0
-    return score
+    return round(score, 2)
+
+
+def _extract_e0_corpus_from_labeled_blocks(user_text: str, labels: list[str]) -> str:
+    blocks: list[str] = []
+    for label in labels:
+        chunk = _extract_labeled_block_text(user_text, label)
+        if chunk:
+            blocks.append(chunk)
+    return "\n".join(blocks)
+
+
+def _contains_metric_like_claim(text: str) -> bool:
+    s = str(text or "")
+    return bool(re.search(r"\b\d+\s*%|\b\d+\s*(k|m|million|months?|weeks?|days?|hours?)\b|\breduced by\b|\bincreased by\b", s, flags=re.IGNORECASE))
+
+
+def _contains_any_digit(text: str) -> bool:
+    return bool(re.search(r"\d", str(text or "")))
+
+
+def _extract_strict_terms(text: str) -> set[str]:
+    normalized = str(text or "").casefold()
+    found: set[str] = set()
+    for term in _EVIDENCE_STRICT_TERMS:
+        if term in normalized:
+            found.add(term)
+    return found
+
+
+def _find_work_e0_violations(*, roles: list[Any], e0_corpus: str) -> list[str]:
+    violations: list[str] = []
+    source = str(e0_corpus or "")
+    source_terms = _extract_strict_terms(source)
+    source_has_digits = _contains_any_digit(source)
+
+    for role_idx, role in enumerate(roles or []):
+        bullets = []
+        if isinstance(role, dict):
+            bullets = role.get("bullets") if isinstance(role.get("bullets"), list) else []
+        elif hasattr(role, "bullets"):
+            bullets = list(getattr(role, "bullets", []) or [])
+
+        for bullet_idx, bullet in enumerate(bullets or []):
+            text = str(bullet or "").strip()
+            if not text:
+                continue
+            if _contains_metric_like_claim(text) and not source_has_digits:
+                violations.append(f"Role {role_idx+1}, Bullet {bullet_idx+1}: metric-like claim without E0 metric evidence")
+            for term in sorted(_extract_strict_terms(text)):
+                if term not in source_terms:
+                    violations.append(f"Role {role_idx+1}, Bullet {bullet_idx+1}: uses '{term}' without E0 evidence")
+    return violations
+
+
+def _coerce_alignment_breakdown(raw: object) -> dict[str, float]:
+    data: dict[str, object]
+    if isinstance(raw, dict):
+        data = dict(raw)
+    elif hasattr(raw, "model_dump"):
+        try:
+            dumped = raw.model_dump()  # type: ignore[attr-defined]
+            data = dumped if isinstance(dumped, dict) else {}
+        except Exception:
+            data = {}
+    elif hasattr(raw, "dict"):
+        try:
+            dumped = raw.dict()  # type: ignore[attr-defined]
+            data = dumped if isinstance(dumped, dict) else {}
+        except Exception:
+            data = {}
+    else:
+        data = {}
+    out: dict[str, float] = {}
+    for key, limit in ALIGNMENT_RUBRIC_LIMITS.items():
+        try:
+            value = float(data.get(key, 0.0)) if isinstance(data, dict) else 0.0
+        except Exception:
+            value = 0.0
+        if value < 0.0:
+            value = 0.0
+        if value > limit:
+            value = limit
+        out[key] = round(value, 2)
+    return out
+
+
+def _coerce_alignment_evidence(raw: object) -> list[str]:
+    if isinstance(raw, list):
+        items = [str(item).strip() for item in raw if str(item).strip()]
+    elif isinstance(raw, str):
+        items = [str(raw).strip()] if str(raw).strip() else []
+    else:
+        items = []
+    deduped = _dedupe_strings_case_insensitive(items, max_items=4)
+    return deduped[:4]
+
+
+def _work_tailor_alignment_policy_text(*, threshold: float = WORK_ROLE_ALIGNMENT_THRESHOLD) -> str:
+    return (
+        "For EACH role return full alignment section only: alignment_breakdown + alignment_evidence.\n"
+        "Use BOTH [CURRENT_WORK_EXPERIENCE] and [TAILORING_SUGGESTIONS]/[TAILORING_FEEDBACK] as candidate evidence.\n"
+        "Alignment score = rounded sum of alignment_breakdown fields (2 decimals).\n"
+        "Return 2-4 short alignment_evidence snippets that justify scoring (for debugging/traceability).\n"
+        "\n"
+        "Core responsibilities match (0.00-0.40): match to 5-7 main responsibilities from job posting (verbs+objects).\n"
+        "Methods/tools match (0.00-0.25): Lean/Six Sigma/RCA/KPI/facilitation etc. only when present in evidence.\n"
+        "Context match (0.00-0.15): manufacturing/ops/regulatory/cross-functional; transferability allowed.\n"
+        "Seniority/scope (0.00-0.10): team size, budget, multi-site, end-to-end ownership when evidenced.\n"
+        "Language/requirements match (0.00-0.10): only from provided candidate data.\n"
+        f"Role inclusion threshold is backend-derived from alignment_breakdown sum < {float(threshold):.2f}.\n"
+        "Do not invent facts, tools, metrics, or responsibilities."
+    )
+
+
+def _normalize_role_alignment_fields(role: dict) -> dict:
+    role2 = dict(role or {})
+    breakdown = _coerce_alignment_breakdown(role2.get("alignment_breakdown"))
+    role2["alignment_breakdown"] = breakdown
+    role2["alignment_evidence"] = _coerce_alignment_evidence(role2.get("alignment_evidence"))
+    return role2
+
+
+def _alignment_total_from_role(role: dict) -> float:
+    breakdown = _coerce_alignment_breakdown(role.get("alignment_breakdown"))
+    total = round(sum(float(v) for v in breakdown.values()), 2)
+    evidence = _coerce_alignment_evidence(role.get("alignment_evidence"))
+    if len(evidence) < 2:
+        total = min(total, 0.69)
+    return _coerce_alignment_score(total)
+
+
+def _find_cover_letter_e0_violations(*, paragraphs: list[str], e0_corpus: str) -> list[str]:
+    text = "\n".join([str(p or "").strip() for p in (paragraphs or []) if str(p or "").strip()])
+    source = str(e0_corpus or "")
+    source_terms = _extract_strict_terms(source)
+    source_has_digits = _contains_any_digit(source)
+    violations: list[str] = []
+    if _contains_metric_like_claim(text) and not source_has_digits:
+        violations.append("Metric-like claims in cover letter are not supported by E0 evidence")
+    for term in sorted(_extract_strict_terms(text)):
+        if term not in source_terms:
+            violations.append(f"Cover letter uses '{term}' without E0 evidence")
+    return violations
 
 
 def _split_work_roles_by_alignment(*, roles: list[dict], threshold: float = WORK_ROLE_ALIGNMENT_THRESHOLD) -> tuple[list[dict], list[dict]]:
@@ -444,10 +610,8 @@ def _split_work_roles_by_alignment(*, roles: list[dict], threshold: float = WORK
     for raw in roles or []:
         if not isinstance(raw, dict):
             continue
-        role = dict(raw)
-        score = _coerce_alignment_score(role.get("alignment_score"))
-        role["alignment_score"] = score
-        reason = str(role.get("exclusion_reason") or "").strip()
+        role = _normalize_role_alignment_fields(raw)
+        score = _alignment_total_from_role(role)
 
         if score < float(threshold):
             excluded.append(
@@ -455,8 +619,9 @@ def _split_work_roles_by_alignment(*, roles: list[dict], threshold: float = WORK
                     "title": str(role.get("title") or "").strip(),
                     "company": str(role.get("company") or role.get("employer") or "").strip(),
                     "date_range": str(role.get("date_range") or "").strip(),
-                    "alignment_score": score,
-                    "exclusion_reason": reason or "Low alignment with target job requirements.",
+                    "alignment_total": score,
+                    "alignment_breakdown": role.get("alignment_breakdown") if isinstance(role.get("alignment_breakdown"), dict) else _coerce_alignment_breakdown({}),
+                    "alignment_evidence": _coerce_alignment_evidence(role.get("alignment_evidence")),
                 }
             )
             continue
@@ -475,8 +640,9 @@ def _compose_work_alignment_notes(*, base_notes: str, excluded_roles: list[dict]
     for role in excluded_roles[:5]:
         title = str(role.get("title") or "").strip() or "(untitled role)"
         company = str(role.get("company") or role.get("employer") or "").strip()
-        score = _coerce_alignment_score(role.get("alignment_score"))
-        reason = str(role.get("exclusion_reason") or "").strip() or "Low alignment with target job requirements."
+        score = _coerce_alignment_score(role.get("alignment_total"))
+        evidence = _coerce_alignment_evidence(role.get("alignment_evidence"))
+        reason = "Missing alignment evidence snippets." if len(evidence) < 2 else "Low alignment with target job requirements."
         label = f"{title} @ {company}" if company else title
         lines.append(f"- {label} [{score:.2f}]: {reason}")
 
@@ -802,6 +968,94 @@ def _overwrite_work_experience_from_proposal_roles(*, cv_data: dict, proposal_ro
     return cv2
 
 
+def _backfill_missing_work_locations(*, cv_data: dict, previous_work: list[dict] | None, meta: dict | None) -> dict:
+    def _clean_one_line(s: str) -> str:
+        return " ".join(str(s or "").replace("\r", " ").replace("\n", " ").split()).strip()
+
+    def _role_employer(role: dict) -> str:
+        return _clean_one_line(str(role.get("employer") or role.get("company") or ""))
+
+    def _role_title(role: dict) -> str:
+        return _clean_one_line(str(role.get("title") or role.get("position") or ""))
+
+    def _role_date_range(role: dict) -> str:
+        return _normalize_date_range_one_line(role.get("date_range") or "")
+
+    def _role_location(role: dict) -> str:
+        return (
+            _clean_one_line(str(role.get("location") or ""))
+            or _clean_one_line(str(role.get("city") or ""))
+            or _clean_one_line(str(role.get("place") or ""))
+        )
+
+    cv2 = dict(cv_data or {})
+    cur = cv2.get("work_experience") if isinstance(cv2.get("work_experience"), list) else []
+
+    source_roles: list[dict] = []
+    if isinstance(previous_work, list):
+        source_roles.extend([r for r in previous_work if isinstance(r, dict)])
+
+    if isinstance(meta, dict):
+        dpu = meta.get("docx_prefill_unconfirmed") if isinstance(meta.get("docx_prefill_unconfirmed"), dict) else None
+        dpu_work = dpu.get("work_experience") if isinstance(dpu, dict) and isinstance(dpu.get("work_experience"), list) else []
+        source_roles.extend([r for r in dpu_work if isinstance(r, dict)])
+
+    if (not isinstance(cur, list) or not cur) and source_roles:
+        hydrated: list[dict] = []
+        for src in source_roles:
+            emp = _role_employer(src)
+            title = _role_title(src)
+            date_range = _role_date_range(src)
+            bullets = src.get("bullets") if isinstance(src.get("bullets"), list) else []
+            if not emp or not title:
+                continue
+            hydrated.append(
+                {
+                    "employer": emp,
+                    "title": title,
+                    "date_range": date_range,
+                    "location": _role_location(src),
+                    "bullets": [str(b).strip() for b in bullets if str(b).strip()][:8],
+                }
+            )
+        if hydrated:
+            cv2["work_experience"] = hydrated
+            return cv2
+
+    if not isinstance(cur, list) or not cur:
+        return cv2
+
+    by_primary: dict[str, str] = {}
+    by_secondary: dict[str, str] = {}
+    for src in source_roles:
+        loc = _role_location(src)
+        if not loc:
+            continue
+        primary = "|".join([_role_employer(src).casefold(), _role_date_range(src).casefold()]).strip("|")
+        secondary = "|".join([_role_title(src).casefold(), _role_employer(src).casefold(), _role_date_range(src).casefold()]).strip("|")
+        if primary and primary not in by_primary:
+            by_primary[primary] = loc
+        if secondary and secondary not in by_secondary:
+            by_secondary[secondary] = loc
+
+    out: list[dict] = []
+    for role in cur:
+        role2 = dict(role) if isinstance(role, dict) else {}
+        if _role_location(role2):
+            out.append(role2)
+            continue
+
+        primary = "|".join([_role_employer(role2).casefold(), _role_date_range(role2).casefold()]).strip("|")
+        secondary = "|".join([_role_title(role2).casefold(), _role_employer(role2).casefold(), _role_date_range(role2).casefold()]).strip("|")
+        loc = by_secondary.get(secondary) or by_primary.get(primary) or ""
+        if loc:
+            role2["location"] = loc
+        out.append(role2)
+
+    cv2["work_experience"] = out
+    return cv2
+
+
 def _drop_one_work_bullet_bottom_up(*, cv_in: dict, min_bullets_per_role: int) -> tuple[dict, str | None]:
     """Drop exactly one work-experience bullet (bottom-up), keeping a floor per role.
 
@@ -848,6 +1102,199 @@ def _dedupe_strings_case_insensitive(items: list, *, max_items: int) -> list[str
         if len(out) >= max_items:
             break
     return out
+
+
+def _extract_labeled_block_text(raw_text: str, label: str) -> str:
+    text = str(raw_text or "")
+    lbl = str(label or "").strip().upper()
+    if not text.strip() or not lbl:
+        return ""
+    pattern = rf"(?is)\[{re.escape(lbl)}\]\s*(.*?)(?=\n\s*\[[A-Z0-9_]+\]|\Z)"
+    m = re.search(pattern, text)
+    return str(m.group(1) or "").strip() if m else ""
+
+
+def _parse_candidate_skills_text(raw_text: str, *, max_items: int = 120) -> list[str]:
+    text = str(raw_text or "")
+    if not text.strip():
+        return []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [ln.strip() for ln in normalized.split("\n") if str(ln).strip()]
+    out: list[str] = []
+    split_on_commas = ("\n" not in normalized) and (normalized.count(",") >= 2)
+    for line in lines:
+        cleaned = re.sub(r"^\s*[-*•\u2022]+\s*", "", line).strip()
+        cleaned = re.sub(r"^\s*\d+[\).\-:\s]+", "", cleaned).strip()
+        if not cleaned:
+            continue
+        splitter = r"\s*[;,|]\s*" if split_on_commas else r"\s*[;|]\s*"
+        parts = [p.strip() for p in re.split(splitter, cleaned) if p.strip()]
+        if parts:
+            out.extend(parts)
+        else:
+            out.append(cleaned)
+    return _dedupe_strings_case_insensitive(out, max_items=max_items)
+
+
+def _parse_candidate_skills_from_payload(payload: dict | None, *, max_items: int = 120) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    out: list[str] = []
+    for key in ("candidate_skills", "candidate_skills_text", "skills_file_text", "skills_text"):
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            out.extend([str(it).strip() for it in value if str(it).strip()])
+            continue
+        out.extend(_parse_candidate_skills_text(str(value), max_items=max_items))
+    return _dedupe_strings_case_insensitive(out, max_items=max_items)
+
+
+def _collect_contextual_skill_seeds(*, cv_data: dict, meta: dict, max_items: int = 120) -> list[str]:
+    lines: list[str] = []
+
+    for key in ("work_tailoring_notes", "work_tailoring_feedback", "skills_ranking_notes"):
+        value = meta.get(key)
+        if isinstance(value, str) and value.strip():
+            lines.append(value)
+
+    work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+    for role in work_list:
+        if not isinstance(role, dict):
+            continue
+        title = str(role.get("title") or role.get("position") or "").strip()
+        employer = str(role.get("employer") or role.get("company") or "").strip()
+        if title:
+            lines.append(title)
+        if employer:
+            lines.append(employer)
+        bullets = role.get("bullets") if isinstance(role.get("bullets"), list) else role.get("responsibilities")
+        if isinstance(bullets, list):
+            lines.extend([str(b).strip() for b in bullets if str(b).strip()])
+
+    proposal_block = meta.get("work_experience_proposal_block") if isinstance(meta.get("work_experience_proposal_block"), dict) else None
+    proposal_roles = proposal_block.get("roles") if isinstance(proposal_block, dict) and isinstance(proposal_block.get("roles"), list) else []
+    for role in proposal_roles:
+        if not isinstance(role, dict):
+            continue
+        title = str(role.get("title") or "").strip()
+        company = str(role.get("company") or "").strip()
+        if title:
+            lines.append(title)
+        if company:
+            lines.append(company)
+        bullets = role.get("bullets") if isinstance(role.get("bullets"), list) else []
+        lines.extend([str(b).strip() for b in bullets if str(b).strip()])
+
+    if not lines:
+        return []
+    return _parse_candidate_skills_text("\n".join(lines), max_items=max_items)
+
+
+def _collect_raw_docx_skills_context(*, meta: dict, max_items: int = 20) -> list[str]:
+    dpu = meta.get("docx_prefill_unconfirmed") if isinstance(meta.get("docx_prefill_unconfirmed"), dict) else None
+    if not isinstance(dpu, dict):
+        return []
+
+    out: list[str] = []
+
+    def _sanitize_raw_skill_line(value: str) -> str:
+        s = str(value or "").strip()
+        if not s:
+            return ""
+        s = re.sub(
+            r"(?is)^\s*(fähigkeiten\s*&\s*kompetenzen|faehigkeiten\s*&\s*kompetenzen|skills|kompetenzen)\s*[:\-\u2013\u2014]*\s*",
+            "",
+            s,
+        ).strip()
+        s = re.sub(r"(?is),?\s*git\s*hub\s*:\s*h\s*$", "", s).strip()
+        s = re.sub(r"(?is),?\s*github\s*:\s*h\s*$", "", s).strip()
+        return s
+
+    raw_lines = dpu.get("skills_raw_lines") if isinstance(dpu.get("skills_raw_lines"), list) else []
+    if raw_lines:
+        cleaned_from_raw: list[str] = []
+        for item in raw_lines:
+            cleaned = _sanitize_raw_skill_line(item)
+            if cleaned:
+                cleaned_from_raw.append(cleaned)
+        out.extend(cleaned_from_raw)
+
+    direct_it = dpu.get("it_ai_skills") if isinstance(dpu.get("it_ai_skills"), list) else []
+    direct_tech = dpu.get("technical_operational_skills") if isinstance(dpu.get("technical_operational_skills"), list) else []
+    direct_cleaned: list[str] = []
+    for value in list(direct_it) + list(direct_tech):
+        cleaned = _sanitize_raw_skill_line(value)
+        if cleaned:
+            direct_cleaned.append(cleaned)
+    out.extend(direct_cleaned)
+
+    if not out:
+        langs = dpu.get("languages") if isinstance(dpu.get("languages"), list) else []
+        for raw in langs:
+            value = str(raw or "").strip()
+            low = value.lower()
+            if not value:
+                continue
+            if any(tag in low for tag in ("fähigkeiten", "faehigkeiten", "kompetenzen", "skills", "github")):
+                out.extend(_parse_candidate_skills_text(value, max_items=max_items))
+
+    if not out:
+        further = dpu.get("further_experience") if isinstance(dpu.get("further_experience"), list) else []
+        for item in further:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if title:
+                out.append(title)
+
+    out = [_sanitize_raw_skill_line(item) for item in out]
+    out = [item for item in out if item]
+
+    return _dedupe_strings_case_insensitive(out, max_items=max_items)
+
+
+def _collect_merged_candidate_skills(
+    *,
+    cv_data: dict,
+    meta: dict,
+    action_payload: dict | None,
+    message_text: str,
+    max_items: int = 120,
+) -> tuple[list[str], list[str], list[str]]:
+    skills_from_cv = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
+    skills_legacy_from_cv = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
+    dpu = meta.get("docx_prefill_unconfirmed") if isinstance(meta.get("docx_prefill_unconfirmed"), dict) else None
+    skills_from_docx = dpu.get("it_ai_skills") if isinstance(dpu, dict) and isinstance(dpu.get("it_ai_skills"), list) else []
+    skills_legacy_from_docx = dpu.get("technical_operational_skills") if isinstance(dpu, dict) and isinstance(dpu.get("technical_operational_skills"), list) else []
+
+    prior_input_raw = meta.get("candidate_skills_input")
+    if isinstance(prior_input_raw, list):
+        prior_input = [str(s).strip() for s in prior_input_raw if str(s).strip()]
+    elif isinstance(prior_input_raw, str):
+        prior_input = _parse_candidate_skills_text(prior_input_raw, max_items=max_items)
+    else:
+        prior_input = []
+
+    payload_input = _parse_candidate_skills_from_payload(action_payload, max_items=max_items)
+    message_block = _extract_labeled_block_text(message_text, "CANDIDATE_SKILLS")
+    message_input = _parse_candidate_skills_text(message_block, max_items=max_items)
+    external_input_now = _dedupe_strings_case_insensitive(payload_input + message_input, max_items=max_items)
+    contextual_seeds = _collect_contextual_skill_seeds(cv_data=cv_data, meta=meta, max_items=max_items)
+
+    merged_external_input = _dedupe_strings_case_insensitive(prior_input + external_input_now, max_items=max_items)
+    merged_skills = _dedupe_strings_case_insensitive(
+        list(skills_from_cv)
+        + list(skills_legacy_from_cv)
+        + list(skills_from_docx)
+        + list(skills_legacy_from_docx)
+        + list(merged_external_input)
+        + list(contextual_seeds),
+        max_items=max_items,
+    )
+
+    return merged_skills, merged_external_input, external_input_now
 
 
 def _fetch_text_from_url(url: str, *, timeout: float = 8.0, max_bytes: int = 20000) -> tuple[bool, str, str]:
@@ -1157,6 +1604,40 @@ def _bulk_translation_output_budget(*, user_text: str, requested_tokens: object)
     approx = int(max(min_tokens, min(8000, (len(user_text or "") // 3) + 600)))
     return min(8192, max(req, base, approx))
 
+def _extract_openai_output_text(resp: object) -> str:
+    text = str(getattr(resp, "output_text", "") or "")
+    if text.strip():
+        return text
+
+    chunks: list[str] = []
+    output_items = getattr(resp, "output", None)
+    if not isinstance(output_items, list):
+        return ""
+
+    for item in output_items:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_text = part.get("text")
+            if isinstance(part_text, str) and part_text.strip():
+                chunks.append(part_text)
+                continue
+            if isinstance(part_text, dict):
+                val = part_text.get("value")
+                if isinstance(val, str) and val.strip():
+                    chunks.append(val)
+                    continue
+            val = part.get("value")
+            if isinstance(val, str) and val.strip():
+                chunks.append(val)
+
+    return "\n".join(chunks).strip()
+
 
 def _openai_json_schema_call(
     *,
@@ -1226,6 +1707,10 @@ def _openai_json_schema_call(
                     len(system_prompt),
                 )
 
+        prompt_source_mode = "legacy_model"
+        if prompt_id:
+            prompt_source_mode = "dashboard_plus_system" if (include_system_with_dashboard and system_prompt.strip()) else "dashboard_only"
+
         # NOTE: Avoid sending `reasoning: null` — some API deployments validate the object shape strictly.
         req: dict = {"input": req_input, "text": {"format": response_format}, "max_output_tokens": max_output_tokens}
 
@@ -1253,10 +1738,12 @@ def _openai_json_schema_call(
             req["model"] = model_override or _openai_model()
 
         logging.info(
-            "Calling OpenAI for stage=%s max_output_tokens=%s has_prompt_id=%s",
+            "Calling OpenAI for stage=%s max_output_tokens=%s has_prompt_id=%s prompt_source_mode=%s system_prompt_hash=%s",
             stage,
             str(max_output_tokens),
             bool(prompt_id),
+            prompt_source_mode,
+            hashlib.sha256((system_prompt or "").encode("utf-8", errors="ignore")).hexdigest()[:16],
         )
 
         def _openai_trace_enabled() -> bool:
@@ -1306,6 +1793,10 @@ def _openai_json_schema_call(
                 return {
                     "has_prompt": bool(prompt_obj),
                     "prompt_id": prompt_id_local,
+                    "prompt_source_mode": prompt_source_mode,
+                    "include_system_with_dashboard": bool(include_system_with_dashboard),
+                    "system_prompt_chars": len(system_prompt or ""),
+                    "system_prompt_sha256": _sha256_text(system_prompt or ""),
                     "format_name": fmt_name or None,
                     "max_output_tokens": req_obj.get("max_output_tokens"),
                     "input_items": summarized_inputs,
@@ -1347,6 +1838,14 @@ def _openai_json_schema_call(
         while attempt < max_attempts:
             attempt += 1
             try:
+                logging.info(
+                    "OpenAI request attempt stage=%s call_seq=%s max_attempts=%s prompt_source_mode=%s has_prompt_id=%s",
+                    str(stage or "json_schema_call"),
+                    f"attempt_{attempt}",
+                    max_attempts,
+                    prompt_source_mode,
+                    bool(prompt_id),
+                )
                 started_at = time.time()
                 resp = client.responses.create(**req)
             except Exception as e:
@@ -1379,12 +1878,13 @@ def _openai_json_schema_call(
                     body = None
                 body_preview = (str(body)[:500] + "…") if body else ""
                 logging.warning(
-                    "OpenAI call failed stage=%s attempt=%s/%s status=%s has_prompt_id=%s err=%s body=%s",
+                    "OpenAI call failed stage=%s attempt=%s/%s status=%s has_prompt_id=%s prompt_source_mode=%s err=%s body=%s",
                     stage,
                     attempt,
                     max_attempts,
                     status,
                     bool(prompt_id),
+                    prompt_source_mode,
                     str(e),
                     body_preview,
                 )
@@ -1396,7 +1896,7 @@ def _openai_json_schema_call(
                     continue
                 return False, None, last_err
 
-            out = getattr(resp, "output_text", "") or ""
+            out = _extract_openai_output_text(resp)
             try:
                 rid = getattr(resp, "id", None)
                 last_status = getattr(resp, "status", None)
@@ -1418,13 +1918,14 @@ def _openai_json_schema_call(
                         kind="requests",
                         payload={"request": req, "trace": trace_record},
                     )
-                if _openai_trace_enabled() and rid:
+                if rid:
                     logging.info(
-                        "openai_response_id=%s trace_id=%s stage=%s call_seq=%s",
+                        "openai_response_id=%s trace_id=%s stage=%s call_seq=%s prompt_source_mode=%s",
                         str(rid),
                         str(trace_id or ""),
                         str(stage or "json_schema_call"),
                         f"attempt_{attempt}",
+                        prompt_source_mode,
                     )
             except Exception:
                 pass
@@ -1561,9 +2062,17 @@ def _openai_json_schema_call(
                             cur = max_output_tokens or 800
                         # Keep a reasonable cap; models often need >900 tokens for full-document translation.
                         repair_req["max_output_tokens"] = max(cur, min(8192, int(cur * 2)))
+                    logging.info(
+                        "OpenAI request attempt stage=%s call_seq=%s max_attempts=%s prompt_source_mode=%s has_prompt_id=%s",
+                        str(stage or "json_schema_call"),
+                        f"schema_repair_{attempt}",
+                        max_attempts,
+                        prompt_source_mode,
+                        bool(prompt_id),
+                    )
                     started_at_repair = time.time()
                     repair_resp = client.responses.create(**repair_req)
-                    repair_out = getattr(repair_resp, "output_text", "") or ""
+                    repair_out = _extract_openai_output_text(repair_resp)
                     try:
                         rid2 = getattr(repair_resp, "id", None)
                         trace_record2 = {
@@ -1584,13 +2093,14 @@ def _openai_json_schema_call(
                                 kind="requests",
                                 payload={"request": repair_req, "trace": trace_record2},
                             )
-                        if _openai_trace_enabled() and rid2:
+                        if rid2:
                             logging.info(
-                                "openai_response_id=%s trace_id=%s stage=%s call_seq=%s",
+                                "openai_response_id=%s trace_id=%s stage=%s call_seq=%s prompt_source_mode=%s",
                                 str(rid2),
                                 str(trace_id or ""),
                                 str(stage or "json_schema_call"),
                                 f"schema_repair_{attempt}",
+                                prompt_source_mode,
                             )
                     except Exception:
                         pass
@@ -2444,7 +2954,7 @@ def _build_cover_letter_render_payload(*, cv_data: dict, meta: dict, block: dict
         addr = str(cv_data.get("address") or "").strip()
 
     jr = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else {}
-    recipient_company = str(jr.get("company") or "").strip()
+    recipient_company = ""
     recipient_job_title = str(jr.get("title") or "").strip()
 
     return {
@@ -2694,6 +3204,12 @@ def _generate_cover_letter_block_via_openai(
         f"[WORK_EXPERIENCE]\n{roles_text}\n\n"
         f"[SKILLS]\n{_sanitize_for_prompt(skills_text[:2000])}\n"
     )
+    e0_corpus = "\n".join([
+        str(cv_data.get("profile") or ""),
+        str(roles_text or ""),
+        str(skills_text or ""),
+        str(meta.get("work_tailoring_notes") or ""),
+    ])
 
     def _call(extra_fix: str | None = None) -> tuple[bool, dict | None, str]:
         system_prompt = _build_ai_system_prompt(stage="cover_letter", target_language=target_language, extra=extra_fix)
@@ -2726,7 +3242,13 @@ def _generate_cover_letter_block_via_openai(
             "created_at": _now_iso(),
         }
         ok2, errs2 = _validate_cover_letter_block(block=cl_block, cv_data=cv_data)
-        if ok2:
+        errs2.extend(
+            _find_cover_letter_e0_violations(
+                paragraphs=[cl_block.get("opening_paragraph", "")] + list(cl_block.get("core_paragraphs") or []) + [cl_block.get("closing_paragraph", "")],
+                e0_corpus=e0_corpus,
+            )
+        )
+        if ok2 and not errs2:
             return True, cl_block, ""
 
         # Bounded fix attempt (semantic validation, not schema repair).
@@ -2747,7 +3269,13 @@ def _generate_cover_letter_block_via_openai(
             "created_at": _now_iso(),
         }
         ok3, errs3 = _validate_cover_letter_block(block=cl_block2, cv_data=cv_data)
-        if not ok3:
+        errs3.extend(
+            _find_cover_letter_e0_violations(
+                paragraphs=[cl_block2.get("opening_paragraph", "")] + list(cl_block2.get("core_paragraphs") or []) + [cl_block2.get("closing_paragraph", "")],
+                e0_corpus=e0_corpus,
+            )
+        )
+        if (not ok3) or errs3:
             return False, None, "Validation failed: " + "; ".join(errs3[:4])
         return True, cl_block2, ""
     except Exception as e:
@@ -6136,10 +6664,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         notes = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
                         feedback = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
                         target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
-                        alignment_policy = (
-                            f"For EACH role return alignment_score between 0 and 1. "
-                            f"If alignment_score < {WORK_ROLE_ALIGNMENT_THRESHOLD:.2f}, set exclusion_reason and keep bullets factual."
-                        )
 
                         role_blocks = []
                         for r in work_list[:12]:
@@ -6158,7 +6682,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
                             f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
                             f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
-                            f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                             f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                         )
 
@@ -6203,6 +6726,14 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                             validation_errors.append(
                                                 f"Role {role_idx+1} ({company}), Bullet {bullet_idx+1}: {blen} chars (max: {hard_limit})"
                                             )
+
+                                e0_corpus = _extract_e0_corpus_from_labeled_blocks(
+                                    user_text,
+                                    ["CURRENT_WORK_EXPERIENCE", "TAILORING_SUGGESTIONS", "TAILORING_FEEDBACK"],
+                                )
+                                validation_errors.extend(
+                                    _find_work_e0_violations(roles=list(roles or []), e0_corpus=e0_corpus)
+                                )
                                 
                                 if not validation_errors:
                                     # Valid! Exit retry loop.
@@ -6240,11 +6771,11 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                     bad_roles_text = "\n\n".join(bad_role_blocks) if bad_role_blocks else roles_text
                                     user_text = (
                                         f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
-                                        f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                                         f"[TAILORING_FEEDBACK]\n"
                                         f"MCP_VALIDATION_PAYLOAD: {payload_json} "
                                         f"Reduce ONLY flagged bullets by >= 30 chars and to <= {hard_limit} chars, "
-                                        f"without changing tone/meaning/logic. Keep 3-4 bullets per role. Do NOT invent facts.\n\n"
+                                        f"without changing tone/meaning/logic. Keep 3-4 bullets per role. Do NOT invent facts.\n"
+                                        f"E0_POLICY_ERRORS: {'; '.join(validation_errors[:6])}\n\n"
                                         f"[CURRENT_WORK_EXPERIENCE]\n{bad_roles_text}\n"
                                     )
                             except Exception as e:
@@ -6258,32 +6789,19 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                         elif prop and hasattr(prop, "roles"):
                             try:
                                 roles = prop.roles if hasattr(prop, "roles") else []
-                                serialized_roles = [
+                                proposal_roles = [
                                     {
                                         "title": r.title if hasattr(r, "title") else "",
                                         "company": r.company if hasattr(r, "company") else "",
                                         "date_range": r.date_range if hasattr(r, "date_range") else "",
                                         "location": r.location if hasattr(r, "location") else "",
                                         "bullets": list(r.bullets if hasattr(r, "bullets") else []),
-                                        "alignment_score": _coerce_alignment_score(getattr(r, "alignment_score", 0.0)),
-                                        "exclusion_reason": str(getattr(r, "exclusion_reason", "") or "").strip(),
                                     }
                                     for r in (roles or [])[:5]
                                 ]
-                                included_roles, excluded_roles = _split_work_roles_by_alignment(
-                                    roles=serialized_roles,
-                                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                                )
-                                merged_notes = _compose_work_alignment_notes(
-                                    base_notes=str(getattr(prop, "notes", "") or ""),
-                                    excluded_roles=excluded_roles,
-                                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                                )
                                 meta2["work_experience_proposal_block"] = {
-                                    "roles": included_roles,
-                                    "excluded_roles": excluded_roles,
-                                    "alignment_threshold": WORK_ROLE_ALIGNMENT_THRESHOLD,
-                                    "notes": merged_notes,
+                                    "roles": proposal_roles,
+                                    "notes": str(getattr(prop, "notes", "") or ""),
                                     "created_at": _now_iso(),
                                 }
                                 meta2["work_experience_proposal_sig"] = job_sig
@@ -6298,30 +6816,17 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 try:
                     proposal_block = meta2.get("work_experience_proposal_block")
                     if isinstance(proposal_block, dict) and isinstance(proposal_block.get("roles"), list):
-                        roles = proposal_block.get("roles")
-                        existing_excluded = proposal_block.get("excluded_roles") if isinstance(proposal_block.get("excluded_roles"), list) else []
-                        included_roles, excluded_from_roles = _split_work_roles_by_alignment(
-                            roles=list(roles or []),
-                            threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                        )
-                        excluded_roles = list(existing_excluded) + list(excluded_from_roles)
+                        roles = list(proposal_block.get("roles") or [])
 
-                        if not included_roles and not excluded_roles:
+                        if not roles:
                             stage_updates.append({"step": "work_apply", "ok": False, "error": "no_proposal"})
                         else:
-                            if included_roles:
-                                cv_data = _overwrite_work_experience_from_proposal_roles(cv_data=cv_data, proposal_roles=included_roles)
+                            prev_work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                            cv_data = _overwrite_work_experience_from_proposal_roles(cv_data=cv_data, proposal_roles=roles)
+                            cv_data = _backfill_missing_work_locations(cv_data=cv_data, previous_work=prev_work, meta=meta2)
 
                             meta2["work_experience_tailored"] = True
                             meta2["work_experience_proposal_accepted_at"] = _now_iso()
-                            proposal_block["roles"] = included_roles
-                            proposal_block["excluded_roles"] = excluded_roles
-                            proposal_block["alignment_threshold"] = WORK_ROLE_ALIGNMENT_THRESHOLD
-                            proposal_block["notes"] = _compose_work_alignment_notes(
-                                base_notes=str(proposal_block.get("notes") or ""),
-                                excluded_roles=excluded_roles,
-                                threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                            )
                             stage_updates.append({"step": "work_apply", "ok": True})
 
                         # Language-aware hard limit for post-apply validation
@@ -6362,86 +6867,69 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 ):
                     stage_updates.append({"step": "skills_rank", "mode": "cache", "ok": True})
                 else:
-                    skills_from_cv = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
-                    skills_legacy_from_cv = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
-                    dpu = meta2.get("docx_prefill_unconfirmed") if isinstance(meta2.get("docx_prefill_unconfirmed"), dict) else None
-                    skills_from_docx = dpu.get("it_ai_skills") if isinstance(dpu, dict) and isinstance(dpu.get("it_ai_skills"), list) else []
-                    skills_legacy_from_docx = dpu.get("technical_operational_skills") if isinstance(dpu, dict) and isinstance(dpu.get("technical_operational_skills"), list) else []
+                    job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
+                    job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+                    tailoring_suggestions = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
+                    feedback_once_raw = str(meta2.get("work_tailoring_feedback") or "").strip()
+                    tailoring_feedback = _escape_user_input_for_prompt(feedback_once_raw)
+                    if feedback_once_raw:
+                        meta2.pop("work_tailoring_feedback", None)
+                        meta2["work_tailoring_feedback_consumed_at"] = _now_iso()
+                    raw_docx_skills = _collect_raw_docx_skills_context(meta=meta2, max_items=20)
+                    raw_docx_skills_text = "\n".join([f"- {str(s).strip()}" for s in raw_docx_skills if str(s).strip()])
+                    target_lang = str(meta2.get("target_language") or cv_data.get("language") or "en").strip().lower()
+                    work_blocks: list[str] = []
+                    work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+                    for r in (work_list or [])[:8]:
+                        if not isinstance(r, dict):
+                            continue
+                        company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
+                        title = _sanitize_for_prompt(str(r.get("title") or r.get("position") or ""))
+                        date = _sanitize_for_prompt(str(r.get("date_range") or ""))
+                        bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else r.get("responsibilities")
+                        bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:6])
+                        head = " | ".join([p for p in [title, company, date] if p]) or "Role"
+                        work_blocks.append(f"{head}\n{bullet_lines}")
+                    work_text = "\n\n".join(work_blocks)
+                    user_text = (
+                        f"[JOB_SUMMARY]\n{job_summary}\n\n"
+                        f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
+                        f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
+                        f"[WORK_EXPERIENCE_TAILORED]\n{work_text}\n\n"
+                        f"[RAW_DOCX_SKILLS]\n{raw_docx_skills_text}\n"
+                    )
 
-                    seen_lower = set()
-                    skills_list = []
-                    for s in list(skills_from_cv) + list(skills_legacy_from_cv) + list(skills_from_docx) + list(skills_legacy_from_docx):
-                        s_str = str(s).strip()
-                        if s_str and s_str.lower() not in seen_lower:
-                            seen_lower.add(s_str.lower())
-                            skills_list.append(s_str)
-
-                    if not skills_list:
-                        stage_updates.append({"step": "skills_rank", "ok": False, "error": "no_skills"})
+                    ok_sk, parsed_sk, err_sk = _openai_json_schema_call(
+                        system_prompt=_build_ai_system_prompt(stage="it_ai_skills", target_language=target_lang),
+                        user_text=user_text,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        response_format=get_skills_unified_proposal_response_format(),
+                        max_output_tokens=1200,
+                        stage="it_ai_skills",
+                    )
+                    if not ok_sk or not isinstance(parsed_sk, dict):
+                        meta2["skills_proposal_error"] = str(err_sk)[:400]
+                        meta2["skills_proposal_sig"] = ""
+                        stage_updates.append({"step": "skills_rank", "ok": False, "error": str(err_sk)[:200]})
                     else:
-                        job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
-                        job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
-                        tailoring_suggestions = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
-                        tailoring_feedback = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
-                        work_prop = meta2.get("work_experience_proposal_block") if isinstance(meta2.get("work_experience_proposal_block"), dict) else None
-                        work_prop_notes = _escape_user_input_for_prompt(str((work_prop or {}).get("notes") or ""))
-                        notes = _escape_user_input_for_prompt(str(meta2.get("skills_ranking_notes") or ""))
-                        target_lang = str(meta2.get("target_language") or cv_data.get("language") or "en").strip().lower()
-                        skills_text = "\n".join([f"- {str(s).strip()}" for s in skills_list[:30] if str(s).strip()])
-                        work_blocks: list[str] = []
-                        work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
-                        for r in (work_list or [])[:8]:
-                            if not isinstance(r, dict):
-                                continue
-                            company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
-                            title = _sanitize_for_prompt(str(r.get("title") or r.get("position") or ""))
-                            date = _sanitize_for_prompt(str(r.get("date_range") or ""))
-                            bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else r.get("responsibilities")
-                            bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:6])
-                            head = " | ".join([p for p in [title, company, date] if p]) or "Role"
-                            work_blocks.append(f"{head}\n{bullet_lines}")
-                        work_text = "\n\n".join(work_blocks)
-                        user_text = (
-                            f"[JOB_SUMMARY]\n{job_summary}\n\n"
-                            f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
-                            f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
-                            f"[WORK_TAILORING_PROPOSAL_NOTES]\n{work_prop_notes}\n\n"
-                            f"[WORK_EXPERIENCE_TAILORED]\n{work_text}\n\n"
-                            f"[RANKING_NOTES]\n{notes}\n\n"
-                            f"[CANDIDATE_SKILLS]\n{skills_text}\n"
-                        )
-
-                        ok_sk, parsed_sk, err_sk = _openai_json_schema_call(
-                            system_prompt=_build_ai_system_prompt(stage="it_ai_skills", target_language=target_lang),
-                            user_text=user_text,
-                            trace_id=trace_id,
-                            session_id=session_id,
-                            response_format=get_skills_unified_proposal_response_format(),
-                            max_output_tokens=1200,
-                            stage="it_ai_skills",
-                        )
-                        if not ok_sk or not isinstance(parsed_sk, dict):
-                            meta2["skills_proposal_error"] = str(err_sk)[:400]
+                        try:
+                            prop = parse_skills_unified_proposal(parsed_sk)
+                            it_ai_skills = prop.it_ai_skills if hasattr(prop, "it_ai_skills") else []
+                            tech_ops_skills = prop.technical_operational_skills if hasattr(prop, "technical_operational_skills") else []
+                            meta2["skills_proposal_block"] = {
+                                "it_ai_skills": [str(s).strip() for s in it_ai_skills[:8] if str(s).strip()],
+                                "technical_operational_skills": [str(s).strip() for s in tech_ops_skills[:8] if str(s).strip()],
+                                "notes": str(getattr(prop, "notes", "") or "")[:500],
+                                "created_at": _now_iso(),
+                            }
+                            meta2["skills_proposal_sig"] = job_sig
+                            meta2["skills_proposal_base_sig"] = base_sig
+                            stage_updates.append({"step": "skills_rank", "mode": "ai", "ok": True})
+                        except Exception as e:
+                            meta2["skills_proposal_error"] = str(e)[:400]
                             meta2["skills_proposal_sig"] = ""
-                            stage_updates.append({"step": "skills_rank", "ok": False, "error": str(err_sk)[:200]})
-                        else:
-                            try:
-                                prop = parse_skills_unified_proposal(parsed_sk)
-                                it_ai_skills = prop.it_ai_skills if hasattr(prop, "it_ai_skills") else []
-                                tech_ops_skills = prop.technical_operational_skills if hasattr(prop, "technical_operational_skills") else []
-                                meta2["skills_proposal_block"] = {
-                                    "it_ai_skills": [str(s).strip() for s in it_ai_skills[:8] if str(s).strip()],
-                                    "technical_operational_skills": [str(s).strip() for s in tech_ops_skills[:8] if str(s).strip()],
-                                    "notes": str(getattr(prop, "notes", "") or "")[:500],
-                                    "created_at": _now_iso(),
-                                }
-                                meta2["skills_proposal_sig"] = job_sig
-                                meta2["skills_proposal_base_sig"] = base_sig
-                                stage_updates.append({"step": "skills_rank", "mode": "ai", "ok": True})
-                            except Exception as e:
-                                meta2["skills_proposal_error"] = str(e)[:400]
-                                meta2["skills_proposal_sig"] = ""
-                                stage_updates.append({"step": "skills_rank", "ok": False, "error": str(e)[:200]})
+                            stage_updates.append({"step": "skills_rank", "ok": False, "error": str(e)[:200]})
 
                 # Apply skills proposal to cv_data (silent accept)
                 try:
@@ -7265,10 +7753,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 notes = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
                 feedback = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
                 target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
-                alignment_policy = (
-                    f"For EACH role return alignment_score between 0 and 1. "
-                    f"If alignment_score < {WORK_ROLE_ALIGNMENT_THRESHOLD:.2f}, set exclusion_reason and keep bullets factual."
-                )
 
                 if user_action_payload and "work_tailoring_feedback" in user_action_payload:
                     feedback = _escape_user_input_for_prompt(str(user_action_payload.get("work_tailoring_feedback") or ""))
@@ -7309,9 +7793,10 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
                     title = _sanitize_for_prompt(str(r.get("title") or r.get("position") or ""))
                     date = _sanitize_for_prompt(str(r.get("date_range") or ""))
+                    location = _sanitize_for_prompt(str(r.get("location") or r.get("city") or r.get("place") or ""))
                     bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else r.get("responsibilities")
                     bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:12])
-                    head = " | ".join([p for p in [title, company, date] if p]) or "Role"
+                    head = " | ".join([p for p in [title, company, date, location] if p]) or "Role"
                     role_blocks.append(f"{head}\n{bullet_lines}")
                 roles_text = "\n\n".join(role_blocks)
 
@@ -7319,7 +7804,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
                     f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
                     f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
-                    f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                     f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                 )
 
@@ -7384,6 +7868,14 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                     validation_errors.append(
                                         f"Role {role_idx+1} ({company}), Bullet {bullet_idx+1}: {blen} chars (max: {hard_limit})"
                                     )
+
+                        e0_corpus = _extract_e0_corpus_from_labeled_blocks(
+                            user_text,
+                            ["CURRENT_WORK_EXPERIENCE", "TAILORING_SUGGESTIONS", "TAILORING_FEEDBACK"],
+                        )
+                        validation_errors.extend(
+                            _find_work_e0_violations(roles=list(roles or []), e0_corpus=e0_corpus)
+                        )
                         
                         if not validation_errors:
                             # Valid! Exit retry loop.
@@ -7394,10 +7886,10 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             user_text = (
                                 f"[JOB_SUMMARY]\n{_sanitize_for_prompt(job_summary)}\n\n"
                                 f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
-                                f"[ALIGNMENT_POLICY]\n{alignment_policy}\n\n"
                                 f"[TAILORING_FEEDBACK]\n"
                                 f"FIX_VALIDATION: Shorten bullets to fit hard limit (<= {hard_limit} chars). "
-                                f"Rewrite ONLY affected bullets. Keep 3-4 bullets per role. Do NOT invent facts.\n\n"
+                                f"Rewrite ONLY affected bullets. Keep 3-4 bullets per role. Do NOT invent facts.\n"
+                                f"E0_POLICY_ERRORS: {'; '.join(validation_errors[:6])}\n\n"
                                 f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                             )
                     except Exception as e:
@@ -7427,29 +7919,16 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     )
                 
                 roles = prop.roles if hasattr(prop, 'roles') else []
-                serialized_roles = [{
+                proposal_roles = [{
                     "title": r.title if hasattr(r, 'title') else "",
                     "company": r.company if hasattr(r, 'company') else "",
                     "date_range": r.date_range if hasattr(r, 'date_range') else "",
                     "location": r.location if hasattr(r, 'location') else "",
                     "bullets": list(r.bullets if hasattr(r, 'bullets') else []),
-                    "alignment_score": _coerce_alignment_score(getattr(r, "alignment_score", 0.0)),
-                    "exclusion_reason": str(getattr(r, "exclusion_reason", "") or "").strip(),
                 } for r in roles[:5]]
-                included_roles, excluded_roles = _split_work_roles_by_alignment(
-                    roles=serialized_roles,
-                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                )
-                merged_notes = _compose_work_alignment_notes(
-                    base_notes=str(prop.notes or ""),
-                    excluded_roles=excluded_roles,
-                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                )
                 meta2["work_experience_proposal_block"] = {
-                    "roles": included_roles,
-                    "excluded_roles": excluded_roles,
-                    "alignment_threshold": WORK_ROLE_ALIGNMENT_THRESHOLD,
-                    "notes": merged_notes,
+                    "roles": proposal_roles,
+                    "notes": str(prop.notes or ""),
                     "created_at": _now_iso(),
                 }
                 meta2 = _wizard_set_stage(meta2, "work_tailor_review")
@@ -7472,19 +7951,14 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
                 # Extract roles from structured proposal
                 roles = proposal_block.get("roles")
-                existing_excluded = proposal_block.get("excluded_roles") if isinstance(proposal_block.get("excluded_roles"), list) else []
                 if not isinstance(roles, list):
                     meta2 = _wizard_set_stage(meta2, "work_experience")
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(assistant_text="Proposal was empty or invalid. Generate again.", meta_out=meta2, cv_out=cv_data)
 
-                included_roles, excluded_from_roles = _split_work_roles_by_alignment(
-                    roles=list(roles or []),
-                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                )
-                excluded_roles = list(existing_excluded) + list(excluded_from_roles)
+                included_roles = list(roles or [])
 
-                if not included_roles and not excluded_roles:
+                if not included_roles:
                     meta2 = _wizard_set_stage(meta2, "work_experience")
                     cv_data, meta2 = _persist(cv_data, meta2)
                     return _wizard_resp(assistant_text="Proposal was empty or invalid. Generate again.", meta_out=meta2, cv_out=cv_data)
@@ -7518,16 +7992,11 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     )
 
                 # Apply accepted proposal as replace-all (no preserve of legacy unmatched roles).
+                prev_work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
                 cv_data = _overwrite_work_experience_from_proposal_roles(cv_data=cv_data, proposal_roles=included_roles)
+                cv_data = _backfill_missing_work_locations(cv_data=cv_data, previous_work=prev_work, meta=meta2)
 
                 proposal_block["roles"] = included_roles
-                proposal_block["excluded_roles"] = excluded_roles
-                proposal_block["alignment_threshold"] = WORK_ROLE_ALIGNMENT_THRESHOLD
-                proposal_block["notes"] = _compose_work_alignment_notes(
-                    base_notes=str(proposal_block.get("notes") or ""),
-                    excluded_roles=excluded_roles,
-                    threshold=WORK_ROLE_ALIGNMENT_THRESHOLD,
-                )
                 meta2["work_experience_tailored"] = True
                 meta2["work_experience_proposal_accepted_at"] = _now_iso()
 
@@ -7560,9 +8029,10 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                             company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
                             title = _sanitize_for_prompt(str(r.get("title") or r.get("position") or ""))
                             date = _sanitize_for_prompt(str(r.get("date_range") or ""))
+                            location = _sanitize_for_prompt(str(r.get("location") or r.get("city") or r.get("place") or ""))
                             bullets = r.get("bullets") if isinstance(r.get("bullets"), list) else r.get("responsibilities")
                             bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:12])
-                            head = " | ".join([p for p in [title, company, date] if p]) or "Role"
+                            head = " | ".join([p for p in [title, company, date, location] if p]) or "Role"
                             role_blocks.append(f"{head}\n{bullet_lines}")
                         roles_text = "\n\n".join(role_blocks)
 
@@ -7626,6 +8096,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                                 cv_data=cv_data,
                                 proposal_roles=proposal_roles,
                             )
+                            cv_candidate = _backfill_missing_work_locations(cv_data=cv_candidate, previous_work=(cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []), meta=meta2)
                             violations_retry = _find_work_bullet_hard_limit_violations(
                                 cv_data=cv_candidate,
                                 hard_limit=hard_limit,
@@ -8199,25 +8670,6 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 if "skills_ranking_notes" in payload:
                     meta2["skills_ranking_notes"] = str(payload.get("skills_ranking_notes") or "").strip()[:2000]
 
-                skills_from_cv = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
-                skills_legacy_from_cv = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
-                dpu = meta2.get("docx_prefill_unconfirmed") if isinstance(meta2.get("docx_prefill_unconfirmed"), dict) else None
-                skills_from_docx = dpu.get("it_ai_skills") if isinstance(dpu, dict) and isinstance(dpu.get("it_ai_skills"), list) else []
-                skills_legacy_from_docx = dpu.get("technical_operational_skills") if isinstance(dpu, dict) and isinstance(dpu.get("technical_operational_skills"), list) else []
-
-                # Deduplicate skills (case-insensitive)
-                seen_lower = set()
-                skills_list = []
-                for s in list(skills_from_cv) + list(skills_legacy_from_cv) + list(skills_from_docx) + list(skills_legacy_from_docx):
-                    s_str = str(s).strip()
-                    if s_str and s_str.lower() not in seen_lower:
-                        seen_lower.add(s_str.lower())
-                        skills_list.append(s_str)
-                if not skills_list:
-                    meta2 = _wizard_set_stage(meta2, "it_ai_skills")
-                    cv_data, meta2 = _persist(cv_data, meta2)
-                    return _wizard_resp(assistant_text="No skills found in your CV.", meta_out=meta2, cv_out=cv_data)
-
                 if not _openai_enabled():
                     meta2 = _wizard_set_stage(meta2, "it_ai_skills")
                     cv_data, meta2 = _persist(cv_data, meta2)
@@ -8226,13 +8678,15 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
                 job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
                 tailoring_suggestions = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
-                tailoring_feedback = _escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
-                work_prop = meta2.get("work_experience_proposal_block") if isinstance(meta2.get("work_experience_proposal_block"), dict) else None
-                work_prop_notes = _escape_user_input_for_prompt(str((work_prop or {}).get("notes") or ""))
-                notes = _escape_user_input_for_prompt(str(meta2.get("skills_ranking_notes") or ""))
+                feedback_once_raw = str(meta2.get("work_tailoring_feedback") or "").strip()
+                tailoring_feedback = _escape_user_input_for_prompt(feedback_once_raw)
+                if feedback_once_raw:
+                    meta2.pop("work_tailoring_feedback", None)
+                    meta2["work_tailoring_feedback_consumed_at"] = _now_iso()
+                raw_docx_skills = _collect_raw_docx_skills_context(meta=meta2, max_items=20)
+                raw_docx_skills_text = "\n".join([f"- {str(s).strip()}" for s in raw_docx_skills if str(s).strip()])
                 target_lang = str(meta2.get("target_language") or cv_data.get("language") or "en").strip().lower()
 
-                skills_text = "\n".join([f"- {str(s).strip()}" for s in skills_list[:30] if str(s).strip()])
                 work_blocks: list[str] = []
                 work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
                 for r in (work_list or [])[:8]:
@@ -8251,10 +8705,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     f"[JOB_SUMMARY]\n{job_summary}\n\n"
                     f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
                     f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
-                    f"[WORK_TAILORING_PROPOSAL_NOTES]\n{work_prop_notes}\n\n"
                     f"[WORK_EXPERIENCE_TAILORED]\n{work_text}\n\n"
-                    f"[RANKING_NOTES]\n{notes}\n\n"
-                    f"[CANDIDATE_SKILLS]\n{skills_text}\n"
+                    f"[RAW_DOCX_SKILLS]\n{raw_docx_skills_text}\n"
                 )
 
                 ok, parsed, err = _openai_json_schema_call(
@@ -9800,6 +10252,12 @@ def _tool_generate_cv_from_session(*, session_id: str, language: str | None, cli
                 cv_data["photo_url"] = f"data:{ptr.content_type};base64,{b64}"
     except Exception as e:
         logging.warning(f"Failed to inject photo from blob for session {session_id}: {e}")
+
+    cv_data = _backfill_missing_work_locations(
+        cv_data=cv_data,
+        previous_work=None,
+        meta=meta if isinstance(meta, dict) else {},
+    )
 
     is_valid, errors = validate_canonical_schema(cv_data, strict=True)
     if not is_valid:

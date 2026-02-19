@@ -33,7 +33,6 @@ skills_text = "\n".join([f"- {str(s).strip()}" for s in skills_list[:30] if str(
 
 user_text = (
     f"[JOB_SUMMARY]\n{job_summary}\n\n"
-    f"[CANDIDATE_PROFILE]\n{str(cv.get('profile') or '')}\n\n"
     f"[TAILORING_SUGGESTIONS]\n{tailoring}\n\n"
     f"[RANKING_NOTES]\n{notes}\n\n"
     f"[CANDIDATE_SKILLS]\n{skills_text}\n"

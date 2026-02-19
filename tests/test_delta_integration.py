@@ -41,7 +41,7 @@ class TestHashComputation:
         
         expected_sections = {
             "contact", "work_experience", "education", "languages",
-            "it_ai_skills", "interests", "profile", "further_experience"
+            "it_ai_skills", "interests", "further_experience"
         }
         assert set(hashes.keys()) == expected_sections
 
@@ -81,18 +81,13 @@ class TestDeltaDetection:
         
         assert changes["work_experience"] is True  # Changed
         assert changes["education"] is False  # Unchanged
-        assert changes["profile"] is False  # Unchanged
+        assert changes["languages"] is False  # Unchanged
 
-    def test_detects_new_profile(self):
-        """Detect profile changes."""
+    def test_profile_not_tracked(self):
+        """Profile is intentionally excluded from section hashes."""
         cv = sample_cv()
-        prev_hashes = compute_cv_section_hashes(cv)
-        
-        cv["profile"] = "New profile text"
-        curr_hashes = compute_cv_section_hashes(cv)
-        
-        changes = detect_section_changes(curr_hashes, prev_hashes)
-        assert changes["profile"] is True
+        hashes = compute_cv_section_hashes(cv)
+        assert "profile" not in hashes
 
     def test_empty_prev_hashes_marks_all_changed(self):
         """No previous hashes → all sections marked changed (safe default)."""

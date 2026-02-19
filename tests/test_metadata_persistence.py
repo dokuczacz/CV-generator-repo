@@ -7,7 +7,11 @@ import json
 import sys
 import base64
 import requests
+import pytest
 from pathlib import Path
+
+if __name__ != "__main__":
+    pytest.skip("Manual local script; run directly with python tests/test_metadata_persistence.py", allow_module_level=True)
 
 BASE_URL = "http://localhost:7071/api"
 

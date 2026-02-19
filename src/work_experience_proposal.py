@@ -39,6 +39,7 @@ class WorkExperienceRoleProposal(BaseModel):
         return v
 
 
+
 class WorkExperienceBulletsProposal(BaseModel):
     """Proposed work experience section with role-by-role structure."""
 

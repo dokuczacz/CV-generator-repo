@@ -1,0 +1,551 @@
+{
+  "scenario_id": "a15065ac-15e6-4f29-9642-7e1da0da2925",
+  "created_at": "2026-02-11T21:50:08.046168",
+  "updated_at": "2026-02-11T22:04:17.112110",
+  "cv_data": {
+    "full_name": "Mariusz Horodecki",
+    "email": "horodecki.mariusz@gmail.com",
+    "phone": "+41 77 952 24 37",
+    "address_lines": [
+      "Zer Chirchu 20",
+      "3933 Staldenried"
+    ],
+    "photo_url": "",
+    "work_experience": [
+      {
+        "employer": "Git Hub: https://github.com/dokuczacz/",
+        "title": "Independent Technical Development",
+        "date_range": "2024-11 - present",
+        "location": "",
+        "bullets": [
+          "Designed Omni Flow Beta, a multi-user AI agent backend on Azure Functions and Blob Storage enabling deterministic tool orchestration, user-isolated data storage, and semantic JSON pipelines",
+          "Built and maintained Omni Flow Central on Azure Functions, exposing authenticated HTTP endpoints for tool execution, dataset access, OAuth email integration, and structured blob storage",
+          "Developed a production-ready CV Generator with stateless tool-orchestrated workflows, ATS-compliant schema validation, deterministic PDF rendering, and OpenAI tool calling via Azure Functions"
+        ]
+      },
+      {
+        "employer": "GL Solutions Sp. Z o.o.",
+        "title": "Director",
+        "date_range": "2020-01 - 2025-10",
+        "location": "Zielona Góra, Poland",
+        "bullets": [
+          "Built a construction company from scratch delivering 30-40k EUR projects, achieving commercial viability and repeatable project delivery.",
+          "Streamlined site operations and subcontractor workflows, cutting on-site process steps and improving project throughput by measurable lead-time reductions.",
+          "Optimized scheduling and budgeting controls to reduce rework and delays, improving on-time delivery rate for public and private contracts."
+        ]
+      },
+      {
+        "employer": "Expondo Polska Sp. z o.o.",
+        "title": "Head of Quality & Product Service",
+        "date_range": "2018-11 - 2020-01",
+        "location": "Zielona Góra, Poland",
+        "bullets": [
+          "Led three departments (35 people) and introduced KPI dashboards and standard work, improving visibility and process compliance across quality functions.",
+          "Resolved a 3-year product quality issue, reducing customer claims by 70% through root-cause fixes and supplier quality controls.",
+          "Reorganized warehouse workflows and locations, halving the number of handling steps and eliminating legacy backlog within three months."
+        ]
+      },
+      {
+        "employer": "SE Bordnetze SRL",
+        "title": "Quality Manager",
+        "date_range": "2016-08 - 2018-11",
+        "location": "Greenfield project Orhei, Moldova",
+        "bullets": [
+          "Established a greenfield plant and quality systems for 5 sections and 80 employees, enabling production readiness and scalable operations.",
+          "Implemented VDA, Formel-Q and IATF standards and achieved IATF compliance on first audit through structured standard work and training.",
+          "Designed handover and succession plans initiated six months ahead, building and mentoring a local quality team to support OEM production lines."
+        ]
+      },
+      {
+        "employer": "Sumitomo Electric Bordnetze SE",
+        "title": "Global Process Improvement Specialist",
+        "date_range": "2011-03 - 2016-07",
+        "location": "Wolfsburg, Germany",
+        "bullets": [
+          "Led shop-floor standardization and KAIZEN programs across sites, driving measurable cycle-time and cost reductions via time studies and process redesign.",
+          "Conducted value chain diagnostics and benchmarking as lead auditor, aligning global audits and adapting best practices to customer requirements.",
+          "Deployed production solutions in critical plants as on-site troubleshooter, restoring output and stabilizing quality at customer-critical locations."
+        ]
+      }
+    ],
+    "education": [
+      {
+        "title": "Master of Science in Electrical Engineering",
+        "institution": "Poznań University of Technology",
+        "date_range": "2012–2015",
+        "specialization": "Industrial and vehicle systems",
+        "details": [
+          "Focus: Industrial and vehicle systems"
+        ],
+        "location": ""
+      },
+      {
+        "title": "Bachelor of Engineering in Electrical Engineering",
+        "institution": "Poznań University of Technology",
+        "date_range": "2008–2012",
+        "specialization": "Microprocessor control systems",
+        "details": [
+          "Focus: Microprocessor control systems"
+        ],
+        "location": ""
+      }
+    ],
+    "further_experience": [],
+    "languages": [
+      "Polish (native)",
+      "English (fluent)",
+      "German (intermediate)",
+      "Russian and Romanian (basic knowledge)"
+    ],
+    "it_ai_skills": [
+      "Azure Functions",
+      "Azure Blob Storage",
+      "GitHub",
+      "OpenAI / GPT integration",
+      "Deterministic tool orchestration",
+      "OAuth integration",
+      "Automated PDF generation",
+      "KPI dashboards / reporting"
+    ],
+    "interests": "Systems thinking & workflow optimization, process automation & planning architectures, long-distance cycling, outdoor activities, hiking, fiction (e.g., fantasy/sci-fi) and non-fiction (decision psychology, NLP)",
+    "references": "",
+    "technical_operational_skills": [
+      "Operational Excellence",
+      "Process Improvement (Kaizen, VSM)",
+      "Quality Systems (IATF, VDA, Formel-Q)",
+      "Standard Work & SOPs",
+      "Value Chain Diagnostics",
+      "Changeover & Downtime Reduction",
+      "Root Cause Analysis (FMEA, 5 Whys, PDCA)",
+      "CAPEX/OPEX Project Management"
+    ]
+  },
+  "metadata": {
+    "language": "en",
+    "source_language": "en",
+    "target_language": "en",
+    "created_from": "docx",
+    "stage": "PREPARE",
+    "stage_updated_at": "2026-02-11T21:50:08.045174",
+    "flow_mode": "wizard",
+    "wizard_stage": "cover_letter_review",
+    "wizard_stage_updated_at": "2026-02-11T22:04:16.907294",
+    "prefill_summary": {
+      "has_name": true,
+      "has_email": true,
+      "has_phone": true,
+      "work_experience_count": 5,
+      "education_count": 2,
+      "languages_count": 4,
+      "it_ai_skills_count": 6,
+      "interests_chars": 223
+    },
+    "docx_prefill_unconfirmed": {
+      "full_name": "Mariusz Horodecki",
+      "email": "horodecki.mariusz@gmail.com",
+      "phone": "+41 77 952 24 37",
+      "address_lines": [
+        "Zer Chirchu 20",
+        "3933 Staldenried"
+      ],
+      "profile": "Projekt- und Betriebsleiter mit über 10 Jahren Erfahrung in Qualitätssystemen, technischen Prozessverbesserungen und Infrastrukturprojekten. Nachgewiesene Führung interdisziplinärer Teams, Aufbau von Greenfield-Standorten sowie Umsetzung komplexer Projekte in öffentlichen und privaten Bereichen. Starker Hintergrund in der Produktions- und Qualitätsingenieurtechnik mit zunehmender Spezialisierung auf Automatisierung und KI-gestützte Produktivitätstools (GPT). Fliessend in Englisch, muttersprachlich Polnisch, Deutschkenntnisse auf Mittelstufenniveau. Auf der Suche nach neuen Herausforderungen.",
+      "work_experience": [
+        {
+          "date_range": "2024-11 - present",
+          "employer": "",
+          "location": "",
+          "title": "Independent Technical Development, Git Hub: https://github.com/dokuczacz/",
+          "bullets": [
+            "Designed and developed Omni Flow Beta, a multi-user AI agent backend built on Azure Functions and Azure Blob Storage, providing deterministic tool orchestration, user-isolated data storage, and semantic JSON pipelines for LLM-driven workflows",
+            "Built and maintained Omni Flow Central, a dedicated Azure Functions backend for Custom GPT tools, exposing authenticated HTTP endpoints for tool execution, dataset access, OAuth-based email integration, and structured blob-based storage",
+            "Developed a production-ready CV Generator, implementing a stateless, tool-orchestrated workflow for ATS-compliant CV generation, schema validation, and deterministic PDF rendering using OpenAI tool calling and Azure Functions"
+          ]
+        },
+        {
+          "date_range": "2020-01 – 2025-10",
+          "employer": "GL Solutions Sp. Z o.o.",
+          "location": "Zielona Góra, Poland",
+          "title": "Direktor",
+          "bullets": [
+            "Planung und Koordination von Strassenbau- und Infrastrukturprojekten",
+            "Überwachung von Baustellen, Subunternehmern und Einhaltung gesetzlicher Vorschriften",
+            "Erstellung von Terminplänen, Budgets und Abschlussdokumentationen",
+            "Operatives Management öffentlicher und privater Aufträge",
+            "Einsatz von Planungs- und Kalkulationstools zur Optimierung der Umsetzung vor Ort"
+          ]
+        },
+        {
+          "date_range": "2018-11 – 2020-01",
+          "employer": "Expondo Polska Sp. z o.o.",
+          "location": "Zielona Góra, Poland",
+          "title": "Leiter Qualität & Produktservice",
+          "bullets": [
+            "Leitung von 3 Abteilungen mit insgesamt 35 Mitarbeitenden",
+            "Sicherstellung der CE-Konformität, Einführung von KPI-Dashboards und Prozessverbesserungen",
+            "Reklamationsmanagement, Produkt- und Prozessoptimierung",
+            "Standardisierung und Verbesserung der internen Abläufe"
+          ]
+        },
+        {
+          "date_range": "2016-08 – 2018-11",
+          "employer": "SE Bordnetze SRL",
+          "location": "Greenfield project Orhei, Moldova",
+          "title": "Qualitätsmanager",
+          "bullets": [
+            "Leitung eines Bereichs mit 5 Sektionen und 80 Mitarbeitenden",
+            "Aufbau eines Greenfield-Werks, Einführung von Prozessen und Qualitätssystemen",
+            "Implementierung von VDA, Formel-Q und IATF Standards",
+            "Ansprechpartner für OEM-Kunden und Zertifizierungsstellen"
+          ]
+        },
+        {
+          "date_range": "2011-03 – 2016-07",
+          "employer": "Sumitomo Electric Bordnetze SE",
+          "location": "Wolfsburg, Germany",
+          "title": "Spezialist für Prozessverbesserung (global)",
+          "bullets": [
+            "Optimierung von Arbeitsplätzen und Prozessen, Durchführung von Zeitstudien",
+            "Kostenreduktion durch effiziente Produktionslösungen",
+            "Hauptauditor (PK) – Koordination globaler Audits, Benchmarking, Kundenanforderungsanpassung"
+          ]
+        }
+      ],
+      "education": [
+        {
+          "date_range": "2012–2015",
+          "institution": "Poznań University of Technology",
+          "title": "Master of Science in Electrical Engineering",
+          "details": [
+            "Schwerpunkt: Industrielle und fahrzeugtechnische Systeme"
+          ]
+        },
+        {
+          "date_range": "2008–2012",
+          "institution": "Poznań University of Technology",
+          "title": "Bachelor of Engineering in Electrical Engineering",
+          "details": [
+            "Schwerpunkt: Mikroprozessorsteuerungen"
+          ]
+        }
+      ],
+      "languages": [
+        "Polnisch (Muttersprache)",
+        "Englisch (fliessend)",
+        "Deutsch (mittelstufe)",
+        "Russian and Romanian (basic knowledge)"
+      ],
+      "it_ai_skills": [
+        "Technisches Projektmanagement (CAPEX/OPEX)",
+        "Führung interdisziplinärer Teams",
+        "Ursachenanalysen & Prozessverbesserungen (FMEA, 5 Why, PDCA)",
+        "Baustellenmanagement (Strassenbau)",
+        "Standardisierung & Optimierung auf datenbasierter Grundlage",
+        "KI-gestützte Effizienz (GPT / Automatisierung / Reporting)"
+      ],
+      "technical_operational_skills": [],
+      "further_experience": [
+        {
+          "date_range": "05/2018",
+          "organization": "Q Anforderungen – TQM Slovakia",
+          "title": "Formel",
+          "bullets": []
+        },
+        {
+          "date_range": "04/2018",
+          "organization": "RQM Certification s.r.l.",
+          "title": "Core Tools (APQP, FMEA, MSA, SPC, PPAP)",
+          "bullets": []
+        },
+        {
+          "date_range": "12/2017",
+          "organization": "RQM Certification s.r.l.",
+          "title": "Interner Auditor für IATF",
+          "bullets": []
+        },
+        {
+          "date_range": "11/2017",
+          "organization": "RQM Certification s.r.l.",
+          "title": "IATF für Führungskräfte",
+          "bullets": []
+        },
+        {
+          "date_range": "03/2017",
+          "organization": "TQMsoft Sp. z o.o.",
+          "title": "Produktsicherheitsbeauftragter",
+          "bullets": []
+        },
+        {
+          "date_range": "12/2015",
+          "organization": "Effect Group Sp. z o.o.",
+          "title": "Teamorientierte Kommunikation",
+          "bullets": []
+        }
+      ],
+      "interests": "Systemdenken & Workflow-Optimierung, Prozessautomatisierung & Planungsarchitekturen, Langstreckenradfahren, Outdoor-Aktivitäten, Wandern, Belletristik (z. B. Fantasy/Sci-Fi) und Fachliteratur (Entscheidungspsychologie, NLP)"
+    },
+    "confirmed_flags": {
+      "contact_confirmed": true,
+      "education_confirmed": true,
+      "confirmed_at": "2026-02-11T21:51:33.163998"
+    },
+    "job_posting_text": "Back to Search\n\nLonza\nOperational Excellence Manager - Vibe-X (Microbial/Bioconjugates)\nPosted Jan 30, 2026\nJob ID: R73184\nManufacturing Operations & Production\nLocation\nVisp\nHours/week\n41 hrs/week\nPayrate range\nUnknown\n\nToday, Lonza is a global leader in life sciences operating across five continents. While we work in science, there’s no magic formula to how we do it. Our greatest scientific solution is talented people working together, devising ideas that help businesses to help people. In exchange, we let our people own their careers. Their ideas, big and small, genuinely improve the world. And that’s the kind of work we want to be part of.\n\nThis role is based in Visp and will be instrumental in driving performance improvement in the Growth Project Vibe-X (Microbial and Bioconjugation Production). The position combines project management, operational excellence, and manufacturing expertise to lead high-impact, cross-functional initiatives.\n\nThe actual location of this job is in Visp, Switzerland. Relocation assistance is available for eligible candidates and their families, if needed.\n\nWhat you’ll get:\n\n    An agile career and dynamic working culture in a driven team.\n\n    An inclusive and ethical workplace.\n\n    Compensation programs that recognize high performance.\n\n    A variety of benefits depending on role and location.\n\n    Relocation assistance for eligible candidates.\n\nWhat you’ll do:\n\n    Lead and deliver high-priority, complex performance improvement projects in the growth project Vibe-X combining Microbial and Bioconjugation technology.\n\n    Drive the implementation of LBMS standards and tools, including 6S, Standard Work, VSM, and problem-solving.\n\n    Coordinate and support maturity assessments and improvement roadmaps for operational functions.\n\n    Act as SME and mentor for lean leadership and continuous improvement culture.\n\n    Facilitate workshops and provide methodology support for key cost-saving and performance initiatives.\n\n    Collaborate with asset teams and OE functions to identify improvement opportunities via end-to-end value chain diagnostics.\n\n    Support strategic projects.\n\nWhat we’re looking for:\n\n    Proven hands-on experience in cycle time, changeover, and downtime reduction.\n\n    Strong background in Operational Excellence and manufacturing processes.\n\n    Demonstrated ability to lead change and collaborate across functions.\n\n    Bachelor’s degree required; Master’s preferred (IE, Science, Engineering or related fields)\n\n    Experience in Lean Six Sigma; pharma industry experience is a plus\n\n    Structured, focused, and well-organized working style.\n\n    Strong leadership and communication skills across all levels.\n\n    Fluent in English; German is a plus.\n\nEvery day, Lonza’s products and services have a positive impact on millions of people. For us, this is not only a great privilege, but also a great responsibility. How we achieve our business results is just as important as the achievements themselves. At Lonza, we respect and protect our people and our environment. Any success we achieve is no success at all if not achieved ethically.\n\nPeople come to Lonza for the challenge and creativity of solving complex problems and developing new ideas in life sciences. In return, we offer the satisfaction that comes with improving lives all around the world. The satisfaction that comes with making a meaningful difference.\n\nLonza is an equal opportunity employer. All qualified applicants will receive consideration for employment without regard to race, religion, color, national origin, sex, sexual orientation, gender identity, age, status as a qualified individual with disability, protected veteran status, or any other characteristic protected by law.\nSimilar jobs\n+ Search all projects\n\nRandstad Sourceright 2026. All rights reserved",
+    "photo_blob": {
+      "container": "cv-photos",
+      "blob_name": "photos/482d34fd-d419-4d9b-90f4-dc437ddde0ae.png",
+      "content_type": "image/png"
+    },
+    "fast_path_profile": false,
+    "current_job_sig": "5dbd2aa8b5fe57b5a83b09b2e4e09a74b9ce8035e10603dbb0c7ba5af2327045",
+    "job_changed_at": "2026-02-11T21:50:08.167730",
+    "pdf_generated": false,
+    "job_reference_sig": "",
+    "work_experience_proposal_sig": "",
+    "skills_proposal_sig": "",
+    "pending_confirmation": null,
+    "event_log": [
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:50:08.432437"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:50:10.140660"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:50:32.537345"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:51:33.283754"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:51:36.805653"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:52:00.059441"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:53:10.945696"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:53:42.946345"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:53:42.999811"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T21:58:47.106888"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T22:04:09.950416"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T22:04:09.976995"
+      },
+      {
+        "type": "generate_cv_from_session_attempt",
+        "language": "en",
+        "client_context": {},
+        "ts": "2026-02-11T22:04:11.232095"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T22:04:17.062746"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-11T22:04:17.100700"
+      }
+    ],
+    "bulk_translated_to": "en",
+    "bulk_translation_status": "ok",
+    "base_cv": {
+      "container": "cv-artifacts",
+      "blob_name": "base/a15065ac-15e6-4f29-9642-7e1da0da2925/1e114d44902cb4120ee1c4ef36038d4539a9b2b3d648e852b1349e611f122421.json",
+      "sha256": "1e114d44902cb4120ee1c4ef36038d4539a9b2b3d648e852b1349e611f122421",
+      "created_at": "2026-02-11T21:51:36.694650"
+    },
+    "base_cv_sha256": "1e114d44902cb4120ee1c4ef36038d4539a9b2b3d648e852b1349e611f122421",
+    "stable_profile_saved": true,
+    "stable_profile_ref": {
+      "store": "blob",
+      "key": "cv-profiles/profiles/f2601a5af1ccec0c1e370ed65af2de2b55d222c2351e03685b46038400c9c870/en/latest_profile_v1.json"
+    },
+    "job_reference": {
+      "role_title": "Operational Excellence Manager - Vibe-X (Microbial/Bioconjugates)",
+      "company": "Lonza",
+      "location": "Visp, Switzerland",
+      "seniority": "",
+      "employment_type": "",
+      "responsibilities": [
+        "Lead and deliver high-priority, complex performance improvement projects in Growth Project Vibe-X (Microbial and Bioconjugation).",
+        "Drive implementation of LBMS standards and tools including 6S, Standard Work, VSM, and problem-solving.",
+        "Coordinate and support maturity assessments and improvement roadmaps for operational functions.",
+        "Act as SME and mentor for lean leadership and continuous improvement culture.",
+        "Facilitate workshops and provide methodology support for cost-saving and performance initiatives.",
+        "Collaborate with asset teams and OE functions to identify opportunities via end-to-end value chain diagnostics.",
+        "Support strategic projects."
+      ],
+      "must_haves": [
+        "Proven hands-on experience in cycle time, changeover, and downtime reduction.",
+        "Strong background in Operational Excellence and manufacturing processes.",
+        "Bachelor’s degree required; Master’s preferred (IE, Science, Engineering or related fields).",
+        "Experience in Lean Six Sigma.",
+        "Structured, focused, and well-organized working style.",
+        "Strong leadership and communication skills across all levels.",
+        "Fluent in English."
+      ],
+      "nice_to_haves": [
+        "Pharma industry experience is a plus.",
+        "German language skills are a plus.",
+        "Experience mentoring and acting as SME for lean leadership."
+      ],
+      "tools_tech": [
+        "LBMS standards",
+        "6S",
+        "Standard Work",
+        "VSM (Value Stream Mapping)",
+        "Lean Six Sigma",
+        "Problem-solving methodologies"
+      ],
+      "keywords": [
+        "Operational Excellence",
+        "continuous improvement",
+        "cycle time reduction",
+        "changeover reduction",
+        "downtime reduction",
+        "value chain diagnostics",
+        "lean leadership",
+        "maturity assessment",
+        "performance improvement",
+        "cross-functional projects",
+        "Vibe-X",
+        "Microbial production",
+        "Bioconjugation",
+        "workshops",
+        "asset teams"
+      ]
+    },
+    "job_reference_status": "ok",
+    "work_tailoring_notes": "ok in GL solution i created from scratches construction company capable to deliver 30-40k eur jobs, also for public sector,\nin expondo: technically solved issue with 3 years old company headache - good seller - bad quality, claims reduced by 70%, improved multiple workflows, eg. reduction number of steps in warehouse by half by rearranging the locations, after 3 months got rid of old department leftovers (no high-level overdue actions), introduced work classification --> simple job, agency staff, technical work --> technician\nin sumitomo, basically from scraches build quality team taking care of product being actually send to oem production lines, capable to deliver right quality, IATF passed at first try, passed many customer audits, build team from local people, hand over process of position planned and started 6 months ahead, this refer to job positon in moldova quality manager\nSummitomo process improvement:\naround 60% of time in production plants in random locations,\nfire-fighter - i was being sent to critical status plants to put down fires, usually customer-high-level concerns (eg. lack of output, very bad quality),\nmanaged international project of shop floor standardisation and KAIZEN implementation, highest level expert in concern-wide, eg. agreeing which of japanese shareholders applies to our business branch (technically), agreeing concern audits schedule, being main contact person, advicing implementation ideas,\nleaded very company wide improvements, training systems, production managment \nthis is refering to Sumitomo Electric Bordnetze SE — Global Process Improvement Specialist (2011-03 – 2016-07)",
+    "work_experience_proposal_block": {
+      "roles": [
+        {
+          "title": "Director",
+          "company": "GL Solutions Sp. Z o.o.",
+          "date_range": "2020-01 – 2025-10",
+          "location": "",
+          "bullets": [
+            "Built a construction company from scratch delivering 30-40k EUR projects, achieving commercial viability and repeatable project delivery.",
+            "Streamlined site operations and subcontractor workflows, cutting on-site process steps and improving project throughput by measurable lead-time reductions.",
+            "Optimized scheduling and budgeting controls to reduce rework and delays, improving on-time delivery rate for public and private contracts."
+          ]
+        },
+        {
+          "title": "Head of Quality & Product Service",
+          "company": "Expondo Polska Sp. z o.o.",
+          "date_range": "2018-11 – 2020-01",
+          "location": "",
+          "bullets": [
+            "Led three departments (35 people) and introduced KPI dashboards and standard work, improving visibility and process compliance across quality functions.",
+            "Resolved a 3-year product quality issue, reducing customer claims by 70% through root-cause fixes and supplier quality controls.",
+            "Reorganized warehouse workflows and locations, halving the number of handling steps and eliminating legacy backlog within three months."
+          ]
+        },
+        {
+          "title": "Quality Manager",
+          "company": "SE Bordnetze SRL",
+          "date_range": "2016-08 – 2018-11",
+          "location": "",
+          "bullets": [
+            "Established a greenfield plant and quality systems for 5 sections and 80 employees, enabling production readiness and scalable operations.",
+            "Implemented VDA, Formel-Q and IATF standards and achieved IATF compliance on first audit through structured standard work and training.",
+            "Designed handover and succession plans initiated six months ahead, building and mentoring a local quality team to support OEM production lines."
+          ]
+        },
+        {
+          "title": "Global Process Improvement Specialist",
+          "company": "Sumitomo Electric Bordnetze SE",
+          "date_range": "2011-03 – 2016-07",
+          "location": "",
+          "bullets": [
+            "Led shop-floor standardization and KAIZEN programs across sites, driving measurable cycle-time and cost reductions via time studies and process redesign.",
+            "Conducted value chain diagnostics and benchmarking as lead auditor, aligning global audits and adapting best practices to customer requirements.",
+            "Deployed production solutions in critical plants as on-site troubleshooter, restoring output and stabilizing quality at customer-critical locations."
+          ]
+        }
+      ],
+      "notes": "Bullets rewritten for Operational Excellence focus: emphasized cycle-time, changeover, downtime reduction, standard work, VSM/KAIZEN-related activities and measurable outcomes while preserving candidate facts.",
+      "created_at": "2026-02-11T21:53:10.834567"
+    },
+    "work_experience_tailored": true,
+    "work_experience_proposal_accepted_at": "2026-02-11T21:53:42.822812",
+    "skills_proposal_block": {
+      "it_ai_skills": [
+        "Azure Functions",
+        "Azure Blob Storage",
+        "GitHub",
+        "OpenAI / GPT integration",
+        "Deterministic tool orchestration",
+        "OAuth integration",
+        "Automated PDF generation",
+        "KPI dashboards / reporting"
+      ],
+      "technical_operational_skills": [
+        "Operational Excellence",
+        "Process Improvement (Kaizen, VSM)",
+        "Quality Systems (IATF, VDA, Formel-Q)",
+        "Standard Work & SOPs",
+        "Value Chain Diagnostics",
+        "Changeover & Downtime Reduction",
+        "Root Cause Analysis (FMEA, 5 Whys, PDCA)",
+        "CAPEX/OPEX Project Management"
+      ],
+      "notes": "Combined technical cloud/automation capabilities (Azure, GitHub, OpenAI) with strong operational skills (quality systems, Kaizen, process improvement) to support OE initiatives and AI-enabled productivity tools.",
+      "openai_response_id": "resp_0de0bbb5235987c300698cfb8e8bd881a2be367e00ada99d50",
+      "created_at": "2026-02-11T21:58:46.984750"
+    },
+    "it_ai_skills_tailored": true,
+    "skills_proposal_accepted_at": "2026-02-11T22:04:09.853916"
+  },
+  "job_posting": "",
+  "artifacts": {
+    "photo_blob": {
+      "container": "cv-photos",
+      "blob_name": "photos/482d34fd-d419-4d9b-90f4-dc437ddde0ae.png",
+      "content_type": "image/png"
+    },
+    "pdf_refs": [],
+    "skills_json_path": null
+  },
+  "template_version": "CV_template_2pages_2025",
+  "dod_commands": [
+    "python scripts/diagnose_session.py a15065ac-15e6-4f29-9642-7e1da0da2925",
+    "npm run pretest",
+    "pytest tests/test_*.py -v",
+    "npm run test"
+  ]
+}

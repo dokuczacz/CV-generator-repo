@@ -39,9 +39,28 @@ def _find_heading_index(lines: List[str], heading_variants: List[str]) -> Option
 
     variants = {_norm_heading(h) for h in heading_variants if str(h or "").strip()}
     for i, l in enumerate(lines):
-        if _norm_heading(l) in variants:
+        ln = _norm_heading(l)
+        if ln in variants:
             return i
+        for v in variants:
+            if v and ln.startswith(v):
+                return i
     return None
+
+
+def _extract_inline_heading_tail(line: str, heading_variants: List[str]) -> str:
+    text = str(line or "")
+    if not text.strip():
+        return ""
+
+    candidates = [str(h or "").strip() for h in heading_variants if str(h or "").strip()]
+    candidates = sorted(candidates, key=len, reverse=True)
+    for h in candidates:
+        pattern = rf"(?is)^\s*[\-*•\u2022\u2013\u2014]*\s*{re.escape(h)}\s*[:\-\u2013\u2014]*\s*(.*)$"
+        m = re.match(pattern, text)
+        if m:
+            return _dejank(str(m.group(1) or "").strip())
+    return ""
 
 
 def _slice_between(lines: List[str], start_idx: Optional[int], end_idx: Optional[int]) -> List[str]:
@@ -238,6 +257,10 @@ def _parse_languages(lines: List[str]) -> List[str]:
         l = _dejank(raw).strip()
         if not l:
             continue
+
+        low = l.lower()
+        if any(tag in low for tag in ("fähigkeiten", "faehigkeiten", "kompetenzen", "skills", "github")):
+            continue
         # Skip obvious section headers that might have leaked into the slice.
         if l.isupper() and len(l) <= 30:
             continue
@@ -279,6 +302,24 @@ def _parse_languages(lines: List[str]) -> List[str]:
     return [s[:50].rstrip() for s in out[:5]]
 
 
+def _skills_from_language_slice(lines: List[str]) -> List[str]:
+    if not lines:
+        return []
+
+    candidate_lines: List[str] = []
+    for raw in lines:
+        l = _dejank(str(raw or "")).strip()
+        if not l:
+            continue
+        low = l.lower()
+        if any(tag in low for tag in ("muttersprache", "native", "fluent", "mittelstufe", "basic knowledge")):
+            continue
+        if any(tag in low for tag in ("skills", "fähigkeiten", "faehigkeiten", "kompetenzen", "github", "automation", "kaizen", "fmea", "pdca", "capex", "opex", "projektmanagement")):
+            candidate_lines.append(l)
+
+    return _parse_it_ai_skills(candidate_lines)
+
+
 def _parse_it_ai_skills(lines: List[str]) -> List[str]:
     items: List[str] = []
     for raw in lines:
@@ -298,7 +339,7 @@ def _parse_it_ai_skills(lines: List[str]) -> List[str]:
         for p in parts:
             # Clean leading bullets/dashes
             p = re.sub(r"^[\-\u2013\u2014\*•\u2022]+\s*", "", p).strip()
-            p = p[:70].rstrip()
+            p = p[:500].rstrip()
             if p:
                 items.append(p)
             if len(items) >= 20:  # Increased limit to capture more skills
@@ -442,18 +483,27 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
         [idx_tech_ops_skills, idx_edu, idx_lang, idx_further, idx_interests, idx_refs],
     )
     it_ai_lines = _slice_between(lines, idx_it_ai_skills, next_after_it_ai)
+    inline_it_ai_tail = _extract_inline_heading_tail(lines[idx_it_ai_skills], it_ai_heading_variants) if idx_it_ai_skills is not None and idx_it_ai_skills < len(lines) else ""
+    if inline_it_ai_tail:
+        it_ai_lines = [inline_it_ai_tail] + it_ai_lines
 
     next_after_tech_ops = _next_after(
         idx_tech_ops_skills,
         [idx_edu, idx_lang, idx_further, idx_interests, idx_refs],
     )
     tech_ops_lines = _slice_between(lines, idx_tech_ops_skills, next_after_tech_ops)
+    inline_tech_tail = _extract_inline_heading_tail(lines[idx_tech_ops_skills], tech_ops_heading_variants) if idx_tech_ops_skills is not None and idx_tech_ops_skills < len(lines) else ""
+    if inline_tech_tail:
+        tech_ops_lines = [inline_tech_tail] + tech_ops_lines
 
     next_after_skills_generic = _next_after(
         idx_skills_generic,
         [idx_edu, idx_lang, idx_further, idx_interests, idx_refs],
     )
     skills_lines_generic = _slice_between(lines, idx_skills_generic, next_after_skills_generic)
+    inline_skills_tail = _extract_inline_heading_tail(lines[idx_skills_generic], generic_skills_heading_variants) if idx_skills_generic is not None and idx_skills_generic < len(lines) else ""
+    if inline_skills_tail:
+        skills_lines_generic = [inline_skills_tail] + skills_lines_generic
 
     # Further experience / training slice ends at next known heading after it.
     next_after_further = None
@@ -464,6 +514,13 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
 
     # Interests slice ends at references (if any)
     interests_lines = _slice_between(lines, idx_interests, idx_refs)
+
+    raw_skill_lines: List[str] = []
+    for chunk in (it_ai_lines, tech_ops_lines, skills_lines_generic):
+        for raw in chunk:
+            cleaned = _dejank(str(raw or "")).strip()
+            if cleaned:
+                raw_skill_lines.append(cleaned)
 
     profile = _parse_profile(profile_lines)
     work_experience = _parse_work_experience(work_lines)
@@ -485,6 +542,19 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
                 it_ai_skills = combined[:8]
             elif not technical_operational_skills:
                 technical_operational_skills = combined[:8]
+
+    # Extra fallback: some DOCX exports leak skills lines into the languages slice.
+    # Recover them deterministically to avoid empty skills sections.
+    if (not it_ai_skills) or (not technical_operational_skills):
+        combined_from_lang = _skills_from_language_slice(lang_lines)
+        if combined_from_lang:
+            if not it_ai_skills and not technical_operational_skills:
+                it_ai_skills = combined_from_lang[:8]
+                technical_operational_skills = combined_from_lang[8:16]
+            elif not it_ai_skills:
+                it_ai_skills = combined_from_lang[:8]
+            elif not technical_operational_skills:
+                technical_operational_skills = combined_from_lang[:8]
     further_experience = _parse_further_experience(further_lines)
     interests = _parse_interests(interests_lines)
 
@@ -499,6 +569,7 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
         "languages": languages,
         "it_ai_skills": it_ai_skills,
         "technical_operational_skills": technical_operational_skills,
+        "skills_raw_lines": raw_skill_lines[:120],
         "further_experience": further_experience,
         "interests": interests,
     }

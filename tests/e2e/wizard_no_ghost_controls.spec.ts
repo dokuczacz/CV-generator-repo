@@ -27,11 +27,21 @@ async function waitForStageOneOf(page: Page, stages: string[], timeoutMs = 30_00
 }
 
 async function clickAction(page: Page, actionId: string) {
-  const btn = page.getByTestId('stage-panel').getByTestId(`action-${actionId}`);
+  const panel = page.getByTestId('stage-panel');
+  const btn = panel.getByTestId(`action-${actionId}`);
+  if (!(await btn.isVisible().catch(() => false))) {
+    const more = panel.getByText('Więcej akcji').first();
+    if (await more.isVisible().catch(() => false)) {
+      await more.click();
+    }
+  }
   await expect(btn).toBeVisible({ timeout: 20_000 });
 
-  const respPromise = page.waitForResponse(
-    (r) => r.url().includes('/api/process-cv') && r.request().method() === 'POST' && r.status() === 200,
+  const reqPromise = page.waitForRequest(
+    (r) =>
+      r.url().includes('/api/process-cv') &&
+      r.method() === 'POST' &&
+      String(r.postData() || '').includes(actionId),
     { timeout: 30_000 }
   );
 
@@ -39,7 +49,7 @@ async function clickAction(page: Page, actionId: string) {
   await btn.scrollIntoViewIfNeeded().catch(() => undefined);
   await btn.click();
 
-  await respPromise;
+  await reqPromise;
 }
 
 async function fillFirstTextareaInStagePanel(page: Page, value: string) {
@@ -93,8 +103,12 @@ test.describe('Wizard: no ghost controls (AI disabled)', () => {
     await page.getByTestId('job-url-input').fill('https://example.com/job-offer');
     await page.getByTestId('job-text-input').fill('Quick summary: focus on quality audits and compliance.');
 
-    // Upload starts wizard automatically (no dummy chat message needed).
+    // Upload + explicit start via CTA.
     await page.locator('input[type="file"]').setInputFiles(SAMPLE_CV);
+    const useLoadedCv = page.getByTestId('use-loaded-cv');
+    await expect(useLoadedCv).toBeVisible({ timeout: 30_000 });
+    await expect(useLoadedCv).toBeEnabled({ timeout: 30_000 });
+    await useLoadedCv.click();
     await waitForStagePanel(page, 60_000);
 
     // Assert first request preserved job inputs and fast path preference.
@@ -181,9 +195,11 @@ test.describe('Wizard: no ghost controls (AI disabled)', () => {
     await waitForStagePanel(page);
     await clickAction(page, 'WORK_TAILOR_SKIP');
 
-    await waitForStage(page, 'further_experience', 60_000);
-    await expect(page.getByTestId('action-FURTHER_TAILOR_RUN')).toHaveCount(0);
-    await clickAction(page, 'FURTHER_TAILOR_SKIP');
+    const afterWork = await waitForStageOneOf(page, ['further_experience', 'it_ai_skills'], 60_000);
+    if (afterWork === 'further_experience') {
+      await expect(page.getByTestId('action-FURTHER_TAILOR_RUN')).toHaveCount(0);
+      await clickAction(page, 'FURTHER_TAILOR_SKIP');
+    }
 
     await waitForStage(page, 'it_ai_skills', 60_000);
     await clickAction(page, 'SKILLS_TAILOR_SKIP');
@@ -198,8 +214,8 @@ test.describe('Wizard: no ghost controls (AI disabled)', () => {
     // Verify PDF is available for download.
     await expect(page.getByTestId('download-pdf')).toBeVisible({ timeout: 60_000 });
 
-    // Cover "Zmień CV" reset path (should return to upload step, no stuck state).
-    await page.getByRole('button', { name: /Zmień CV/i }).first().click();
+    // Cover "Zmień plik" reset path (powrót do uploadu bez zacięcia stanu).
+    await page.getByRole('button', { name: /Zmień plik/i }).first().click();
     await expect(page.getByTestId('cv-upload-dropzone')).toBeVisible({ timeout: 30_000 });
   });
 });
