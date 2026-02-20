@@ -73,6 +73,7 @@ def handle_work_tailor_ai_actions(
     
         # Persist tailoring notes if the UI sent them with the action payload (user clicked Generate without Save).
         payload = user_action_payload or {}
+        force_regenerate = bool(payload.get("force_regenerate")) if isinstance(payload, dict) else False
         if isinstance(payload, dict) and "work_tailoring_notes" in payload:
             _notes = str(payload.get("work_tailoring_notes") or "").strip()[:2000]
             meta2["work_tailoring_notes"] = _notes
@@ -150,6 +151,43 @@ def handle_work_tailor_ai_actions(
             f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
             f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
         )
+
+        # Guard against accidental repeated runs with identical inputs.
+        # This keeps "Regenerate" explicit: change notes/feedback or pass force_regenerate=true.
+        try:
+            input_fingerprint = deps.sha256_text(
+                json.dumps(
+                    {
+                        "target_lang": target_lang,
+                        "job_summary_sig": deps.sha256_text(job_summary),
+                        "notes_sig": deps.sha256_text(notes),
+                        "feedback_sig": deps.sha256_text(feedback),
+                        "roles_sig": deps.sha256_text(roles_text),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            prev_input_fingerprint = str(meta2.get("work_experience_proposal_input_sig") or "")
+            has_cached_proposal = isinstance(meta2.get("work_experience_proposal_block"), dict)
+            stage_now = str(meta2.get("wizard_stage") or "").strip().lower()
+            if (
+                not force_regenerate
+                and has_cached_proposal
+                and prev_input_fingerprint
+                and prev_input_fingerprint == input_fingerprint
+                and stage_now in ("work_tailor_review", "work_notes_edit", "work_tailor_feedback")
+            ):
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text=(
+                        "Proposal is already up to date for current notes/job context. "
+                        "Edit notes/feedback to regenerate, or accept the current proposal."
+                    ),
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
+        except Exception:
+            input_fingerprint = ""
     
         # Auto-retry loop: validate bullets before showing to user (max 3 attempts).
         max_attempts = 3
@@ -275,6 +313,8 @@ def handle_work_tailor_ai_actions(
             "notes": str(prop.notes or ""),
             "created_at": deps.now_iso(),
         }
+        if input_fingerprint:
+            meta2["work_experience_proposal_input_sig"] = input_fingerprint
         meta2 = deps.wizard_set_stage(meta2, "work_tailor_review")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(

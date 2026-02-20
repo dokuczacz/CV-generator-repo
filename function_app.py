@@ -2853,13 +2853,26 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
 
     # Wizard mode: deterministic, backend-driven stage UI (Playwright-backed).
     if meta.get("flow_mode") == "wizard":
+        def _state_sig(cv_obj: dict, meta_obj: dict) -> str:
+            try:
+                payload = {"cv": cv_obj or {}, "meta": meta_obj or {}}
+                return _sha256_text(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            except Exception:
+                return ""
+
+        _last_persist_sig = _state_sig(cv_data if isinstance(cv_data, dict) else {}, meta if isinstance(meta, dict) else {})
+
         def _wizard_get_stage(m: dict) -> str:
             return str((m or {}).get("wizard_stage") or "contact").strip().lower() or "contact"
 
         def _wizard_set_stage(m: dict, st: str) -> dict:
             out = dict(m or {})
-            out["wizard_stage"] = str(st or "").strip().lower()
-            out["wizard_stage_updated_at"] = _now_iso()
+            next_stage = str(st or "").strip().lower()
+            prev_stage = str(out.get("wizard_stage") or "").strip().lower()
+            out["wizard_stage"] = next_stage
+            # Avoid timestamp churn on no-op stage writes.
+            if prev_stage != next_stage:
+                out["wizard_stage_updated_at"] = _now_iso()
             return out
 
         def _wizard_resp(*, assistant_text: str, meta_out: dict, cv_out: dict, pdf_bytes: bytes | None = None, stage_updates: list[dict] | None = None) -> tuple[int, dict]:
@@ -2888,6 +2901,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             }
 
         def _persist(cv_out: dict, meta_out: dict) -> tuple[dict, dict]:
+            nonlocal _last_persist_sig
             # DIAGNOSTIC: Log metadata before calling store.update_session
             try:
                 logging.debug(
@@ -2899,6 +2913,13 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 )
             except Exception:
                 pass
+
+            sig_now = _state_sig(
+                cv_out if isinstance(cv_out, dict) else {},
+                meta_out if isinstance(meta_out, dict) else {},
+            )
+            if sig_now and sig_now == _last_persist_sig:
+                return dict(cv_out or {}), dict(meta_out or {})
 
             persisted = False
             persisted_meta = dict(meta_out or {})
@@ -2945,6 +2966,10 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             s2 = _session_get(session_id) or {}
             m2 = s2.get("metadata") if isinstance(s2.get("metadata"), dict) else persisted_meta
             c2 = s2.get("cv_data") if isinstance(s2.get("cv_data"), dict) else cv_out
+            _last_persist_sig = _state_sig(
+                c2 if isinstance(c2, dict) else {},
+                m2 if isinstance(m2, dict) else {},
+            )
             
             # DIAGNOSTIC: Log metadata after retrieving from store
             try:
