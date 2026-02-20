@@ -13,7 +13,7 @@ Limits are based on:
 Golden Rule: REJECT if estimated pages > 2.0
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass
 import math
 import re

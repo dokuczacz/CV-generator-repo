@@ -6,10 +6,9 @@ Enables stateful CV processing across conversation turns
 import logging
 import json
 import uuid
-import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from azure.data.tables import TableServiceClient, TableEntity
+from azure.data.tables import TableServiceClient
 from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 import os
 import threading

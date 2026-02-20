@@ -5,7 +5,6 @@ Prompts are loaded once on startup and cached in memory.
 """
 
 import os
-from pathlib import Path
 from typing import Dict, Optional
 
 

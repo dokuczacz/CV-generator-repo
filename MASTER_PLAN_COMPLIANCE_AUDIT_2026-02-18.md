@@ -279,3 +279,14 @@ Code ownership map for this route:
 Rule for dead-code/orphan classification:
 - treat this normal route as default runtime evidence;
 - remove candidates only if they are outside this route, outside fallback contracts, and not required by deterministic tests.
+
+## Execution Scope Update (2026-02-20)
+
+- Full golden suite gate: marked **done** (operator-verified normal run + golden checks completed).
+- UX phase timing: moved to **deferred/backlog** by operator decision.
+  - Current product behavior is stable and accepted for active usage.
+  - UX optimization remains planned but is intentionally paused until a later iteration.
+- Immediate focus is now:
+  - runtime-backed orphan cleanup,
+  - modularization hardening,
+  - deterministic route stability.

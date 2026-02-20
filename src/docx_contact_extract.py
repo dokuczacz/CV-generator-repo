@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import io
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -57,7 +58,7 @@ def _iter_doc_parts(z: zipfile.ZipFile) -> Iterable[str]:
 def _docx_lines_from_bytes(docx_bytes: bytes) -> List[str]:
     lines: List[str] = []
     try:
-        with zipfile.ZipFile(io := __import__("io").BytesIO(docx_bytes)) as z:
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
             for part in _iter_doc_parts(z):
                 try:
                     root = ET.fromstring(z.read(part))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import posixpath
 import re
 import zipfile
@@ -100,7 +101,7 @@ def extract_first_photo_from_docx_bytes(docx_bytes: bytes) -> Optional[Extracted
     Returns None if no embedded image is found.
     """
 
-    with zipfile.ZipFile(io := __import__("io").BytesIO(docx_bytes)) as z:
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
         names = set(z.namelist())
 
         for part_xml in _iter_part_xml_names(z):
