@@ -5,6 +5,10 @@
   "scripts": {
     "run:local": "pwsh -NoProfile -File scripts/run-local.ps1",
     "pretest": "python tests/smoke_prompt_builder.py && python tests/smoke_json_repair.py && python tests/generate_test_artifacts.py",
+    "deadcode:python": "pwsh -NoProfile -File scripts/run-deadcode.ps1",
+    "deadcode:python:strict": "pwsh -NoProfile -File scripts/run-deadcode.ps1 -Strict",
+    "deadcode:ui": "npm --prefix ui run lint -- --max-warnings=0",
+    "deadcode:all": "npm run deadcode:python && npm run deadcode:ui",
     "test": "playwright test",
     "test:openai": "pwsh -NoProfile -File scripts/test-openai-e2e.ps1 -Workers 1",
     "test:headed": "playwright test --headed",

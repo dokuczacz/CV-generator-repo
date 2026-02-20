@@ -7,7 +7,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 
 
 # OpenXML namespaces
@@ -149,6 +149,3 @@ def extract_first_photo_data_uri_from_docx_bytes(docx_bytes: bytes) -> Optional[
     img = extract_first_photo_from_docx_bytes(docx_bytes)
     return img.as_data_uri() if img else None
 
-
-def extract_first_photo_data_uri_from_docx_path(docx_path: Path) -> Optional[str]:
-    return extract_first_photo_data_uri_from_docx_bytes(docx_path.read_bytes())

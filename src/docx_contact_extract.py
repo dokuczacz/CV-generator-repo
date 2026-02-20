@@ -31,12 +31,6 @@ class ContactExtract:
     address_lines: Tuple[str, ...] = ()
 
 
-def _iter_text_parts(root: ET.Element) -> Iterable[str]:
-    for t in root.findall(".//w:t", _NS_W):
-        if t.text:
-            yield t.text
-
-
 def _iter_paragraph_lines(root: ET.Element) -> Iterable[str]:
     # Join w:t runs within each paragraph.
     for p in root.findall(".//w:p", _NS_W):

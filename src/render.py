@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -412,11 +411,6 @@ def render_pdf(cv: Dict[str, Any], *, enforce_two_pages: bool = True, use_cache:
             )
 
     return pdf
-
-
-def render_pdf_b64(cv: Dict[str, Any]) -> str:
-    return base64.b64encode(render_pdf(cv)).decode("ascii")
-
 
 if __name__ == "__main__":
     import json

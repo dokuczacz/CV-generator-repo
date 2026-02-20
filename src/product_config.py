@@ -156,12 +156,6 @@ REQUIRE_OPENAI_PROMPT_ID_PER_STAGE: bool = _get_bool_config("REQUIRE_OPENAI_PROM
 OPENAI_PROMPT_ID: str = _get_str_config("OPENAI_PROMPT_ID", "")
 
 
-def get_stage_prompt_id(stage: str) -> str | None:
-    """Get a stage-specific prompt ID override (for labs/testing)."""
-    val = (os.environ.get(f"OPENAI_PROMPT_ID_{stage}") or "").strip()
-    return val if val else None
-
-
 # ============================================================================
 # TIMEOUTS (global defaults, can be adjusted per function)
 # ============================================================================

@@ -1,16 +1,9 @@
 import re
+from pathlib import Path
 
 
-def _extract_action_ids_from_build_ui_action(src: str) -> set[str]:
-    # Only scan the _build_ui_action() body to avoid unrelated action ids.
-    m = re.search(r"^def _build_ui_action\(.*?\)\s*(?:->.*?)?\s*:\r?\n", src, flags=re.MULTILINE)
-    assert m, "missing _build_ui_action"
-    start = m.end()
-    m2 = re.search(r"\r?\n\r?\n\s*def _tool_process_cv_orchestrated\(", src[start:])
-    assert m2, "missing _tool_process_cv_orchestrated"
-    block = src[start : start + m2.start()]
-
-    ids = set(re.findall(r'\"id\"\\s*:\\s*\"([A-Z0-9_]+)\"', block))
+def _extract_action_ids(src: str) -> set[str]:
+    ids = set(re.findall(r'\"id\"\\s*:\\s*\"([A-Z0-9_]+)\"', src))
     # Filter out obvious non-wizard legacy ids, keep the set strict.
     return {i for i in ids if i and i.upper() == i}
 
@@ -30,11 +23,16 @@ def test_wizard_ui_actions_are_handled():
     Prevent 'ghost buttons': every action id emitted by _build_ui_action (wizard UI)
     must be handled by the wizard user_action dispatcher.
     """
-    with open("function_app.py", "r", encoding="utf-8") as f:
-        src = f.read()
+    ui_builder_path = Path("src/orchestrator/wizard/ui_builder.py")
+    if ui_builder_path.exists():
+        src = ui_builder_path.read_text(encoding="utf-8")
+    else:
+        # Backward compatibility for pre-modularized layout.
+        src = Path("function_app.py").read_text(encoding="utf-8")
 
-    ui_ids = _extract_action_ids_from_build_ui_action(src)
-    handled_ids = _extract_handled_action_ids_from_wizard_handler(src)
+    ui_ids = _extract_action_ids(src)
+    handler_src = Path("function_app.py").read_text(encoding="utf-8")
+    handled_ids = _extract_handled_action_ids_from_wizard_handler(handler_src)
 
     missing = sorted(ui_ids - handled_ids)
     assert not missing, f"Ghost action ids (present in UI, missing in handler): {missing}"

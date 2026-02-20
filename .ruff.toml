@@ -1,0 +1,18 @@
+target-version = "py311"
+line-length = 120
+
+extend-exclude = [
+  ".venv",
+  ".python_packages",
+  "node_modules",
+  "playwright-report",
+  "test-results",
+  "artifacts",
+  "archive",
+  "_archive",
+  "tmp",
+  "logs",
+]
+
+[lint]
+select = ["E", "F"]

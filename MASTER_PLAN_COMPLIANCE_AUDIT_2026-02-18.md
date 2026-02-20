@@ -245,3 +245,37 @@ Add modularization parity tests:
 - Keep extraction commits wave-scoped and reversible.
 - If a wave regresses, revert that wave only; do not continue subsequent waves.
 - Preserve compatibility adapters in `function_app.py` until final wave is green.
+
+## Normal Route Default Baseline (locked 2026-02-20)
+
+Primary runtime baseline for cleanup/orphan decisions:
+- log source: `tmp/logs/func_20260220_110738.log`
+- session observed: `e7a328b5-0b84-4336-b204-b482701fea56`
+
+Default click/action sequence:
+1. `LANGUAGE_SELECT_EN`
+2. `CONFIRM_IMPORT_PREFILL_YES`
+3. `CONTACT_CONFIRM`
+4. `EDUCATION_CONFIRM`
+5. `JOB_OFFER_CONTINUE`
+6. `WORK_TAILOR_RUN` (notes/edit loop can repeat)
+7. `WORK_TAILOR_ACCEPT`
+8. `SKILLS_TAILOR_RUN`
+9. `SKILLS_TAILOR_ACCEPT`
+10. `REQUEST_GENERATE_PDF`
+11. `COVER_LETTER_GENERATE`
+
+Code ownership map for this route:
+- `src/orchestrator/wizard/action_dispatch_contact.py`
+- `src/orchestrator/wizard/action_dispatch_profile_confirm.py`
+- `src/orchestrator/wizard/action_dispatch_job_posting_ai.py`
+- `src/orchestrator/wizard/action_dispatch_work_basic.py`
+- `src/orchestrator/wizard/action_dispatch_work_tailor_ai.py`
+- `src/orchestrator/wizard/action_dispatch_skills.py`
+- `src/orchestrator/wizard/action_dispatch_cover_pdf.py`
+- `src/orchestrator/wizard/ui_builder.py`
+- dispatcher wiring in `function_app.py` (`_tool_process_cv_orchestrated`)
+
+Rule for dead-code/orphan classification:
+- treat this normal route as default runtime evidence;
+- remove candidates only if they are outside this route, outside fallback contracts, and not required by deterministic tests.
