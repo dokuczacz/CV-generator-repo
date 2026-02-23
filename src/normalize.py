@@ -9,6 +9,14 @@ _SPECIALIZATION_LINE_RE = re.compile(
 )
 
 
+def _canon_text_for_dedupe(value: Any) -> str:
+    text = " ".join(str(value or "").split()).strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[\s\.,;:!\?\-_/()\[\]{}]+", "", text)
+    return text
+
+
 def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize incoming CV JSON into the shape expected by the template/validator.
 
@@ -216,7 +224,37 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
 
             if (not existing_spec_val) and lifted_spec_val:
                 edu2["specialization"] = lifted_spec_val
-            edu2["details"] = new_details
+            title_canon = _canon_text_for_dedupe(edu2.get("title"))
+            deduped_details: list[Any] = []
+            for detail in new_details:
+                if not isinstance(detail, str):
+                    deduped_details.append(detail)
+                    continue
+                if title_canon and _canon_text_for_dedupe(detail) == title_canon:
+                    continue
+                deduped_details.append(detail)
+
+            # If title is still empty, lift the first meaningful non-specialization detail.
+            title_raw = str(edu2.get("title") or "").strip()
+            if not title_raw and deduped_details:
+                lifted_title = ""
+                remaining_details: list[Any] = []
+                for detail in deduped_details:
+                    if lifted_title or not isinstance(detail, str):
+                        remaining_details.append(detail)
+                        continue
+                    candidate = str(detail or "").strip()
+                    if not candidate:
+                        continue
+                    if _SPECIALIZATION_LINE_RE.match(candidate):
+                        remaining_details.append(detail)
+                        continue
+                    lifted_title = candidate
+                if lifted_title:
+                    edu2["title"] = lifted_title
+                    deduped_details = remaining_details
+
+            edu2["details"] = deduped_details
 
             out_edu.append(edu2)
         normalized["education"] = out_edu

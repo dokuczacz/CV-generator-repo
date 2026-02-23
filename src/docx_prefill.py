@@ -91,6 +91,34 @@ _DATE_PREFIX_RE = re.compile(
 )
 
 
+def _parse_year_month_token(token: str) -> tuple[int, int]:
+    t = str(token or "").strip().lower()
+    if not t:
+        return (0, 0)
+    if t in ("present", "today"):
+        return (9999, 12)
+    m = re.match(r"^(\d{4})(?:-(\d{2}))?$", t)
+    if not m:
+        return (0, 0)
+    year = int(m.group(1))
+    month = int(m.group(2) or "1")
+    if month < 1 or month > 12:
+        month = 1
+    return (year, month)
+
+
+def _work_sort_key(entry: Dict[str, Any]) -> tuple[tuple[int, int], tuple[int, int]]:
+    date_range = str(entry.get("date_range") or "").strip().lower()
+    if not date_range:
+        return ((0, 0), (0, 0))
+    date_tokens = re.findall(r"\d{4}(?:-\d{2})?|present|today", date_range, flags=re.IGNORECASE)
+    if not date_tokens:
+        return ((0, 0), (0, 0))
+    start_ym = _parse_year_month_token(date_tokens[0])
+    end_ym = _parse_year_month_token(date_tokens[1]) if len(date_tokens) > 1 else start_ym
+    return (end_ym, start_ym)
+
+
 def _split_rest_title_employer(rest: str) -> Tuple[str, str]:
     # Common pattern: "Title – Employer, Location"
     parts = [p.strip() for p in re.split(r"\s*[\u2013\u2014\-]\s*", rest, maxsplit=2) if p.strip()]
@@ -180,6 +208,11 @@ def _parse_work_experience(lines: List[str]) -> List[Dict[str, Any]]:
 
     if current is not None:
         items.append(current)
+    # Deterministic order: newest first (by end date, then start date).
+    # Keep relative order stable for equal keys.
+    indexed = list(enumerate(items))
+    indexed.sort(key=lambda p: (_work_sort_key(p[1]), -p[0]), reverse=True)
+    items = [item for _, item in indexed]
     return items
 
 

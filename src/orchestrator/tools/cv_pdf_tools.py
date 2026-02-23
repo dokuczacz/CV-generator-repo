@@ -381,11 +381,11 @@ def tool_generate_cv_from_session(
         meta=meta if isinstance(meta, dict) else {},
     )
 
+    cv_data = normalize_cv_data(cv_data)
+
     is_valid, errors = validate_canonical_schema(cv_data, strict=True)
     if not is_valid:
         return 400, {"error": "CV data validation failed", "validation_errors": errors, "run_summary": run_summary}, "application/json"
-
-    cv_data = normalize_cv_data(cv_data)
 
     # Iterative shrink-to-fit: prefer keeping content; drop exactly 1 bullet at a time (bottom-up).
     # Important: validate_cv's layout height estimate can be conservative; if errors are layout-only,
