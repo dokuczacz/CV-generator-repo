@@ -9,6 +9,34 @@ _SPECIALIZATION_LINE_RE = re.compile(
 )
 
 
+def _parse_year_month_token(token: str) -> tuple[int, int]:
+    t = str(token or "").strip().lower()
+    if not t:
+        return (0, 0)
+    if t in ("present", "today"):
+        return (9999, 12)
+    m = re.match(r"^(\d{4})(?:-(\d{2}))?$", t)
+    if not m:
+        return (0, 0)
+    year = int(m.group(1))
+    month = int(m.group(2) or "1")
+    if month < 1 or month > 12:
+        month = 1
+    return (year, month)
+
+
+def _work_sort_key(entry: Dict[str, Any]) -> tuple[tuple[int, int], tuple[int, int]]:
+    date_range = str(entry.get("date_range") or "").strip().lower()
+    if not date_range:
+        return ((0, 0), (0, 0))
+    date_tokens = re.findall(r"\d{4}(?:-\d{2})?|present|today", date_range, flags=re.IGNORECASE)
+    if not date_tokens:
+        return ((0, 0), (0, 0))
+    start_ym = _parse_year_month_token(date_tokens[0])
+    end_ym = _parse_year_month_token(date_tokens[1]) if len(date_tokens) > 1 else start_ym
+    return (end_ym, start_ym)
+
+
 def _canon_text_for_dedupe(value: Any) -> str:
     text = " ".join(str(value or "").split()).strip().lower()
     if not text:
@@ -114,6 +142,9 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
             if "employer" not in job2 and "company" in job2:
                 job2["employer"] = job2.get("company")
             out_work.append(job2)
+        indexed = list(enumerate(out_work))
+        indexed.sort(key=lambda p: (_work_sort_key(p[1]), -p[0]), reverse=True)
+        out_work = [item for _, item in indexed]
         normalized["work_experience"] = out_work
 
     # Transform education from GPT schema to template schema.

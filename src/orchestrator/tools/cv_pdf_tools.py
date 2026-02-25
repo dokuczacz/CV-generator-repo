@@ -16,6 +16,28 @@ from src.schema_validator import validate_canonical_schema
 from src.validator import validate_cv
 
 
+def _data_uri_payload_bytes(data_uri: str) -> bytes | None:
+    txt = str(data_uri or "").strip()
+    if not txt.startswith("data:") or "," not in txt:
+        return None
+    try:
+        header, payload = txt.split(",", 1)
+        if ";base64" in header.lower():
+            return base64.b64decode(payload)
+        return payload.encode("utf-8")
+    except Exception:
+        return None
+
+
+def _sha256_hex(data: bytes | None) -> str:
+    if not data:
+        return ""
+    try:
+        return hashlib.sha256(data).hexdigest()
+    except Exception:
+        return ""
+
+
 @dataclass(frozen=True)
 class CvPdfToolDeps:
     cv_pdf_always_regenerate: bool
@@ -358,20 +380,39 @@ def tool_generate_cv_from_session(
                 "details": str(err_bt)[:400],
             }, "application/json"
 
-    # Inject photo from Blob at render time.
+    # Photo reconciliation at render time:
+    # - if only photo_blob exists, inject it to photo_url
+    # - if both exist and hashes mismatch, prefer cv_data.photo_url and clear stale photo_blob
+    # This prevents old blob photo from surviving after user updates photo_url.
     try:
         photo_blob = meta.get("photo_blob") if isinstance(meta, dict) else None
-        if photo_blob and not cv_data.get("photo_url"):
+        if photo_blob:
             ptr = BlobPointer(
                 container=photo_blob.get("container", ""),
                 blob_name=photo_blob.get("blob_name", ""),
                 content_type=photo_blob.get("content_type", "application/octet-stream"),
             )
             if ptr.container and ptr.blob_name:
-                data = CVBlobStore(container=ptr.container).download_bytes(ptr)
-                b64 = base64.b64encode(data).decode("ascii")
-                cv_data = dict(cv_data)
-                cv_data["photo_url"] = f"data:{ptr.content_type};base64,{b64}"
+                blob_bytes = CVBlobStore(container=ptr.container).download_bytes(ptr)
+                blob_hash = _sha256_hex(blob_bytes)
+
+                photo_url_raw = str(cv_data.get("photo_url") or "")
+                photo_url_bytes = _data_uri_payload_bytes(photo_url_raw)
+                photo_url_hash = _sha256_hex(photo_url_bytes)
+
+                if not photo_url_raw:
+                    b64 = base64.b64encode(blob_bytes).decode("ascii")
+                    cv_data = dict(cv_data)
+                    cv_data["photo_url"] = f"data:{ptr.content_type};base64,{b64}"
+                elif photo_url_hash and blob_hash and photo_url_hash != blob_hash:
+                    if isinstance(meta, dict):
+                        meta = dict(meta)
+                        meta.pop("photo_blob", None)
+                    run_summary["photo_reconciled"] = {
+                        "mode": "photo_url_preferred_over_stale_blob",
+                        "photo_url_sha256": photo_url_hash,
+                        "blob_sha256": blob_hash,
+                    }
     except Exception as e:
         logging.warning(f"Failed to inject photo from blob for session {session_id}: {e}")
 
