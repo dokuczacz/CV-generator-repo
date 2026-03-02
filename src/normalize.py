@@ -8,6 +8,17 @@ _SPECIALIZATION_LINE_RE = re.compile(
     r"(?i)^\s*(specialization|major|focus|concentration|schwerpunkt|fachrichtung|vertiefung)\s*:\s*(.+?)\s*$"
 )
 
+_LEAKED_EDUCATION_SECTION_HEADINGS = {
+    "language skills",
+    "sprachkenntnisse",
+    "languages",
+    "interests",
+    "interessen",
+    "hobbies",
+    "references",
+    "referenzen",
+}
+
 
 def _parse_year_month_token(token: str) -> tuple[int, int]:
     t = str(token or "").strip().lower()
@@ -43,6 +54,23 @@ def _canon_text_for_dedupe(value: Any) -> str:
         return ""
     text = re.sub(r"[\s\.,;:!\?\-_/()\[\]{}]+", "", text)
     return text
+
+
+def _is_leaked_education_heading(value: str) -> bool:
+    txt = " ".join(str(value or "").strip().lower().split())
+    if not txt:
+        return False
+    txt = txt.rstrip(":")
+    return txt in _LEAKED_EDUCATION_SECTION_HEADINGS
+
+
+def _truncate_education_details_before_leaked_section(details: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    for item in details:
+        if isinstance(item, str) and _is_leaked_education_heading(item):
+            break
+        out.append(item)
+    return out
 
 
 def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -142,9 +170,7 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
             if "employer" not in job2 and "company" in job2:
                 job2["employer"] = job2.get("company")
             out_work.append(job2)
-        indexed = list(enumerate(out_work))
-        indexed.sort(key=lambda p: (_work_sort_key(p[1]), -p[0]), reverse=True)
-        out_work = [item for _, item in indexed]
+        # Preserve incoming order (import/manual reorder/model-accepted order).
         normalized["work_experience"] = out_work
 
     # Transform education from GPT schema to template schema.
@@ -285,7 +311,7 @@ def normalize_cv_data(cv_data: Dict[str, Any]) -> Dict[str, Any]:
                     edu2["title"] = lifted_title
                     deduped_details = remaining_details
 
-            edu2["details"] = deduped_details
+            edu2["details"] = _truncate_education_details_before_leaked_section(deduped_details)
 
             out_edu.append(edu2)
         normalized["education"] = out_edu

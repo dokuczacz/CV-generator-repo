@@ -36,8 +36,10 @@ export default function CVGenerator() {
   const [fastPathProfile, setFastPathProfile] = useState(true);
   const [uiAction, setUiAction] = useState<UIAction | null>(null);
   const [resumeFailed, setResumeFailed] = useState<string | null>(null);
-  const [latestPdfBase64, setLatestPdfBase64] = useState<string | null>(null);
-  const [latestPdfFilename, setLatestPdfFilename] = useState<string | null>(null);
+  const [latestCvPdfBase64, setLatestCvPdfBase64] = useState<string | null>(null);
+  const [latestCvPdfFilename, setLatestCvPdfFilename] = useState<string | null>(null);
+  const [latestCoverLetterPdfBase64, setLatestCoverLetterPdfBase64] = useState<string | null>(null);
+  const [latestCoverLetterPdfFilename, setLatestCoverLetterPdfFilename] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const [lastStage, setLastStage] = useState<string | null>(null);
   const [stageUpdates, setStageUpdates] = useState<StageUpdate[]>([]);
@@ -53,8 +55,10 @@ export default function CVGenerator() {
     setJobPostingUrl(null);
     setJobPostingText(null);
     setUiAction(null);
-    setLatestPdfBase64(null);
-    setLatestPdfFilename(null);
+    setLatestCvPdfBase64(null);
+    setLatestCvPdfFilename(null);
+    setLatestCoverLetterPdfBase64(null);
+    setLatestCoverLetterPdfFilename(null);
     setLastTraceId(null);
     setLastStage(null);
     setStageUpdates([]);
@@ -225,8 +229,10 @@ export default function CVGenerator() {
         file.name.endsWith('.pdf')
       ) {
         setCvFile(file);
-        setLatestPdfBase64(null);
-        setLatestPdfFilename(null);
+        setLatestCvPdfBase64(null);
+        setLatestCvPdfFilename(null);
+        setLatestCoverLetterPdfBase64(null);
+        setLatestCoverLetterPdfFilename(null);
         setLastTraceId(null);
         setLastStage(null);
         setStageUpdates([]);
@@ -378,8 +384,10 @@ export default function CVGenerator() {
 
       if (result.success) {
         if (actionId === 'NEW_VERSION_RESET') {
-          setLatestPdfBase64(null);
-          setLatestPdfFilename(null);
+          setLatestCvPdfBase64(null);
+          setLatestCvPdfFilename(null);
+          setLatestCoverLetterPdfBase64(null);
+          setLatestCoverLetterPdfFilename(null);
         }
 
         const assistantMsg: Message = {
@@ -391,17 +399,18 @@ export default function CVGenerator() {
         };
         if (result.pdf_base64) {
           assistantMsg.pdfBase64 = result.pdf_base64;
-          setLatestPdfBase64(result.pdf_base64);
-          if (typeof result.filename === 'string' && result.filename.trim()) {
-            setLatestPdfFilename(result.filename.trim());
-          }
-
-          const isCoverLetterAction = actionId === 'COVER_LETTER_GENERATE' || actionId === 'COVER_LETTER_PREVIEW';
+          const resolvedFilename = typeof result.filename === 'string' && result.filename.trim() ? result.filename.trim() : null;
+          const isCoverLetterAction = actionId === 'COVER_LETTER_GENERATE';
           if (isCoverLetterAction) {
-            const fallbackName = `CoverLetter_${Date.now()}.pdf`;
-            const downloadName =
-              typeof result.filename === 'string' && result.filename.trim() ? result.filename.trim() : fallbackName;
-            downloadPDF(result.pdf_base64, downloadName);
+            setLatestCoverLetterPdfBase64(result.pdf_base64);
+            if (resolvedFilename) {
+              setLatestCoverLetterPdfFilename(resolvedFilename);
+            }
+          } else {
+            setLatestCvPdfBase64(result.pdf_base64);
+            if (resolvedFilename) {
+              setLatestCvPdfFilename(resolvedFilename);
+            }
           }
         }
         setMessages((prev) => [...prev, assistantMsg]);
@@ -413,6 +422,9 @@ export default function CVGenerator() {
           'SKILLS_TAILOR_RUN',
           'SKILLS_TAILOR_ACCEPT',
           'REQUEST_GENERATE_PDF',
+          'DOWNLOAD_PDF',
+          'COVER_LETTER_GENERATE',
+          'COVER_LETTER_FEEDBACK_APPLY',
           'FAST_RUN',
           'FAST_RUN_TO_PDF',
           'CONFIRM_IMPORT_PREFILL_YES',
@@ -420,6 +432,8 @@ export default function CVGenerator() {
           'EDU_CONFIRM_LOCK',
           'EDUCATION_CONFIRM_LOCK',
           'NEW_VERSION_RESET',
+          'MOVE_WORK_EXPERIENCE_UP',
+          'MOVE_WORK_EXPERIENCE_DOWN',
         ]);
         if (actionId && (refreshActions.has(actionId) || actionId.endsWith('_ACCEPT'))) {
           void loadCvPreview();
@@ -567,11 +581,16 @@ export default function CVGenerator() {
     return { current, total };
   })();
 
-  const latestPdfDownloadName = (() => {
+  const latestCvPdfDownloadName = (() => {
     if (!cvPreview?.metadata || typeof cvPreview.metadata !== 'object') return null;
     const pdfRefs = (cvPreview.metadata as any)?.pdf_refs;
     if (!pdfRefs || typeof pdfRefs !== 'object') return null;
-    const entries = Object.entries(pdfRefs as Record<string, any>).filter(([, v]) => v && typeof v === 'object');
+    const entries = Object.entries(pdfRefs as Record<string, any>).filter(([k, v]) => {
+      if (!v || typeof v !== 'object') return false;
+      const key = String(k || '').toLowerCase();
+      const kind = String((v as Record<string, unknown>)?.kind || '').toLowerCase();
+      return kind !== 'cover_letter' && !key.startsWith('cover_letter_');
+    });
     if (!entries.length) return null;
     entries.sort((a, b) => String(b[1]?.created_at || '').localeCompare(String(a[1]?.created_at || '')));
     const latest = entries[0]?.[1];
@@ -658,8 +677,8 @@ export default function CVGenerator() {
   };
 
   const handleDownloadLatestPdf = () => {
-    if (!latestPdfBase64) return;
-    downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`);
+    if (!latestCvPdfBase64) return;
+    downloadPDF(latestCvPdfBase64, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
   };
 
   const handleToggleWorkLock = (roleIndex: number) => {
@@ -710,9 +729,11 @@ export default function CVGenerator() {
         wizardStep={wizardStep as WizardStep}
         stepper={stepper as readonly StepperItem[] | null}
         isLoading={isLoading}
-        latestPdfBase64={latestPdfBase64}
-        latestPdfFilename={latestPdfFilename}
-        latestPdfDownloadName={latestPdfDownloadName}
+        latestCvPdfBase64={latestCvPdfBase64}
+        latestCvPdfFilename={latestCvPdfFilename}
+        latestCvPdfDownloadName={latestCvPdfDownloadName}
+        latestCoverLetterPdfBase64={latestCoverLetterPdfBase64}
+        latestCoverLetterPdfFilename={latestCoverLetterPdfFilename}
         hasGeneratedPdf={hasGeneratedPdf}
         formDraft={formDraft}
         stageUpdates={stageUpdates}
@@ -734,9 +755,9 @@ export default function CVGenerator() {
         showCvJson={showCvJson}
         copyNotice={copyNotice}
         actionNotice={actionNotice}
-        latestPdfBase64={latestPdfBase64}
-        latestPdfFilename={latestPdfFilename}
-        latestPdfDownloadName={latestPdfDownloadName}
+        latestCvPdfBase64={latestCvPdfBase64}
+        latestCvPdfFilename={latestCvPdfFilename}
+        latestCvPdfDownloadName={latestCvPdfDownloadName}
         isLoading={isLoading}
         onToggleShowCvJson={() => setShowCvJson((v) => !v)}
         onCopyCvJson={handleCopyCvJson}
@@ -744,6 +765,14 @@ export default function CVGenerator() {
         onDownloadPdf={handleDownloadLatestPdf}
         onScrollToStagePanel={scrollToStagePanel}
         onToggleWorkLock={handleToggleWorkLock}
+        onMoveWorkRoleUp={(roleIndex) => {
+          setActionNotice('Przesuwam rolę…');
+          void handleSendUserAction('MOVE_WORK_EXPERIENCE_UP', { position_index: roleIndex });
+        }}
+        onMoveWorkRoleDown={(roleIndex) => {
+          setActionNotice('Przesuwam rolę…');
+          void handleSendUserAction('MOVE_WORK_EXPERIENCE_DOWN', { position_index: roleIndex });
+        }}
         describeMissing={describeMissing}
         requiredLabel={requiredLabel}
       />

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from src.render import count_pdf_pages, render_cover_letter_pdf
 from src.i18n import get_cover_letter_signoff
 
@@ -90,3 +92,54 @@ def test_cover_letter_german_signoff_formatting() -> None:
     assert isinstance(pdf, (bytes, bytearray))
     assert len(pdf) > 5_000
     assert count_pdf_pages(bytes(pdf)) == 1
+
+
+def test_cover_letter_generation_retries_for_missing_role_references(monkeypatch) -> None:
+    import function_app as app
+
+    cv_data = {
+        "full_name": "Jane Doe",
+        "work_experience": [
+            {"title": "Operations Manager", "employer": "Company Alpha", "date_range": "2021-01 - 2024-01", "bullets": ["Led operations"]},
+            {"title": "Quality Engineer", "employer": "Company Beta", "date_range": "2018-01 - 2020-12", "bullets": ["Improved quality"]},
+        ],
+        "it_ai_skills": ["Lean", "KPI"],
+        "technical_operational_skills": ["FMEA"],
+    }
+    meta = {"job_reference": {"title": "Ops Lead"}}
+
+    monkeypatch.setattr(app, "format_job_reference_for_display", lambda _jr: "Operations leadership role")
+    monkeypatch.setattr(app, "_build_ai_system_prompt", lambda **_kwargs: "prompt")
+
+    calls: list[dict] = []
+
+    def _openai_call(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return True, {"opening": "I worked at Company Alpha.", "core": ["I led operations."], "closing": "Thank you."}, None
+        return True, {"opening": "I worked at Company Alpha and Company Beta.", "core": ["As Operations Manager and Quality Engineer, I delivered results."], "closing": "Thank you."}, None
+
+    monkeypatch.setattr(app, "_openai_json_schema_call", _openai_call)
+
+    def _parse(payload):
+        return SimpleNamespace(
+            opening_paragraph=str(payload.get("opening") or ""),
+            core_paragraphs=list(payload.get("core") or []),
+            closing_paragraph=str(payload.get("closing") or ""),
+            notes="",
+        )
+
+    monkeypatch.setattr(app, "parse_cover_letter_proposal", _parse)
+
+    ok, block, err = app._generate_cover_letter_block_via_openai(
+        cv_data=cv_data,
+        meta=meta,
+        trace_id="trace",
+        session_id="session",
+        target_language="en",
+    )
+
+    assert ok is True, err
+    assert isinstance(block, dict)
+    assert len(calls) == 2
+    assert "[ROLE_CHECKLIST]" in str(calls[0].get("user_text") or "")

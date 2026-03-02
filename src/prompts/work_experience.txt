@@ -14,7 +14,8 @@ Hard evidence rules:
 - Metrics (percentages, savings, throughput, downtime, changeover, counts) are allowed only when explicit in E0.
 
 Language:
-- Write all output text in {target_language}.
+- Write all output text in {target_language},
+- Translate job positions name to {target_language} gracefully, so it adhear to original names,
 - Do not mix languages.
 
 Rules:
@@ -24,6 +25,7 @@ Rules:
 - Highlight job keywords (technical stack, methodologies, domains from the job posting).
 - Remove generic phrases ("responsible for", "helped with", "in charge of").
 - Use 4-5 bullets per role; pick the strongest role-aligned bullets based on job relevance.
+- Order roles by relevance to the job offer (most relevant role first, least relevant last).
 - Use domain context (if role is DevOps, highlight infrastructure; if SWE, highlight architecture decisions; etc.).
 - Keep all JSON string values single-line (no literal newlines).
 

@@ -175,7 +175,7 @@ test.describe('Session resume button behavior', () => {
       const directDownload = page.getByTestId('download-pdf');
       const hasDirectDownload = await directDownload.isVisible().catch(() => false);
 
-      const sameActionAsDownload = stagePanel.getByRole('button', { name: 'Pobierz PDF' });
+      const sameActionAsDownload = stagePanel.getByRole('button', { name: 'Pobierz CV' });
       const hasActionDownloadLabel = await sameActionAsDownload.first().isVisible().catch(() => false);
 
       expect(hasDirectDownload || hasActionDownloadLabel).toBeTruthy();
@@ -196,6 +196,7 @@ test.describe('Session resume button behavior', () => {
       await reqPromise;
 
       await expect(stagePanel).toBeVisible();
+      await expect(stagePanel.getByTestId('action-COVER_LETTER_GENERATE')).toHaveText('Pobierz Cover Letter');
     }
   });
 });

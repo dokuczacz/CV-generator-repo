@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -17,13 +17,7 @@
     @page{
       margin: {{ _styles.margin_top_mm }}mm {{ _styles.margin_right_mm|round(2) }}mm {{ _styles.margin_bottom_mm }}mm {{ _styles.margin_left_mm|round(2) }}mm;
       @top-right { content: string(cv-header); font-size: 9pt; color: #666666; }
-      {% if language == 'de' %}
       @bottom-right { content: "Seite " counter(page) " von " counter(pages); font-size: 9pt; color: #666666; font-weight: 300; text-align: right; }
-      {% elif language == 'pl' %}
-      @bottom-right { content: "Strona " counter(page) " z " counter(pages); font-size: 9pt; color: #666666; font-weight: 300; text-align: right; }
-      {% else %}
-      @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #666666; font-weight: 300; text-align: right; }
-      {% endif %}
     }
     @page :first { @top-right { content: none; } }
     .section{ margin-top: {{ _styles.section_gap_mm }}mm; }
@@ -46,17 +40,17 @@
           </div>
           <div class="contact-block">
             {% if birth_date %}<span>{{ birth_date }}</span>{% endif %}
-            {% if nationality %}<span>Nationality: {{ nationality }}</span>{% endif %}
+            {% if nationality %}<span>Staatsangehörigkeit: {{ nationality }}</span>{% endif %}
           </div>
         </div>
       </div>
-      <div class="photo-box{% if not photo_url %} photo-box--empty{% endif %}">{% if photo_url %}<img src="{{ photo_url }}" alt="Professional application photo" />{% endif %}</div>
+      <div class="photo-box{% if not photo_url %} photo-box--empty{% endif %}">{% if photo_url %}<img src="{{ photo_url }}" alt="Professionelles Bewerbungsfoto" />{% endif %}</div>
     </header>
 
     <main class="content">
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('work_experience') %} soft-break-before{% endif %}">
-      <div class="section-title">Work experience</div>
+      <div class="section-title">Berufserfahrung</div>
       {% for job in work_experience or [] %}
       <div class="entry">
         <div class="entry-head">
@@ -87,21 +81,21 @@
     </section>
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('it_ai_skills') %} soft-break-before{% endif %}">
-      <div class="section-title">IT &amp; AI Skills</div>
+      <div class="section-title">IT-Kenntnisse (inkl. KI)</div>
       <ul class="simple-list">
         {% for sk in it_ai_skills or [] %}<li>{{ sk }}</li>{% endfor %}
       </ul>
     </section>
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('technical_operational_skills') %} soft-break-before{% endif %}">
-      <div class="section-title">Technical &amp; Operational Skills</div>
+      <div class="section-title">Fach- und Methodenkompetenzen</div>
       <ul class="simple-list">
         {% for sk in technical_operational_skills or [] %}<li>{{ sk }}</li>{% endfor %}
       </ul>
     </section>
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('education') %} soft-break-before{% endif %}">
-      <div class="section-title">Education</div>
+      <div class="section-title">Ausbildung</div>
       {% for edu in education or [] %}
       <div class="entry">
         <div class="entry-head">
@@ -112,7 +106,7 @@
               <div class="edu-inst">{{ inst }}{% if not inst.endswith(",") %},{% endif %}</div>
             {% endif %}
             {% if edu.title %}<div class="edu-degree">{{ edu.title }}</div>{% endif %}
-            {% if edu.specialization %}<div class="edu-spec">specialization: {{ edu.specialization }}</div>{% endif %}
+            {% if edu.specialization %}<div class="edu-spec">Spezialisierung: {{ edu.specialization }}</div>{% endif %}
           </div>
         </div>
         {% if edu.details %}
@@ -125,7 +119,7 @@
     </section>
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('languages') %} soft-break-before{% endif %}">
-      <div class="section-title">Language Skills</div>
+      <div class="section-title">Sprachkenntnisse</div>
       <div class="two-col-list">
         {% for lang in languages or [] %}
           {% if lang is mapping %}
@@ -143,13 +137,13 @@
     </section>
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('interests') %} soft-break-before{% endif %}">
-      <div class="section-title">Interests</div>
+      <div class="section-title">Interessen</div>
       <p class="small">{{ interests or "" }}</p>
     </section>
 
     <section class="section{% if _soft_break_before and _soft_break_before.get('references') %} soft-break-before{% endif %}">
-      <div class="section-title">References</div>
-      <p class="small">{{ references or "Will be announced on request." }}</p>
+      <div class="section-title">Referenzen</div>
+      <p class="small">{{ references or "Auf Anfrage verfügbar." }}</p>
     </section>
 
     </main>

@@ -211,10 +211,14 @@ a {
 
 .section {
   margin-top: 5mm; /* ~14pt per spec */
-  /* Deterministic section keep-together: prevent small sections from splitting */
-  break-inside: avoid;
-  page-break-inside: avoid;
   margin-bottom: 14pt;
+  break-inside: avoid-page;
+  page-break-inside: avoid;
+}
+
+.section.soft-break-before {
+  break-before: page;
+  page-break-before: always;
 }
 
 .section-title {

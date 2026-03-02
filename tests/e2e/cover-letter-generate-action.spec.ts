@@ -108,7 +108,9 @@ async function setupMock(page: Page) {
         text: 'Review your cover letter draft. Generate the final 1-page PDF when ready.',
         fields: [{ key: 'cover_letter_preview', label: 'Cover letter', value: '(not generated)' }],
         actions: [
-          { id: 'COVER_LETTER_GENERATE', label: 'Generate final Cover Letter PDF', style: 'primary' },
+          { id: 'DOWNLOAD_PDF', label: 'Pobierz CV', style: 'secondary' },
+          { id: 'COVER_LETTER_FEEDBACK_APPLY', label: 'Improve draft', style: 'primary' },
+          { id: 'COVER_LETTER_GENERATE', label: 'Generate final Cover Letter PDF', style: 'secondary' },
           { id: 'COVER_LETTER_BACK', label: 'Back', style: 'secondary' },
         ],
         disable_free_text: true,
@@ -136,6 +138,12 @@ test.describe('Cover letter generate action', () => {
     await expect(stagePanel).toBeVisible({ timeout: 30_000 });
 
     const generateBtn = stagePanel.getByTestId('action-COVER_LETTER_GENERATE');
+    if (!(await generateBtn.isVisible().catch(() => false))) {
+      const more = stagePanel.getByText('Więcej akcji').first();
+      if (await more.isVisible().catch(() => false)) {
+        await more.click();
+      }
+    }
     await expect(generateBtn).toBeVisible({ timeout: 30_000 });
     await expect(generateBtn).toBeEnabled({ timeout: 30_000 });
 
@@ -155,7 +163,8 @@ test.describe('Cover letter generate action', () => {
     expect((body.message || '').trim()).toBe('');
 
     await expect(stagePanel).toContainText('Generated draft');
-    await expect(page.getByTestId('download-pdf')).toBeVisible({ timeout: 30_000 });
+    await expect(stagePanel.getByTestId('action-COVER_LETTER_GENERATE')).toHaveText('Pobierz Cover Letter');
+    await expect(page.getByTestId('download-pdf')).toHaveCount(0);
 
     const generateCalls = seen.filter((r) => r.user_action?.id === 'COVER_LETTER_GENERATE');
     expect(generateCalls).toHaveLength(1);

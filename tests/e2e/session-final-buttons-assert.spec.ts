@@ -34,6 +34,7 @@ test('resumed session shows final-stage PDF and cover buttons', async ({ page })
 
   await expect(pdfBtn).toBeVisible({ timeout: 30_000 });
   await expect(pdfBtn).toBeEnabled({ timeout: 30_000 });
+  await expect(pdfBtn).toHaveText(/Generuj PDF|Pobierz CV/);
   await expect(coverPreviewBtn).toBeVisible({ timeout: 30_000 });
   await expect(coverPreviewBtn).toBeEnabled({ timeout: 30_000 });
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -105,8 +106,41 @@ def handle_cv_tool_call(req: func.HttpRequest, *, deps: EntryPointDeps) -> func.
         return _json_response(payload, status_code=status)
 
     if tool_name == "process_cv_orchestrated":
-        status, payload = _tool_process_cv_orchestrated(params)
-        return _json_response(payload, status_code=status)
+        result = _tool_process_cv_orchestrated(params)
+        if isinstance(result, tuple) and len(result) == 2:
+            status, payload = result
+            return _json_response(payload, status_code=status)
+
+        # Backward-compatible guard: legacy paths may still return (status, payload, content_type).
+        if isinstance(result, tuple) and len(result) == 3:
+            status, payload, content_type = result
+            if (
+                content_type == "application/pdf"
+                and isinstance(payload, dict)
+                and isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
+            ):
+                body = {
+                    "success": True,
+                    "trace_id": str(params.get("trace_id") or ""),
+                    "pdf_base64": base64.b64encode(bytes(payload["pdf_bytes"])).decode("ascii"),
+                }
+                return _json_response(body, status_code=int(status))
+            return _json_response(
+                {
+                    "success": False,
+                    "error": "process_cv_orchestrated returned unsupported legacy tuple",
+                    "details": str(content_type),
+                },
+                status_code=500,
+            )
+
+        return _json_response(
+            {
+                "success": False,
+                "error": "process_cv_orchestrated returned invalid response shape",
+            },
+            status_code=500,
+        )
 
     if not session_id:
         return _json_response({"error": "session_id is required"}, status_code=400)

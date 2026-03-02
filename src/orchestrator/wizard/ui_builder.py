@@ -351,6 +351,9 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 )
 
             actions = [{"id": "WORK_ADD_TAILORING_NOTES", "label": "Add tailoring notes", "style": "secondary"}]
+            if role_lines:
+                actions.append({"id": "MOVE_WORK_EXPERIENCE_UP", "label": "Move role up (↑)", "style": "tertiary"})
+                actions.append({"id": "MOVE_WORK_EXPERIENCE_DOWN", "label": "Move role down (↓)", "style": "tertiary"})
             if missing_loc_lines:
                 actions.append({"id": "WORK_LOCATIONS_EDIT", "label": "Add missing locations", "style": "secondary"})
             has_job_context = bool(job_ref or str(meta.get("job_posting_text") or "").strip())
@@ -365,7 +368,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "kind": "review_form",
                 "stage": "WORK_EXPERIENCE",
                 "title": f"Stage 4/{wizard_total} — Work experience",
-                "text": "Tailor your work experience to the job offer (recommended), or skip. If locations are missing, add them manually first.",
+                "text": "Tailor your work experience to the job offer (recommended), or skip. You can reorder roles with ↑/↓. If locations are missing, add them manually first.",
                 "fields": fields,
                 "actions": actions,
                 "disable_free_text": True,
@@ -897,7 +900,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 # After PDF generation: show download first, then optional regenerate
                 actions.append({
                     "id": "DOWNLOAD_PDF",
-                    "label": "Pobierz PDF / Download PDF",
+                    "label": "Pobierz CV",
                     "style": "primary",
                 })
                 actions.append({
@@ -926,6 +929,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
 
         if wizard_stage == "cover_letter_review":
             cl = meta.get("cover_letter_block") if isinstance(meta.get("cover_letter_block"), dict) else None
+            feedback_value = str(meta.get("cover_letter_feedback") or "").strip()
             fields_list: list[dict] = []
             if isinstance(cl, dict):
                 fields_list.append({"key": "opening", "label": "Opening", "value": str(cl.get("opening_paragraph") or "").strip()})
@@ -936,6 +940,16 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                     fields_list.append({"key": "core2", "label": "Core paragraph 2", "value": str(core[1] or "").strip()})
                 fields_list.append({"key": "closing", "label": "Closing", "value": str(cl.get("closing_paragraph") or "").strip()})
                 fields_list.append({"key": "signoff", "label": "Sign-off", "value": str(cl.get("signoff") or "").strip()})
+            fields_list.append(
+                {
+                    "key": "cover_letter_feedback",
+                    "label": "Feedback for draft improvement",
+                    "value": feedback_value,
+                    "type": "textarea",
+                    "editable": True,
+                    "placeholder": "Keep opening shorter, reference my Operations Manager role more directly, and align closing to regulated manufacturing context.",
+                }
+            )
             if not fields_list:
                 fields_list = [{"key": "cover_letter", "label": "Cover letter", "value": "(not generated)"}]
 
@@ -943,15 +957,40 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "kind": "review_form",
                 "stage": "COVER_LETTER",
                 "title": f"Stage 7/{wizard_total} — Cover Letter (optional)",
-                "text": "Review your cover letter draft. Generate the final 1-page PDF when ready.",
+                "text": "Review your cover letter draft. You can improve the draft with feedback, then generate and download the final PDF.",
                 "fields": fields_list,
                 "actions": [
+                    {"id": "DOWNLOAD_PDF", "label": "Pobierz CV", "style": "secondary"},
                     {"id": "COVER_LETTER_BACK", "label": "Back", "style": "secondary"},
+                    {"id": "COVER_LETTER_FEEDBACK_EDIT", "label": "Edit feedback", "style": "secondary"},
+                    {"id": "COVER_LETTER_FEEDBACK_APPLY", "label": "Improve draft", "style": "primary"},
                     {
                         "id": "COVER_LETTER_GENERATE",
                         "label": "Generate final Cover Letter PDF",
-                        "style": "primary",
+                        "style": "secondary",
                     },
+                ],
+                "disable_free_text": True,
+            }
+
+        if wizard_stage == "cover_letter_feedback_edit":
+            return {
+                "kind": "edit_form",
+                "stage": "COVER_LETTER",
+                "title": f"Stage 7/{wizard_total} — Cover Letter feedback",
+                "text": "Add short feedback, then improve the draft.",
+                "fields": [
+                    {
+                        "key": "cover_letter_feedback",
+                        "label": "Feedback",
+                        "value": str(meta.get("cover_letter_feedback") or ""),
+                        "type": "textarea",
+                        "placeholder": "Mention all my roles and keep each paragraph concise.",
+                    }
+                ],
+                "actions": [
+                    {"id": "COVER_LETTER_BACK", "label": "Back", "style": "secondary"},
+                    {"id": "COVER_LETTER_FEEDBACK_APPLY", "label": "Improve draft", "style": "primary"},
                 ],
                 "disable_free_text": True,
             }

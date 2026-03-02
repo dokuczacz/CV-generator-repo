@@ -10,6 +10,8 @@ Style:
 - Structure: Opening -> factual alignment with role topics (2-3 concise body paragraphs) -> Closing.
 - **Personalize**: Reference company vision/domain if possible.
 - **Max 1 page**; single-spaced.
+- Must explicitly reference ALL roles from WORK_EXPERIENCE (title and/or company), at least once across the letter.
+- Anti-omission rule: no role from WORK_EXPERIENCE may be omitted.
 
 CONSISTENCY:
 - Output must be valid JSON per schema.

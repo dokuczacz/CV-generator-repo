@@ -14,9 +14,14 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates" / "html"
 TEMPLATE_NAME = "cv_template_2pages_2025.html"
+TEMPLATE_NAME_DE = "cv_template_2pages_2025_de.html"
 CSS_NAME = "cv_template_2pages_2025.css"
 CL_TEMPLATE_NAME = "cover_letter_template_2025.html"
 CL_CSS_NAME = "cover_letter_template_2025.css"
+
+CV_TEMPLATE_BY_LANGUAGE = {
+    "de": TEMPLATE_NAME_DE,
+}
 
 
 class RenderError(Exception):
@@ -66,14 +71,116 @@ def _load_env() -> Environment:
             lstrip_blocks=True,
             cache_size=400,  # Enable bytecode caching
         )
-        # Pre-compile the CV template on first load
+        # Pre-compile CV templates on first load
         _jinja_env.get_template(TEMPLATE_NAME)
+        for _tpl in CV_TEMPLATE_BY_LANGUAGE.values():
+            try:
+                _jinja_env.get_template(_tpl)
+            except Exception:
+                # Keep rendering resilient if optional localized templates are absent.
+                pass
         try:
             _jinja_env.get_template(CL_TEMPLATE_NAME)
         except Exception:
             # Keep CV rendering working in older checkouts where the CL template isn't present.
             pass
     return _jinja_env
+
+
+def _resolve_cv_template_name(language: str | None) -> str:
+    lang = str(language or "").strip().lower()
+    return CV_TEMPLATE_BY_LANGUAGE.get(lang, TEMPLATE_NAME)
+
+
+def _estimate_section_height_mm(section_key: str, cv: Dict[str, Any]) -> float:
+    section_title = 6.0
+    section_margin = 5.0
+
+    if section_key == "work_experience":
+        rows = cv.get("work_experience") if isinstance(cv.get("work_experience"), list) else []
+        total = section_title + section_margin
+        for role in (rows or [])[:12]:
+            if not isinstance(role, dict):
+                continue
+            bullets = role.get("bullets") if isinstance(role.get("bullets"), list) else []
+            bullet_count = max(1, min(6, len(bullets or [])))
+            total += 6.5 + (bullet_count * 4.2)
+        return total
+
+    if section_key in ("it_ai_skills", "technical_operational_skills"):
+        arr = cv.get(section_key) if isinstance(cv.get(section_key), list) else []
+        count = max(1, min(12, len(arr or [])))
+        return section_title + section_margin + (count * 4.2)
+
+    if section_key == "education":
+        rows = cv.get("education") if isinstance(cv.get("education"), list) else []
+        total = section_title + section_margin
+        for edu in (rows or [])[:8]:
+            if not isinstance(edu, dict):
+                continue
+            details = edu.get("details") if isinstance(edu.get("details"), list) else []
+            total += 6.0 + (min(3, len(details or [])) * 4.0)
+        return total
+
+    if section_key == "languages":
+        arr = cv.get("languages") if isinstance(cv.get("languages"), list) else []
+        count = max(1, min(8, len(arr or [])))
+        return section_title + section_margin + (count * 4.0)
+
+    if section_key == "interests":
+        txt = str(cv.get("interests") or "").strip()
+        lines = max(1, min(6, (len(txt) // 70) + 1)) if txt else 1
+        return section_title + section_margin + (lines * 4.5)
+
+    if section_key == "references":
+        txt = str(cv.get("references") or "").strip()
+        lines = max(1, min(3, (len(txt) // 80) + 1)) if txt else 1
+        return section_title + section_margin + (lines * 4.0)
+
+    return section_title + section_margin
+
+
+def _compute_soft_pagination_breaks(cv: Dict[str, Any]) -> Dict[str, bool]:
+    if bool(cv.get("_disable_soft_break_before")):
+        return {}
+
+    section_order = [
+        "work_experience",
+        "it_ai_skills",
+        "technical_operational_skills",
+        "education",
+        "languages",
+        "interests",
+        "references",
+    ]
+    page_content_mm = 257.0
+    threshold_mm = page_content_mm * 0.80
+    short_section_mm = page_content_mm * 0.22
+
+    estimated = {key: _estimate_section_height_mm(key, cv) for key in section_order}
+    estimated_total = sum(estimated.values())
+
+    # Be conservative: on denser CVs prefer natural flow to avoid forcing extra pages.
+    if estimated_total > (page_content_mm * 1.55):
+        return {}
+
+    # Fallback to natural flow when 3rd-page risk is high.
+    if estimated_total > (page_content_mm * 2.0):
+        return {}
+
+    hints: Dict[str, bool] = {}
+    running = 0.0
+    for idx, key in enumerate(section_order):
+        cur_h = estimated.get(key, 0.0)
+        next_key = section_order[idx + 1] if idx + 1 < len(section_order) else None
+        next_h = estimated.get(next_key, 0.0) if next_key else 0.0
+        running += cur_h
+        if next_key and running > threshold_mm and 0 < next_h <= short_section_mm:
+            hints[next_key] = True
+            running = next_h
+        if running > page_content_mm:
+            running -= page_content_mm
+    return hints
 
 
 def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
@@ -96,7 +203,8 @@ def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
     cv.setdefault('interests', '')
     cv.setdefault('further_experience', [])
     env = _load_env()
-    template = env.get_template(TEMPLATE_NAME)
+    language = str(cv.get("language") or "en").strip().lower()
+    template = env.get_template(_resolve_cv_template_name(language))
     css = ""
     if inline_css:
         css_path = TEMPLATES_DIR / CSS_NAME
@@ -136,6 +244,7 @@ def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
         }
 
     context = dict(cv)
+    context["_soft_break_before"] = _compute_soft_pagination_breaks(cv)
     if inline_css:
         context["_inline_css"] = css
     context["_styles"] = styles

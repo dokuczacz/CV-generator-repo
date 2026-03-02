@@ -63,6 +63,53 @@ def _extract_inline_heading_tail(line: str, heading_variants: List[str]) -> str:
     return ""
 
 
+def _split_inline_section_headings(lines: List[str]) -> List[str]:
+    """Split lines where section headings are glued into preceding content.
+
+    Example:
+    "... Electrical Engineering Language Skills German ..."
+    ->
+    ["... Electrical Engineering", "Language Skills German ..."]
+    """
+    if not lines:
+        return []
+
+    heading_markers = [
+        "Language Skills",
+        "Sprachkenntnisse",
+        "Sprachen",
+        "IT & AI Skills",
+        "IT and AI Skills",
+        "Technical & Operational Skills",
+        "Technical and Operational Skills",
+        "Interests",
+        "Interessen",
+        "References",
+        "Referenzen",
+        "FÄHIGKEITEN & KOMPETENZEN",
+        "FAEHIGKEITEN & KOMPETENZEN",
+    ]
+
+    markers = sorted({m for m in heading_markers if m}, key=len, reverse=True)
+    out: List[str] = []
+
+    for raw in lines:
+        txt = str(raw or "")
+        if not txt.strip():
+            continue
+        normalized = txt.replace("\u00a0", " ")
+
+        for marker in markers:
+            # Insert a hard split before marker when it appears mid-line.
+            pattern = re.compile(rf"(?i)(?<=.)\s*({re.escape(marker)})")
+            normalized = pattern.sub(lambda m: f"\n{m.group(1)}", normalized)
+
+        parts = [p.strip() for p in normalized.splitlines() if p.strip()]
+        out.extend(parts if parts else [normalized.strip()])
+
+    return out
+
+
 def _slice_between(lines: List[str], start_idx: Optional[int], end_idx: Optional[int]) -> List[str]:
     if start_idx is None:
         return []
@@ -208,11 +255,7 @@ def _parse_work_experience(lines: List[str]) -> List[Dict[str, Any]]:
 
     if current is not None:
         items.append(current)
-    # Deterministic order: newest first (by end date, then start date).
-    # Keep relative order stable for equal keys.
-    indexed = list(enumerate(items))
-    indexed.sort(key=lambda p: (_work_sort_key(p[1]), -p[0]), reverse=True)
-    items = [item for _, item in indexed]
+    # Preserve source/import order from the document.
     return items
 
 
@@ -298,35 +341,43 @@ def _parse_languages(lines: List[str]) -> List[str]:
         if l.isupper() and len(l) <= 30:
             continue
 
-        # Typical: "English (fluent)"
-        m = re.match(r"^\s*(.+?)\s*(\(.+?\))\s*$", l)
-        if m:
-            name = m.group(1).strip()
-            level = m.group(2).strip()
-            if name:
-                out.append(f"{name} {level}".strip())
-                if len(out) >= 5:
-                    break
-            continue
+        segments = [seg.strip() for seg in re.split(r"[;,]", l) if seg.strip()]
+        if len(segments) <= 1:
+            segments = [l]
 
-        # Common: "English - fluent", "English: fluent", "English – fluent"
-        m = re.match(r"^\s*(.+?)\s*[:\-\u2013\u2014]\s*(.+?)\s*$", l)
-        if m:
-            name = m.group(1).strip()
-            level = m.group(2).strip()
-            if name and level:
-                out.append(f"{name} ({level})")
-                if len(out) >= 5:
-                    break
+        for seg in segments:
+            if len(out) >= 5:
+                break
+
+            seg_low = seg.lower()
+            if any(tag in seg_low for tag in ("fähigkeiten", "faehigkeiten", "kompetenzen", "skills", "github")):
                 continue
 
-        # Common: "English fluent" (best-effort; keep 1-word name + rest as level)
-        parts = [p for p in l.split(" ") if p]
-        if len(parts) >= 2 and len(parts[0]) <= 20 and len(parts[1:]) <= 6:
-            out.append(f"{parts[0]} ({' '.join(parts[1:])})")
-        else:
-            # Fallback: treat full line as name
-            out.append(l)
+            # Typical: "English (fluent)"
+            m = re.match(r"^\s*(.+?)\s*(\(.+?\))\s*$", seg)
+            if m:
+                name = m.group(1).strip()
+                level = m.group(2).strip()
+                if name:
+                    out.append(f"{name} {level}".strip())
+                continue
+
+            # Common: "English - fluent", "English: fluent", "English – fluent"
+            m = re.match(r"^\s*(.+?)\s*[:\-\u2013\u2014]\s*(.+?)\s*$", seg)
+            if m:
+                name = m.group(1).strip()
+                level = m.group(2).strip()
+                if name and level:
+                    out.append(f"{name} ({level})")
+                    continue
+
+            # Common: "English fluent" (best-effort; keep 1-word name + rest as level)
+            parts = [p for p in seg.split(" ") if p]
+            if len(parts) >= 2 and len(parts[0]) <= 20 and len(parts[1:]) <= 6:
+                out.append(f"{parts[0]} ({' '.join(parts[1:])})")
+            else:
+                # Fallback: treat full segment as name
+                out.append(seg)
 
         if len(out) >= 5:
             break
@@ -435,13 +486,14 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
 
     Focus: contact + profile + work_experience + education (enough to avoid 'missing required fields').
     """
-    lines = _lines_from_docx(docx_bytes)
+    lines = _split_inline_section_headings(_lines_from_docx(docx_bytes))
     contact = extract_contact_from_docx_bytes(docx_bytes)
 
     idx_profile = _find_heading_index(lines, ["profil", "profile", "summary"])
     idx_work = _find_heading_index(lines, ["berufserfahrung", "work experience", "experience"])
     idx_edu = _find_heading_index(lines, ["ausbildung", "education"])
-    idx_lang = _find_heading_index(lines, ["sprachen", "languages"])
+    lang_heading_variants = ["sprachen", "sprachkenntnisse", "language skills", "languages"]
+    idx_lang = _find_heading_index(lines, lang_heading_variants)
     it_ai_heading_variants = [
         "it & ai skills",
         "it and ai skills",
@@ -486,19 +538,9 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
             "commitment",
         ],
     )
-    idx_interests = _find_heading_index(lines, ["interessen", "interests"])
+    interests_heading_variants = ["interessen", "interests"]
+    idx_interests = _find_heading_index(lines, interests_heading_variants)
     idx_refs = _find_heading_index(lines, ["referenzen", "references"])
-
-    profile_lines = _slice_between(lines, idx_profile, idx_work or idx_edu)
-    work_lines = _slice_between(lines, idx_work, idx_edu)
-    edu_lines = _slice_between(lines, idx_edu, idx_lang)
-
-    # Languages slice ends at the next known heading after languages
-    next_after_lang = None
-    for idx in [idx_it_ai_skills, idx_tech_ops_skills, idx_skills_generic, idx_interests, idx_refs]:
-        if idx is not None and idx_lang is not None and idx > idx_lang:
-            next_after_lang = idx if next_after_lang is None else min(next_after_lang, idx)
-    lang_lines = _slice_between(lines, idx_lang, next_after_lang)
 
     def _next_after(current_idx: Optional[int], candidates: List[Optional[int]]) -> Optional[int]:
         if current_idx is None:
@@ -510,6 +552,24 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
             if idx > current_idx:
                 best = idx if best is None else min(best, idx)
         return best
+
+    profile_lines = _slice_between(lines, idx_profile, idx_work or idx_edu)
+    work_lines = _slice_between(lines, idx_work, idx_edu)
+    next_after_edu = _next_after(
+        idx_edu,
+        [idx_lang, idx_it_ai_skills, idx_tech_ops_skills, idx_skills_generic, idx_further, idx_interests, idx_refs],
+    )
+    edu_lines = _slice_between(lines, idx_edu, next_after_edu)
+
+    # Languages slice ends at the next known heading after languages
+    next_after_lang = None
+    for idx in [idx_it_ai_skills, idx_tech_ops_skills, idx_skills_generic, idx_interests, idx_refs]:
+        if idx is not None and idx_lang is not None and idx > idx_lang:
+            next_after_lang = idx if next_after_lang is None else min(next_after_lang, idx)
+    lang_lines = _slice_between(lines, idx_lang, next_after_lang)
+    inline_lang_tail = _extract_inline_heading_tail(lines[idx_lang], lang_heading_variants) if idx_lang is not None and idx_lang < len(lines) else ""
+    if inline_lang_tail:
+        lang_lines = [inline_lang_tail] + lang_lines
 
     next_after_it_ai = _next_after(
         idx_it_ai_skills,
@@ -547,6 +607,9 @@ def prefill_cv_from_docx_bytes(docx_bytes: bytes) -> Dict[str, Any]:
 
     # Interests slice ends at references (if any)
     interests_lines = _slice_between(lines, idx_interests, idx_refs)
+    inline_interests_tail = _extract_inline_heading_tail(lines[idx_interests], interests_heading_variants) if idx_interests is not None and idx_interests < len(lines) else ""
+    if inline_interests_tail:
+        interests_lines = [inline_interests_tail] + interests_lines
 
     raw_skill_lines: List[str] = []
     for chunk in (it_ai_lines, tech_ops_lines, skills_lines_generic):

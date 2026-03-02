@@ -422,6 +422,9 @@ def tool_generate_cv_from_session(
         meta=meta if isinstance(meta, dict) else {},
     )
 
+    cv_data = dict(cv_data or {})
+    cv_data["language"] = target_lang
+
     cv_data = normalize_cv_data(cv_data)
 
     is_valid, errors = validate_canonical_schema(cv_data, strict=True)
@@ -460,8 +463,11 @@ def tool_generate_cv_from_session(
         if not hard_errors:
             try:
                 logging.info("=== PDF GENERATION START === session_id=%s shrink_step=%s", session_id, step)
-                pdf_bytes = render_pdf(cv_try, enforce_two_pages=True)
-                cv_data = cv_try  # render snapshot used for download name + metadata
+                cv_render = dict(cv_try or {})
+                if step > 0:
+                    cv_render["_disable_soft_break_before"] = True
+                pdf_bytes = render_pdf(cv_render, enforce_two_pages=True)
+                cv_data = cv_render  # render snapshot used for download name + metadata
                 break
             except Exception as e:
                 # If renderer still violates DoD (pages != 2), shrink once and retry.

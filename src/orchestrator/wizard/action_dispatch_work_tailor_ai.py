@@ -403,6 +403,7 @@ def handle_work_tailor_ai_actions(
         proposal_block["roles"] = included_roles
         meta2["work_experience_tailored"] = True
         meta2["work_experience_proposal_accepted_at"] = deps.now_iso()
+        meta2["work_experience_order_source"] = "model_relevance_after_accept"
     
         # Language-aware validation after applying proposal
         base_limit = deps.work_experience_hard_limit_chars

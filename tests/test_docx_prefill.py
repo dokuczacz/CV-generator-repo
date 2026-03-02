@@ -106,3 +106,98 @@ def test_prefill_preserves_long_skill_lines(monkeypatch):
     raw_lines = cv.get("skills_raw_lines") if isinstance(cv.get("skills_raw_lines"), list) else []
     assert any(("omni" in x.lower() and "azure functions" in x.lower()) for x in raw_lines)
     assert any(len(x) > 180 for x in raw_lines)
+
+
+def test_parse_work_experience_preserves_import_order():
+    lines = [
+        "2021-01 - 2023-01 Senior Engineer - Company B, Zurich",
+        "- Led delivery",
+        "2019-01 - 2020-12 Engineer - Company A, Basel",
+        "- Improved process",
+    ]
+
+    parsed = docx_prefill._parse_work_experience(lines)
+
+    assert isinstance(parsed, list)
+    assert len(parsed) == 2
+    assert str(parsed[0].get("employer") or "").startswith("Company B")
+    assert str(parsed[1].get("employer") or "").startswith("Company A")
+
+
+def test_prefill_splits_inline_section_leakage_from_education(monkeypatch):
+    fake_lines = [
+        "Mariusz Horodecki",
+        "horodecki@example.com",
+        "+41 77 111 22 33",
+        "Ausbildung",
+        "2012-2015 Poznań University of Technology",
+        "Master of Science in Electrical Engineering, Spezialisierung: Industrie- und Fahrzeugsysteme",
+        "2008-2012 Poznań University of Technology",
+        "Bachelor of Engineering in Electrical Engineering, Spezialisierung: Mikroprozessorgesteuerte Systeme, Sprachkenntnisse,Polnisch (Muttersprache),Englisch (fließend),Deutsch (mittelstufe),Russisch und Rumänisch (Grundkenntnisse),Interessen,Systemdenken & Workflow-Optimierung,Referenzen,Werden auf Anfrage bekanntgegeben.",
+    ]
+
+    monkeypatch.setattr(docx_prefill, "_lines_from_docx", lambda _bytes: fake_lines)
+    monkeypatch.setattr(
+        docx_prefill,
+        "extract_contact_from_docx_bytes",
+        lambda _bytes: ContactExtract(
+            full_name="Mariusz Horodecki",
+            email="horodecki@example.com",
+            phone="+41 77 111 22 33",
+            address_lines=("Zer Chirchu 20", "3933 Staldenried"),
+        ),
+    )
+
+    cv = prefill_cv_from_docx_bytes(b"fake")
+
+    education = cv.get("education") if isinstance(cv.get("education"), list) else []
+    assert len(education) >= 2
+    details_2 = education[1].get("details") if isinstance(education[1], dict) else []
+    assert isinstance(details_2, list)
+    assert all(len(str(d)) <= 300 for d in details_2)
+    assert not any("Interessen" in str(d) or "Referenzen" in str(d) for d in details_2)
+
+    languages = cv.get("languages") if isinstance(cv.get("languages"), list) else []
+    assert any("Deutsch" in str(x) for x in languages)
+
+    interests = str(cv.get("interests") or "")
+    assert "Workflow-Optimierung" in interests
+
+
+def test_prefill_splits_inline_language_skills_from_education(monkeypatch):
+    fake_lines = [
+        "Mariusz Horodecki",
+        "horodecki@example.com",
+        "+41 77 111 22 33",
+        "Education",
+        "2012-2015 Poznań University of Technology",
+        "Master of Science in Electrical Engineering, specialization: Industrial and automotive systems",
+        "2008-2012 Poznań University of Technology",
+        "Bachelor of Engineering in Electrical Engineering, specialization: Microprocessor control systems, Language Skills,Polish (native),English (fluent),German (intermediate),Russian and Romanian (basic knowledge),Interests,Systems thinking & Workflow-Optimierung,References,Available upon request.",
+    ]
+
+    monkeypatch.setattr(docx_prefill, "_lines_from_docx", lambda _bytes: fake_lines)
+    monkeypatch.setattr(
+        docx_prefill,
+        "extract_contact_from_docx_bytes",
+        lambda _bytes: ContactExtract(
+            full_name="Mariusz Horodecki",
+            email="horodecki@example.com",
+            phone="+41 77 111 22 33",
+            address_lines=("Zer Chirchu 20", "3933 Staldenried"),
+        ),
+    )
+
+    cv = prefill_cv_from_docx_bytes(b"fake")
+
+    education = cv.get("education") if isinstance(cv.get("education"), list) else []
+    assert len(education) >= 2
+    details_2 = education[1].get("details") if isinstance(education[1], dict) else []
+    assert isinstance(details_2, list)
+    assert not any("Language Skills" in str(d) or "Interests" in str(d) or "References" in str(d) for d in details_2)
+
+    languages = cv.get("languages") if isinstance(cv.get("languages"), list) else []
+    assert any("German" in str(x) for x in languages)
+
+    interests = str(cv.get("interests") or "")
+    assert "Workflow-Optimierung" in interests

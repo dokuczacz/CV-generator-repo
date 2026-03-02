@@ -556,6 +556,9 @@ def _reset_metadata_for_new_version(meta: dict) -> dict:
     out.pop("work_experience_tailored", None)
     out.pop("it_ai_skills_tailored", None)
     out.pop("cover_letter_generated", None)
+    out.pop("cover_letter_feedback", None)
+    out.pop("cover_letter_feedback_applied_at", None)
+    out.pop("cover_letter_feedback_capsule", None)
 
     out.pop("pending_confirmation", None)
     out.pop("work_selected_index", None)
@@ -2366,10 +2369,11 @@ def _generate_cover_letter_block_via_openai(
             "Job reference is missing. Please provide a valid job posting (responsibilities and requirements) before generating cover letter.",
         )
 
-    # Compact CV excerpt.
+    # Compact CV excerpt + role checklist.
     role_blocks: list[str] = []
+    role_checklist_items: list[dict[str, str]] = []
     work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
-    for r in (work_list or [])[:5]:
+    for idx, r in enumerate((work_list or [])[:12]):
         if not isinstance(r, dict):
             continue
         company = _sanitize_for_prompt(str(r.get("employer") or r.get("company") or ""))
@@ -2379,19 +2383,35 @@ def _generate_cover_letter_block_via_openai(
         bullet_lines = "\n".join([f"- {_sanitize_for_prompt(str(b))}" for b in (bullets or []) if str(b).strip()][:5])
         head = " | ".join([p for p in [title, company, date] if p]) or "Role"
         role_blocks.append(f"{head}\n{bullet_lines}")
+        role_checklist_items.append(
+            {
+                "id": f"R{idx+1}",
+                "title": title,
+                "company": company,
+            }
+        )
     roles_text = "\n\n".join(role_blocks)
+    role_checklist_text = "\n".join(
+        [f"{it.get('id')} | {it.get('title')} | {it.get('company')}" for it in role_checklist_items if (it.get("title") or it.get("company"))]
+    )
 
     it_ai = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
     tech = cv_data.get("technical_operational_skills") if isinstance(cv_data.get("technical_operational_skills"), list) else []
     skills_text = "\n".join([f"- {str(s).strip()}" for s in (it_ai or [])[:8] if str(s).strip()] + [f"- {str(s).strip()}" for s in (tech or [])[:8] if str(s).strip()])
 
     style_profile = _infer_style_profile(cv_data)
+    feedback_text = str(meta.get("cover_letter_feedback") or "").strip()[:2000]
+    capsule_context = meta.get("cover_letter_feedback_capsule") if isinstance(meta.get("cover_letter_feedback_capsule"), dict) else {}
+    capsule_json = json.dumps(capsule_context, ensure_ascii=False)[:4000] if capsule_context else ""
 
     user_text = (
         f"[JOB_REFERENCE]\n{_sanitize_for_prompt(job_summary)}\n\n"
         f"[STYLE_PROFILE]\n{_sanitize_for_prompt(style_profile)}\n\n"
+        f"[ROLE_CHECKLIST]\n{_sanitize_for_prompt(role_checklist_text)}\n\n"
         f"[WORK_EXPERIENCE]\n{roles_text}\n\n"
         f"[SKILLS]\n{_sanitize_for_prompt(skills_text[:2000])}\n"
+        f"\n[COVER_LETTER_FEEDBACK]\n{_sanitize_for_prompt(feedback_text)}\n"
+        f"\n[CAPSULE_CONTEXT]\n{_sanitize_for_prompt(capsule_json)}\n"
     )
     e0_corpus = "\n".join([
         str(cv_data.get("profile") or ""),
@@ -2399,6 +2419,31 @@ def _generate_cover_letter_block_via_openai(
         str(skills_text or ""),
         str(meta.get("work_tailoring_notes") or ""),
     ])
+
+    def _role_tokens(item: dict[str, str]) -> list[str]:
+        title = str(item.get("title") or "").strip()
+        company = str(item.get("company") or "").strip()
+        raw_tokens = [title, company]
+        out: list[str] = []
+        for token in raw_tokens:
+            if not token:
+                continue
+            token_low = token.casefold()
+            if len(token_low) < 3:
+                continue
+            out.append(token_low)
+        return out
+
+    def _missing_role_refs(text_value: str) -> list[str]:
+        body = str(text_value or "").casefold()
+        missing: list[str] = []
+        for item in role_checklist_items:
+            tokens = _role_tokens(item)
+            if not tokens:
+                continue
+            if not any(tok in body for tok in tokens):
+                missing.append(str(item.get("id") or ""))
+        return missing
 
     def _call(extra_fix: str | None = None) -> tuple[bool, dict | None, str]:
         system_prompt = _build_ai_system_prompt(stage="cover_letter", target_language=target_language, extra=extra_fix)
@@ -2431,6 +2476,10 @@ def _generate_cover_letter_block_via_openai(
             "created_at": _now_iso(),
         }
         ok2, errs2 = _validate_cover_letter_block(block=cl_block, cv_data=cv_data)
+        full_text = "\n\n".join([cl_block.get("opening_paragraph", "")] + list(cl_block.get("core_paragraphs") or []) + [cl_block.get("closing_paragraph", "")])
+        missing_roles = _missing_role_refs(full_text)
+        if missing_roles:
+            errs2.append("Missing references for roles: " + ", ".join(missing_roles[:12]))
         errs2.extend(
             _find_cover_letter_e0_violations(
                 paragraphs=[cl_block.get("opening_paragraph", "")] + list(cl_block.get("core_paragraphs") or []) + [cl_block.get("closing_paragraph", "")],
@@ -2441,7 +2490,12 @@ def _generate_cover_letter_block_via_openai(
             return True, cl_block, ""
 
         # Bounded fix attempt (semantic validation, not schema repair).
-        ok_fix, parsed_fix, err_fix = _call("Fix these validation errors:\n- " + "\n- ".join(errs2[:8]))
+        fix_instruction = (
+            "Fix these validation errors:\n- "
+            + "\n- ".join(errs2[:8])
+            + "\n\nHard rule: reference EVERY role from ROLE_CHECKLIST at least once using role title or company."
+        )
+        ok_fix, parsed_fix, err_fix = _call(fix_instruction)
         if not ok_fix or not isinstance(parsed_fix, dict):
             return False, None, "Validation failed: " + "; ".join(errs2[:4])
         prop_fix = parse_cover_letter_proposal(parsed_fix)
@@ -2458,6 +2512,10 @@ def _generate_cover_letter_block_via_openai(
             "created_at": _now_iso(),
         }
         ok3, errs3 = _validate_cover_letter_block(block=cl_block2, cv_data=cv_data)
+        full_text2 = "\n\n".join([cl_block2.get("opening_paragraph", "")] + list(cl_block2.get("core_paragraphs") or []) + [cl_block2.get("closing_paragraph", "")])
+        missing_roles2 = _missing_role_refs(full_text2)
+        if missing_roles2:
+            errs3.append("Missing references for roles: " + ", ".join(missing_roles2[:12]))
         errs3.extend(
             _find_cover_letter_e0_violations(
                 paragraphs=[cl_block2.get("opening_paragraph", "")] + list(cl_block2.get("core_paragraphs") or []) + [cl_block2.get("closing_paragraph", "")],
@@ -2721,7 +2779,8 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     session_id = str(params.get("session_id") or "").strip()
     job_posting_text = (str(params.get("job_posting_text") or "").strip() or None)
     job_posting_url = (str(params.get("job_posting_url") or "").strip() or None)
-    language = str(params.get("language") or "en").strip() or "en"
+    language_raw = params.get("language")
+    language = str(language_raw).strip().lower() if isinstance(language_raw, str) else ""
     client_context = params.get("client_context") if isinstance(params.get("client_context"), dict) else None
     user_action = params.get("user_action") if isinstance(params.get("user_action"), dict) else None
     user_action_id = str((user_action or {}).get("id") or "").strip()
@@ -2755,7 +2814,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     if not session_id and docx_base64:
         status, created = _tool_extract_and_store_cv(
             docx_base64=docx_base64,
-            language=language,
+            language=language or "en",
             extract_photo_flag=bool(params.get("extract_photo", True)),
             job_posting_url=job_posting_url,
             job_posting_text=job_posting_text,
@@ -2785,7 +2844,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         )
         return 200, {"success": True, "trace_id": trace_id, "assistant_text": "Your session is no longer available. Please re-upload your CV DOCX to start a new session.", "session_id": None, "run_summary": {"trace_id": trace_id, "steps": [{"step": "session_missing"}]}, "turn_trace": []}
 
-    # Keep metadata language in sync with user preference (stateless calls).
+    # Keep metadata language in sync only when the client explicitly sends a language preference.
     if isinstance(sess.get("metadata"), dict) and language:
         meta = dict(sess.get("metadata") or {})
         if meta.get("language") != language:
@@ -3404,6 +3463,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             )
             handled, cv_data, meta2, cover_pdf_resp = handle_cover_pdf_actions(
                 aid=aid,
+                user_action_payload=user_action_payload if isinstance(user_action_payload, dict) else None,
                 cv_data=cv_data,
                 meta2=meta2,
                 session_id=session_id,

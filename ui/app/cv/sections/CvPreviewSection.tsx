@@ -1,4 +1,3 @@
-import { downloadPDF } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -14,9 +13,9 @@ interface CvPreviewSectionProps {
   showCvJson: boolean;
   copyNotice: string | null;
   actionNotice: string | null;
-  latestPdfBase64: string | null;
-  latestPdfFilename: string | null;
-  latestPdfDownloadName: string | null;
+  latestCvPdfBase64: string | null;
+  latestCvPdfFilename: string | null;
+  latestCvPdfDownloadName: string | null;
   isLoading: boolean;
   onToggleShowCvJson: () => void;
   onCopyCvJson: () => void;
@@ -24,6 +23,8 @@ interface CvPreviewSectionProps {
   onDownloadPdf: () => void;
   onScrollToStagePanel: () => void;
   onToggleWorkLock: (roleIndex: number) => void;
+  onMoveWorkRoleUp: (roleIndex: number) => void;
+  onMoveWorkRoleDown: (roleIndex: number) => void;
   describeMissing: (key: string) => { label: string; hint: string };
   requiredLabel: (key: string) => string;
 }
@@ -37,9 +38,9 @@ export function CvPreviewSection({
   showCvJson,
   copyNotice,
   actionNotice,
-  latestPdfBase64,
-  latestPdfFilename,
-  latestPdfDownloadName,
+  latestCvPdfBase64,
+  latestCvPdfFilename,
+  latestCvPdfDownloadName,
   isLoading,
   onToggleShowCvJson,
   onCopyCvJson,
@@ -47,6 +48,8 @@ export function CvPreviewSection({
   onDownloadPdf,
   onScrollToStagePanel,
   onToggleWorkLock,
+  onMoveWorkRoleUp,
+  onMoveWorkRoleDown,
   describeMissing,
   requiredLabel,
 }: CvPreviewSectionProps) {
@@ -68,7 +71,7 @@ export function CvPreviewSection({
               <Button size="sm" variant="secondary" onClick={onCopyCvJson} disabled={!cvPreview}>
                 Kopiuj
               </Button>
-              {latestPdfBase64 ? (
+              {latestCvPdfBase64 ? (
                 <Button size="sm" variant="secondary" onClick={onDownloadPdf} data-testid="download-pdf">
                   Pobierz PDF
                 </Button>
@@ -193,15 +196,35 @@ export function CvPreviewSection({
                               const locks = (cvPreview?.metadata?.work_role_locks || {}) as Record<string, boolean>;
                               const isLocked = !!locks?.[String(i)];
                               return (
-                                <Button
-                                  size="sm"
-                                  variant={isLocked ? 'secondary' : 'primary'}
-                                  onClick={() => onToggleWorkLock(i)}
-                                  disabled={isLoading}
-                                  data-testid={`work-role-lock-${i}`}
-                                >
-                                  {isLocked ? 'Unlock' : 'Lock'}
-                                </Button>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => onMoveWorkRoleUp(i)}
+                                    disabled={isLoading || i === 0}
+                                    data-testid={`work-role-up-${i}`}
+                                  >
+                                    ↑
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => onMoveWorkRoleDown(i)}
+                                    disabled={isLoading || i === ((cvPreview.cv_data?.work_experience as Array<unknown> | undefined)?.length || 0) - 1}
+                                    data-testid={`work-role-down-${i}`}
+                                  >
+                                    ↓
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant={isLocked ? 'secondary' : 'primary'}
+                                    onClick={() => onToggleWorkLock(i)}
+                                    disabled={isLoading}
+                                    data-testid={`work-role-lock-${i}`}
+                                  >
+                                    {isLocked ? 'Unlock' : 'Lock'}
+                                  </Button>
+                                </div>
                               );
                             })()}
                           </div>

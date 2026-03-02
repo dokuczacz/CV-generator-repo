@@ -29,6 +29,7 @@ class CoverPdfActionDeps:
 def handle_cover_pdf_actions(
     *,
     aid: str,
+    user_action_payload: dict | None,
     cv_data: dict,
     meta2: dict,
     session_id: str,
@@ -37,7 +38,7 @@ def handle_cover_pdf_actions(
     language: str | None,
     client_context: dict | None,
     deps: CoverPdfActionDeps,
-) -> tuple[bool, dict, dict, tuple[int, dict] | tuple[int, dict, str] | None]:
+) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
     if aid == "WORK_CONFIRM_STAGE":
         meta2 = deps.wizard_set_stage(meta2, "further_experience")
         cv_data, meta2 = deps.persist(cv_data, meta2)
@@ -93,6 +94,83 @@ def handle_cover_pdf_actions(
         meta2 = deps.wizard_set_stage(meta2, "review_final")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(assistant_text="Back to PDF generation.", meta_out=meta2, cv_out=cv_data)
+
+    if aid == "COVER_LETTER_FEEDBACK_EDIT":
+        meta2 = deps.wizard_set_stage(meta2, "cover_letter_feedback_edit")
+        cv_data, meta2 = deps.persist(cv_data, meta2)
+        return True, cv_data, meta2, deps.wizard_resp(
+            assistant_text="Add feedback and click Improve draft.",
+            meta_out=meta2,
+            cv_out=cv_data,
+        )
+
+    if aid == "COVER_LETTER_FEEDBACK_APPLY":
+        payload = user_action_payload if isinstance(user_action_payload, dict) else {}
+        feedback_text = ""
+        if isinstance(payload, dict):
+            feedback_text = str(payload.get("cover_letter_feedback") or "").strip()
+        if not feedback_text:
+            feedback_text = str(meta2.get("cover_letter_feedback") or "").strip()
+
+        feedback_text = feedback_text[:2000]
+        meta2["cover_letter_feedback"] = feedback_text
+        meta2["cover_letter_feedback_applied_at"] = deps.now_iso()
+
+        capsule_context = {
+            "job_reference": meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else {},
+            "cover_letter_block": meta2.get("cover_letter_block") if isinstance(meta2.get("cover_letter_block"), dict) else {},
+            "work_experience": cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else [],
+            "work_tailoring_notes": str(meta2.get("work_tailoring_notes") or "")[:2000],
+            "feedback": feedback_text,
+        }
+        meta2["cover_letter_feedback_capsule"] = capsule_context
+
+        target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
+        allowed_langs = {"en", "de"}
+        if target_lang not in allowed_langs:
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="Cover letter is available only for English (EN) or German (DE) for now.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+        if not deps.cv_enable_cover_letter or not deps.openai_enabled():
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="AI is not configured. Cover letter improvement is unavailable.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+
+        ok_cl, cl_block, err_cl = deps.generate_cover_letter_block_via_openai(
+            cv_data=cv_data,
+            meta=meta2,
+            trace_id=trace_id,
+            session_id=session_id,
+            target_language=target_lang,
+        )
+        if not ok_cl or not isinstance(cl_block, dict):
+            meta2["cover_letter_error"] = str(err_cl)[:400]
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text=deps.friendly_schema_error_message(str(err_cl)),
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+
+        meta2["cover_letter_block"] = cl_block
+        meta2.pop("cover_letter_error", None)
+        meta2.pop("cover_letter_error_details", None)
+        meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+        cv_data, meta2 = deps.persist(cv_data, meta2)
+        return True, cv_data, meta2, deps.wizard_resp(
+            assistant_text="Cover letter draft improved.",
+            meta_out=meta2,
+            cv_out=cv_data,
+        )
     
     if aid == "COVER_LETTER_GENERATE":
         # Always regenerate cover letter from current CV state.
@@ -192,7 +270,7 @@ def handle_cover_pdf_actions(
             session_id=session_id,
             language=language,
             client_context=client_context,
-            session=store.get_session_with_blob_retrieval(session_id) or {"cv_data": cv_data, "metadata": meta2},
+            session=deps.session_get(session_id) or {"cv_data": cv_data, "metadata": meta2},
         )
         
         if (
@@ -202,7 +280,16 @@ def handle_cover_pdf_actions(
             and isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
         ):
             pdf_bytes = bytes(payload["pdf_bytes"])
-            return True, cv_data, meta2, (200, {"success": True, "pdf_bytes": pdf_bytes, "trace_id": trace_id}, "application/pdf")
+            sess_after = deps.session_get(session_id) or {}
+            meta_after = sess_after.get("metadata") if isinstance(sess_after.get("metadata"), dict) else meta2
+            cv_after = sess_after.get("cv_data") if isinstance(sess_after.get("cv_data"), dict) else cv_data
+            cv_data, meta2 = deps.persist(dict(cv_after or {}), dict(meta_after or {}))
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="PDF is ready. You can download it now.",
+                meta_out=meta2,
+                cv_out=cv_data,
+                pdf_bytes=pdf_bytes,
+            )
         else:
             # PDF not available - fallback to error response
             err_msg = "PDF not yet generated or unavailable"
@@ -214,6 +301,7 @@ def handle_cover_pdf_actions(
     
     if aid == "REQUEST_GENERATE_PDF":
         # Generate on first click (avoid the "clicked but nothing happened" UX).
+        effective_language = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower() or "en"
     
         def _try_generate(*, force_regen: bool) -> tuple[int, dict | bytes, str]:
             cc = client_context if isinstance(client_context, dict) else {}
@@ -222,7 +310,7 @@ def handle_cover_pdf_actions(
                 cc["force_pdf_regen"] = True
             return deps.tool_generate_cv_from_session(
                 session_id=session_id,
-                language=language,
+                language=effective_language,
                 client_context=cc,
                 session=deps.session_get(session_id) or {"cv_data": cv_data, "metadata": meta2},
             )

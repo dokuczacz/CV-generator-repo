@@ -13,9 +13,11 @@ interface WizardStageSectionProps {
   wizardStep: WizardStep;
   stepper: readonly StepperItem[] | null;
   isLoading: boolean;
-  latestPdfBase64: string | null;
-  latestPdfFilename: string | null;
-  latestPdfDownloadName: string | null;
+  latestCvPdfBase64: string | null;
+  latestCvPdfFilename: string | null;
+  latestCvPdfDownloadName: string | null;
+  latestCoverLetterPdfBase64: string | null;
+  latestCoverLetterPdfFilename: string | null;
   hasGeneratedPdf: boolean;
   formDraft: Record<string, string>;
   stageUpdates: StageUpdate[];
@@ -36,9 +38,11 @@ export function WizardStageSection({
   wizardStep,
   stepper,
   isLoading,
-  latestPdfBase64,
-  latestPdfFilename,
-  latestPdfDownloadName,
+  latestCvPdfBase64,
+  latestCvPdfFilename,
+  latestCvPdfDownloadName,
+  latestCoverLetterPdfBase64,
+  latestCoverLetterPdfFilename,
   hasGeneratedPdf,
   formDraft,
   stageUpdates,
@@ -145,7 +149,60 @@ export function WizardStageSection({
                           />
                         )
                       ) : (
-                        <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">{f.value || ''}</div>
+                        (() => {
+                          const isWorkRolesPreview = String(uiAction.stage || '').toUpperCase() === 'WORK_EXPERIENCE' && f.key === 'roles_preview';
+                          if (!isWorkRolesPreview) {
+                            return <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">{f.value || ''}</div>;
+                          }
+
+                          const lines = String(f.value || '')
+                            .split('\n')
+                            .map((line) => line.trim())
+                            .filter(Boolean);
+
+                          if (!lines.length) {
+                            return <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">(none)</div>;
+                          }
+
+                          return (
+                            <div className="mt-2 space-y-2">
+                              {lines.map((line, idx) => {
+                                const m = line.match(/^(\d+)\.\s*(.*)$/);
+                                const roleIdx = m ? Math.max(0, Number(m[1]) - 1) : idx;
+                                const roleText = m ? m[2] : line;
+                                return (
+                                  <div key={`${roleIdx}-${roleText}`} className="flex items-start justify-between gap-2 rounded border border-slate-200 bg-slate-50 p-2">
+                                    <div className="text-sm text-slate-900 break-words">{`${roleIdx + 1}. ${roleText}`}</div>
+                                    <div className="flex shrink-0 items-center gap-1">
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={isLoading || roleIdx <= 0}
+                                        onClick={() => {
+                                          void onSendUserAction('MOVE_WORK_EXPERIENCE_UP', { position_index: roleIdx });
+                                        }}
+                                        data-testid={`work-move-up-${roleIdx}`}
+                                      >
+                                        ↑
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={isLoading || roleIdx >= lines.length - 1}
+                                        onClick={() => {
+                                          void onSendUserAction('MOVE_WORK_EXPERIENCE_DOWN', { position_index: roleIdx });
+                                        }}
+                                        data-testid={`work-move-down-${roleIdx}`}
+                                      >
+                                        ↓
+                                      </Button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()
                       )}
                     </div>
                   ))}
@@ -157,7 +214,7 @@ export function WizardStageSection({
                   const actions = uiAction.actions || [];
                   const fields = Array.isArray(uiAction.fields) ? uiAction.fields : [];
                   const hasEditable = uiAction.kind === 'edit_form' || fields.some((f) => !!f?.editable);
-                  const keepInline = new Set(['COVER_LETTER_PREVIEW']);
+                  const keepInline = new Set(['COVER_LETTER_PREVIEW', 'COVER_LETTER_GENERATE']);
                   const primaryRaw = actions.filter((a) => !(a.style === 'secondary' || a.style === 'tertiary'));
                   const primary = primaryRaw.length > 1 ? primaryRaw.slice(0, 1) : primaryRaw;
                   const inlineSecondary = actions.filter((a) => (a.style === 'secondary' || a.style === 'tertiary') && keepInline.has(a.id));
@@ -165,8 +222,11 @@ export function WizardStageSection({
                   const demotedPrimary = primaryRaw.length > 1 ? primaryRaw.slice(1).map((a) => ({ ...a, style: 'secondary' as const })) : [];
 
                   const isLanguageSelection = String(uiAction.stage || '').toUpperCase() === 'LANGUAGE_SELECTION';
+                  const isCoverLetterStage = String(uiAction.stage || '').toUpperCase() === 'COVER_LETTER';
                   const enabledLanguageActions = new Set(['LANGUAGE_SELECT_EN', 'LANGUAGE_SELECT_DE']);
-                  const languageNote = isLanguageSelection ? 'Wersje językowe są niezależne (możesz później zrobić osobny przebieg dla DE/PL).' : null;
+                  const languageNote = isLanguageSelection ? 'Wybrany język docelowy ustawia wariant template PDF (EN/DE). Dla PL opcja jest jeszcze niedostępna.' : null;
+                  const hasLocalCvPdf = !!latestCvPdfBase64;
+                  const hasLocalCoverPdf = !!latestCoverLetterPdfBase64;
 
                   const renderButtons = (items: typeof actions, showRefreshBtn: boolean = false) => (
                     <div className="flex flex-wrap gap-2">
@@ -187,11 +247,11 @@ export function WizardStageSection({
                         const isCancel = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK');
                         const payload = hasEditable && !isCancel ? formDraft : undefined;
                         const isLangDisabled = isLanguageSelection && !enabledLanguageActions.has(a.id);
-                        const wantsDownload = a.id === 'REQUEST_GENERATE_PDF' && (latestPdfBase64 || hasGeneratedPdf);
+                        const wantsCvDownloadViaGenerate = a.id === 'REQUEST_GENERATE_PDF' && (hasLocalCvPdf || hasGeneratedPdf);
 
                         const label = (() => {
                           if (isLangDisabled) return `${a.label} (Coming soon)`;
-                          if (a.id === 'REQUEST_GENERATE_PDF') return wantsDownload ? 'Pobierz PDF' : 'Generuj PDF';
+                          if (a.id === 'REQUEST_GENERATE_PDF') return wantsCvDownloadViaGenerate ? 'Pobierz CV' : 'Generuj PDF';
                           return a.label;
                         })();
                         return (
@@ -201,8 +261,12 @@ export function WizardStageSection({
                             disabled={isLangDisabled}
                             title={isLangDisabled ? 'Coming soon — najpierw dopracuj wersję EN.' : undefined}
                             onClick={() => {
-                              if (wantsDownload && latestPdfBase64) {
-                                downloadPDF(latestPdfBase64, latestPdfDownloadName || latestPdfFilename || `CV_${Date.now()}.pdf`);
+                              if (a.id === 'REQUEST_GENERATE_PDF' && hasLocalCvPdf) {
+                                downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
+                                return;
+                              }
+                              if (a.id === 'DOWNLOAD_PDF' && hasLocalCvPdf) {
+                                downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
                                 return;
                               }
                               void onSendUserAction(a.id, payload);
@@ -214,6 +278,36 @@ export function WizardStageSection({
                           </Button>
                         );
                       })}
+                      {showRefreshBtn && isCoverLetterStage && (hasGeneratedPdf || hasLocalCvPdf) ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            if (hasLocalCvPdf) {
+                              downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
+                              return;
+                            }
+                            void onSendUserAction('DOWNLOAD_PDF');
+                          }}
+                          disabled={isLoading}
+                          data-testid="action-inline-download-cv"
+                        >
+                          Pobierz CV
+                        </Button>
+                      ) : null}
+                      {showRefreshBtn && isCoverLetterStage && hasLocalCoverPdf ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            downloadPDF(latestCoverLetterPdfBase64!, latestCoverLetterPdfFilename || `CoverLetter_${Date.now()}.pdf`);
+                          }}
+                          disabled={isLoading}
+                          data-testid="action-inline-download-cover-letter"
+                        >
+                          Pobierz Cover Letter
+                        </Button>
+                      ) : null}
                     </div>
                   );
 
