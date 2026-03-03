@@ -51,6 +51,7 @@ from src.normalize import normalize_cv_data
 from src.render import render_cover_letter_pdf, render_html
 from src.schema_validator import validate_canonical_schema
 from src.profile_store import get_profile_store
+from src.i18n import get_cover_letter_signoff
 from src.session_store import CVSessionStore
 from src.structured_response import parse_structured_response, format_user_message_for_ui
 from src.validator import validate_cv
@@ -2148,8 +2149,11 @@ def _build_cover_letter_render_payload(*, cv_data: dict, meta: dict, block: dict
     jr = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else {}
     recipient_company = ""
     recipient_job_title = str(jr.get("title") or "").strip()
+    target_language = str(meta.get("target_language") or meta.get("language") or "en").strip().lower() or "en"
+    signoff_prefix = get_cover_letter_signoff(target_language)
 
     return {
+        "language": target_language,
         "sender_name": str(cv_data.get("full_name") or "").strip(),
         "sender_email": str(cv_data.get("email") or "").strip(),
         "sender_phone": str(cv_data.get("phone") or "").strip(),
@@ -2161,7 +2165,7 @@ def _build_cover_letter_render_payload(*, cv_data: dict, meta: dict, block: dict
         "core_paragraphs": [str(p).strip() for p in (block.get("core_paragraphs") or []) if str(p).strip()],
         "closing_paragraph": str(block.get("closing_paragraph") or "").strip(),
         # Backend enforces deterministic sign-off identity.
-        "signoff": f"Kind regards,\n{str(cv_data.get('full_name') or '').strip()}",
+        "signoff": f"{signoff_prefix},\n{str(cv_data.get('full_name') or '').strip()}",
     }
 
 

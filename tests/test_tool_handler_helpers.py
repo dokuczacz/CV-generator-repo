@@ -62,6 +62,28 @@ def test_cover_letter_payload_omits_recipient_company():
     assert payload.get("recipient_company") == ""
 
 
+def test_cover_letter_payload_uses_target_language_signoff_and_language_field():
+    cv_data = {
+        "full_name": "Jan Kowalski",
+        "email": "jan@example.com",
+        "phone": "+41 555 000",
+    }
+    meta = {
+        "target_language": "de",
+        "language": "en",
+        "job_reference": {"title": "Operational Excellence Manager"},
+    }
+    block = {
+        "opening_paragraph": "Hallo",
+        "core_paragraphs": ["Kern"],
+        "closing_paragraph": "Danke",
+    }
+
+    payload = _build_cover_letter_render_payload(cv_data=cv_data, meta=meta, block=block)
+    assert payload.get("language") == "de"
+    assert payload.get("signoff") == "Mit freundlichen Grüßen,\nJan Kowalski"
+
+
 def test_backfill_missing_work_locations_from_docx_prefill():
     cv_data = {
         "work_experience": [

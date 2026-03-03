@@ -17,10 +17,15 @@ TEMPLATE_NAME = "cv_template_2pages_2025.html"
 TEMPLATE_NAME_DE = "cv_template_2pages_2025_de.html"
 CSS_NAME = "cv_template_2pages_2025.css"
 CL_TEMPLATE_NAME = "cover_letter_template_2025.html"
+CL_TEMPLATE_NAME_DE = "cover_letter_template_2025_de.html"
 CL_CSS_NAME = "cover_letter_template_2025.css"
 
 CV_TEMPLATE_BY_LANGUAGE = {
     "de": TEMPLATE_NAME_DE,
+}
+
+CL_TEMPLATE_BY_LANGUAGE = {
+    "de": CL_TEMPLATE_NAME_DE,
 }
 
 
@@ -84,12 +89,22 @@ def _load_env() -> Environment:
         except Exception:
             # Keep CV rendering working in older checkouts where the CL template isn't present.
             pass
+        for _tpl in CL_TEMPLATE_BY_LANGUAGE.values():
+            try:
+                _jinja_env.get_template(_tpl)
+            except Exception:
+                pass
     return _jinja_env
 
 
 def _resolve_cv_template_name(language: str | None) -> str:
     lang = str(language or "").strip().lower()
     return CV_TEMPLATE_BY_LANGUAGE.get(lang, TEMPLATE_NAME)
+
+
+def _resolve_cover_letter_template_name(language: str | None) -> str:
+    lang = str(language or "").strip().lower()
+    return CL_TEMPLATE_BY_LANGUAGE.get(lang, CL_TEMPLATE_NAME)
 
 
 def _estimate_section_height_mm(section_key: str, cv: Dict[str, Any]) -> float:
@@ -254,7 +269,8 @@ def render_html(cv: Dict[str, Any], inline_css: bool = True) -> str:
 def render_cover_letter_html(payload: Dict[str, Any], inline_css: bool = True) -> str:
     """Render cover letter HTML from a backend-derived payload."""
     env = _load_env()
-    template = env.get_template(CL_TEMPLATE_NAME)
+    language = str((payload or {}).get("language") or "en").strip().lower()
+    template = env.get_template(_resolve_cover_letter_template_name(language))
     css = ""
     if inline_css:
         css_path = TEMPLATES_DIR / CL_CSS_NAME

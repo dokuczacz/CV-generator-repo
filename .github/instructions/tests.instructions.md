@@ -1,5 +1,5 @@
 ---
-applyTo: "tests/**, playwright.config.ts"
+applyTo: "tests/**, **/*.ts, playwright.config.ts"
 name: Playwright testing conventions
 description: Best practices for Playwright tests and visual regression in this repository
 ---
