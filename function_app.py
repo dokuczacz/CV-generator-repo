@@ -1519,6 +1519,202 @@ def _maybe_apply_fast_profile(*, cv_data: dict, meta: dict, client_context: dict
     return cv2, meta2, True
 
 
+def _build_job_data_table_row(*, cv_data: dict, meta: dict, session_id: str | None = None, updated_at: str | None = None) -> dict:
+    job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else {}
+    work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
+    first_role = next((r for r in (work or []) if isinstance(r, dict)), {}) if isinstance(work, list) else {}
+
+    pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
+    cv_pdf_created_candidates: list[str] = []
+    if isinstance(pdf_refs, dict):
+        for key, value in pdf_refs.items():
+            if not isinstance(value, dict):
+                continue
+            kind = str(value.get("kind") or "").strip().lower()
+            key_l = str(key or "").strip().lower()
+            if kind == "cover_letter" or key_l.startswith("cover_letter_"):
+                continue
+            created = str(value.get("created_at") or "").strip()
+            if created:
+                cv_pdf_created_candidates.append(created)
+    row_updated_at = str(updated_at or _now_iso())[:40]
+    cv_generated_at = ""
+    if cv_pdf_created_candidates:
+        cv_generated_at = sorted(cv_pdf_created_candidates)[-1]
+    elif meta.get("pdf_generated"):
+        cv_generated_at = str(meta.get("wizard_stage_updated_at") or row_updated_at or _now_iso())
+    if not cv_generated_at:
+        cv_generated_at = row_updated_at
+
+    row = {
+        "position_name": str(job_ref.get("role_title") or first_role.get("title") or first_role.get("position") or "").strip()[:300],
+        "company_name": str(job_ref.get("company") or first_role.get("company") or first_role.get("employer") or "").strip()[:300],
+        "company_address": str(job_ref.get("location") or first_role.get("location") or first_role.get("city") or "").strip()[:300],
+        "company_email": str(meta.get("company_email") or "").strip()[:180],
+        "company_phone": str(meta.get("company_phone") or "").strip()[:80],
+        "cv_generated_at": cv_generated_at[:40],
+        "session_id": str(session_id or "")[:80],
+        "updated_at": row_updated_at,
+    }
+    return row
+
+
+def _job_data_row_signature(row: dict) -> str:
+    payload = {
+        "position_name": str(row.get("position_name") or "").strip().lower(),
+        "company_name": str(row.get("company_name") or "").strip().lower(),
+        "company_address": str(row.get("company_address") or "").strip().lower(),
+        "company_email": str(row.get("company_email") or "").strip().lower(),
+        "company_phone": str(row.get("company_phone") or "").strip().lower(),
+    }
+    return _sha256_text(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def _recover_job_data_rows_from_sessions(*, user_id: str, limit: int = 64) -> list[dict]:
+    rows: list[dict] = []
+    if not user_id:
+        return rows
+    try:
+        store = _get_session_store()
+        entities = store.table_client.list_entities()
+        scanned = 0
+        for entity in entities:
+            if scanned >= 300:
+                break
+            scanned += 1
+            if str(entity.get("PartitionKey") or "") != "cv":
+                continue
+            sid = str(entity.get("RowKey") or "").strip()
+            if not sid:
+                continue
+            sess = store.get_session_with_blob_retrieval(sid)
+            if not sess:
+                continue
+            cv_s = sess.get("cv_data") if isinstance(sess.get("cv_data"), dict) else {}
+            meta_s = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else {}
+            uid_s = _stable_profile_user_id(cv_s, meta_s)
+            if uid_s != user_id:
+                continue
+            row = _build_job_data_table_row(
+                cv_data=cv_s,
+                meta=meta_s,
+                session_id=sid,
+                updated_at=str(sess.get("updated_at") or sess.get("created_at") or _now_iso()),
+            )
+            if not any(str(row.get(k) or "").strip() for k in ("position_name", "company_name", "company_address", "company_email", "company_phone")):
+                continue
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+    except Exception as exc:
+        logging.warning("JOB_DATA_RECOVERY_FAILED user=%s err=%s", user_id[:16], str(exc)[:240])
+    return rows
+
+
+def _sync_job_data_table_history(*, session_id: str, cv_data: dict, meta: dict, max_items: int = 120) -> dict:
+    meta2 = dict(meta or {})
+    user_id = _stable_profile_user_id(cv_data if isinstance(cv_data, dict) else {}, meta2)
+    if not user_id:
+        # No stable id yet -> show only current row best-effort.
+        row_now = _build_job_data_table_row(cv_data=cv_data, meta=meta2, session_id=session_id, updated_at=_now_iso())
+        meta2["job_data_table_history"] = [row_now]
+        return meta2
+
+    blacklist_keys = {
+        ("construction laborer", "imbodden ag", "visp, schweiz"),
+        ("construction worker", "imbodden ag", "visp, schweiz"),
+        ("construction worker", "imbodden ag", "visp, switzerland"),
+        ("bauarbeiter", "imbodden ag", "visp, schweiz"),
+        ("operational excellence manager", "imbodden ag", "visp, schweiz"),
+        ("operational excellence manager", "imbodden ag", "visp, switzerland"),
+        ("head of quality & product support", "expondo polska sp. z o.o.", "zielona góra, poland"),
+        ("head of quality & product support", "expondo polska sp. z o.o.", "zielona gora, poland"),
+    }
+
+    def _norm(v: str) -> str:
+        return " ".join(str(v or "").strip().lower().split())
+
+    def _is_blacklisted(row: dict) -> bool:
+        key = (
+            _norm(str(row.get("position_name") or "")),
+            _norm(str(row.get("company_name") or "")),
+            _norm(str(row.get("company_address") or "")),
+        )
+        return key in blacklist_keys
+
+    def _with_generation_fallback(row: dict) -> dict:
+        out = dict(row or {})
+        gen = str(out.get("cv_generated_at") or "").strip()
+        if not gen:
+            gen = str(out.get("updated_at") or "").strip()
+        out["cv_generated_at"] = gen[:40]
+        return out
+
+    history_rows: list[dict] = []
+    try:
+        payload = get_profile_store().get_latest(user_id=user_id, target_language="job-data-history")
+        if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+            history_rows = [r for r in payload.get("rows", []) if isinstance(r, dict)]
+    except Exception:
+        history_rows = []
+
+    recovered: list[dict] = []
+    if not history_rows:
+        recovered = _recover_job_data_rows_from_sessions(user_id=user_id, limit=64)
+    current_row = _build_job_data_table_row(cv_data=cv_data, meta=meta2, session_id=session_id, updated_at=_now_iso())
+
+    merged: list[dict] = []
+    by_sig: dict[str, dict] = {}
+    for row in [current_row, *history_rows, *recovered]:
+        row2 = _with_generation_fallback(row)
+        if _is_blacklisted(row2):
+            continue
+        sig = _job_data_row_signature(row2)
+        existing = by_sig.get(sig)
+        if existing is None:
+            by_sig[sig] = row2
+            merged.append(row2)
+            continue
+        old_gen = str(existing.get("cv_generated_at") or "").strip()
+        new_gen = str(row2.get("cv_generated_at") or "").strip()
+        old_upd = str(existing.get("updated_at") or "").strip()
+        new_upd = str(row2.get("updated_at") or "").strip()
+        if (not old_gen and new_gen) or (new_gen and new_upd > old_upd):
+            existing.update(row2)
+
+    merged.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+    merged = merged[:max_items]
+    meta2["job_data_table_history"] = merged
+    meta2["job_data_table_count"] = len(merged)
+    try:
+        sample_dates = [
+            {
+                "position": str(r.get("position_name") or "")[:60],
+                "cv_generated_at": str(r.get("cv_generated_at") or "")[:40],
+                "updated_at": str(r.get("updated_at") or "")[:40],
+            }
+            for r in merged[:3]
+        ]
+        logging.info("JOB_DATA_HISTORY_SYNC session=%s rows=%d sample=%s", session_id, len(merged), json.dumps(sample_dates, ensure_ascii=False))
+    except Exception:
+        pass
+
+    try:
+        get_profile_store().put_latest(
+            user_id=user_id,
+            payload={
+                "schema_version": "job_data_history_v1",
+                "saved_at": _now_iso(),
+                "rows": merged,
+            },
+            target_language="job-data-history",
+        )
+    except Exception as exc:
+        logging.warning("JOB_DATA_HISTORY_SAVE_FAILED user=%s err=%s", user_id[:16], str(exc)[:240])
+
+    return meta2
+
+
 def _update_section_hashes_in_metadata(session_id: str, cv_data: dict) -> None:
     """Update section_hashes in session metadata after CV changes.
     
@@ -2932,10 +3128,39 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             out = dict(m or {})
             next_stage = str(st or "").strip().lower()
             prev_stage = str(out.get("wizard_stage") or "").strip().lower()
+
+            def _stage_major(s: str) -> int | None:
+                if s in ("contact", "contact_edit"):
+                    return 1
+                if s in ("education", "education_edit_json"):
+                    return 2
+                if s in ("job_posting", "job_posting_paste", "job_posting_invalid_input", "interests_edit"):
+                    return 3
+                if s in ("work_experience", "work_notes_edit", "work_tailor_review", "work_tailor_feedback", "work_select_role", "work_role_view", "work_locations_edit"):
+                    return 4
+                if s in ("it_ai_skills", "skills_notes_edit", "skills_tailor_review"):
+                    return 5
+                if s in ("review_final", "generate_confirm"):
+                    return 6
+                if s in ("cover_letter_review", "cover_letter_feedback_edit"):
+                    return 7
+                if s in ("job_data_table",):
+                    return 8
+                return None
+
             out["wizard_stage"] = next_stage
             # Avoid timestamp churn on no-op stage writes.
             if prev_stage != next_stage:
                 out["wizard_stage_updated_at"] = _now_iso()
+
+            try:
+                next_major = _stage_major(next_stage)
+                prev_max_raw = out.get("wizard_max_major")
+                prev_max = int(prev_max_raw) if prev_max_raw is not None else 0
+                if isinstance(next_major, int) and next_major > prev_max:
+                    out["wizard_max_major"] = next_major
+            except Exception:
+                pass
             return out
 
         def _wizard_resp(*, assistant_text: str, meta_out: dict, cv_out: dict, pdf_bytes: bytes | None = None, stage_updates: list[dict] | None = None) -> tuple[int, dict]:
@@ -3464,6 +3689,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 wizard_get_stage=_wizard_get_stage,
                 tool_generate_cv_from_session=_tool_generate_cv_from_session,
                 session_get=_session_get,
+                sync_job_data_table_history=_sync_job_data_table_history,
             )
             handled, cv_data, meta2, cover_pdf_resp = handle_cover_pdf_actions(
                 aid=aid,
