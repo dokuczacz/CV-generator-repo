@@ -39,6 +39,7 @@ def test_request_generate_pdf_uses_target_language_from_metadata() -> None:
         wizard_get_stage=lambda m: str(m.get("wizard_stage") or ""),
         tool_generate_cv_from_session=_tool_generate_cv_from_session,
         session_get=lambda _sid: {"cv_data": {}, "metadata": {"target_language": "de", "language": "en"}},
+        sync_job_data_table_history=lambda **kwargs: dict(kwargs.get("meta") or {}),
     )
 
     handled, _cv_out, _meta_out, resp = handle_cover_pdf_actions(
@@ -92,6 +93,7 @@ def test_download_pdf_returns_wizard_response_shape() -> None:
         wizard_get_stage=lambda m: str(m.get("wizard_stage") or ""),
         tool_generate_cv_from_session=_tool_generate_cv_from_session,
         session_get=lambda _sid: {"cv_data": {}, "metadata": {"target_language": "en", "language": "en"}},
+        sync_job_data_table_history=lambda **kwargs: dict(kwargs.get("meta") or {}),
     )
 
     handled, _cv_out, _meta_out, resp = handle_cover_pdf_actions(

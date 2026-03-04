@@ -95,21 +95,14 @@ class CVSessionStore:
             session_id: Session identifier
         
         Returns:
-            Dictionary with cv_data and metadata, or None if not found/expired
+            Dictionary with cv_data and metadata, or None if not found
         """
         try:
             entity = self.table_client.get_entity(partition_key="cv", row_key=session_id)
         except ResourceNotFoundError:
             logging.warning(f"Session {session_id} not found")
             return None
-        
-        # Check expiration
-        expires_at = datetime.fromisoformat(entity.get("expires_at", "1970-01-01T00:00:00"))
-        if datetime.utcnow() > expires_at:
-            logging.warning(f"Session {session_id} expired at {expires_at.isoformat()}")
-            self.delete_session(session_id)
-            return None
-        
+
         return {
             "session_id": session_id,
             "cv_data": json.loads(entity["cv_data_json"]),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -57,6 +59,7 @@ def tool_generate_cover_letter_from_session(
 
     payload = deps.build_cover_letter_render_payload(cv_data=cv_data, meta=meta2, block=cl_block)
     try:
+        render_start = time.time()
         pdf_bytes = deps.render_cover_letter_pdf(payload, enforce_one_page=True, use_cache=False)
     except Exception as exc:
         return 500, {"error": "cover_letter_render_failed", "details": str(exc)[:400]}, "application/json"
@@ -66,12 +69,21 @@ def tool_generate_cover_letter_from_session(
 
     pdf_refs = meta2.get("pdf_refs") if isinstance(meta2.get("pdf_refs"), dict) else {}
     pdf_refs = dict(pdf_refs or {})
+    render_ms = max(1, int((time.time() - render_start) * 1000))
+    pdf_sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+    target_lang = str(language or meta2.get("target_language") or meta2.get("language") or "").strip().lower()
+    job_sig = str(meta2.get("current_job_sig") or "").strip()
     pdf_refs[pdf_ref] = {
         "kind": "cover_letter",
         "container": (blob_ptr or {}).get("container"),
         "blob_name": (blob_ptr or {}).get("blob_name"),
         "download_name": deps.compute_cover_letter_download_name(cv_data=cv_data, meta=meta2),
         "created_at": deps.now_iso(),
+        "sha256": pdf_sha256,
+        "size_bytes": len(pdf_bytes),
+        "render_ms": render_ms,
+        "target_language": target_lang,
+        "job_sig": job_sig,
     }
     meta2["pdf_refs"] = pdf_refs
     meta2["cover_letter_block"] = cl_block

@@ -1559,6 +1559,93 @@ def _build_job_data_table_row(*, cv_data: dict, meta: dict, session_id: str | No
     return row
 
 
+def _extract_artifact_rows_from_meta(*, meta: dict, session_id: str) -> list[dict]:
+    rows: list[dict] = []
+    pdf_refs = meta.get("pdf_refs") if isinstance(meta, dict) else None
+    if not isinstance(pdf_refs, dict):
+        return rows
+
+    for ref_key, ref in pdf_refs.items():
+        if not isinstance(ref, dict):
+            continue
+        key_s = str(ref_key or "").strip()
+        if not key_s:
+            continue
+        kind = str(ref.get("kind") or "").strip().lower()
+        if not kind:
+            kind = "cover_letter" if key_s.lower().startswith("cover_letter_") else "cv"
+        created_at = str(ref.get("created_at") or "").strip()
+        if not created_at:
+            created_at = _now_iso()
+
+        rows.append(
+            {
+                "artifact_id": key_s[:128],
+                "kind": kind[:32],
+                "session_id": str(session_id or "")[:80],
+                "created_at": created_at[:40],
+                "container": str(ref.get("container") or "")[:120],
+                "blob_name": str(ref.get("blob_name") or "")[:512],
+                "download_name": str(ref.get("download_name") or "")[:220],
+                "sha256": str(ref.get("sha256") or "")[:128],
+                "size_bytes": int(ref.get("size_bytes") or 0),
+                "target_language": str(ref.get("target_language") or "")[:16],
+                "job_sig": str(ref.get("job_sig") or "")[:128],
+            }
+        )
+
+    rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return rows
+
+
+def _sync_artifact_history(*, session_id: str, cv_data: dict, meta: dict, max_items: int = 500) -> dict:
+    meta2 = dict(meta or {})
+    user_id = _stable_profile_user_id(cv_data if isinstance(cv_data, dict) else {}, meta2)
+    if not user_id:
+        return meta2
+
+    existing_rows: list[dict] = []
+    try:
+        payload = get_profile_store().get_latest(user_id=user_id, target_language="artifact-history")
+        if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+            existing_rows = [r for r in payload.get("rows", []) if isinstance(r, dict)]
+    except Exception:
+        existing_rows = []
+
+    current_rows = _extract_artifact_rows_from_meta(meta=meta2, session_id=session_id)
+    merged_by_id: dict[str, dict] = {}
+    for row in [*current_rows, *existing_rows]:
+        artifact_id = str(row.get("artifact_id") or "").strip()
+        if not artifact_id:
+            continue
+        prev = merged_by_id.get(artifact_id)
+        if prev is None:
+            merged_by_id[artifact_id] = dict(row)
+            continue
+        if str(row.get("created_at") or "") > str(prev.get("created_at") or ""):
+            merged_by_id[artifact_id] = dict(row)
+
+    merged = list(merged_by_id.values())
+    merged.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    merged = merged[:max_items]
+
+    meta2["artifact_history_count"] = len(merged)
+    try:
+        get_profile_store().put_latest(
+            user_id=user_id,
+            payload={
+                "schema_version": "artifact_history_v1",
+                "saved_at": _now_iso(),
+                "rows": merged,
+            },
+            target_language="artifact-history",
+        )
+    except Exception as exc:
+        logging.warning("ARTIFACT_HISTORY_SAVE_FAILED user=%s err=%s", user_id[:16], str(exc)[:240])
+
+    return meta2
+
+
 def _job_data_row_signature(row: dict) -> str:
     payload = {
         "position_name": str(row.get("position_name") or "").strip().lower(),
@@ -1711,6 +1798,11 @@ def _sync_job_data_table_history(*, session_id: str, cv_data: dict, meta: dict, 
         )
     except Exception as exc:
         logging.warning("JOB_DATA_HISTORY_SAVE_FAILED user=%s err=%s", user_id[:16], str(exc)[:240])
+
+    try:
+        meta2 = _sync_artifact_history(session_id=session_id, cv_data=cv_data, meta=meta2)
+    except Exception as exc:
+        logging.warning("ARTIFACT_HISTORY_SYNC_FAILED user=%s err=%s", user_id[:16], str(exc)[:240])
 
     return meta2
 
@@ -2133,16 +2225,6 @@ def _shrink_metadata_for_table(metadata: dict) -> dict:
             if isinstance(v, list) and len(v) > 50:
                 dpu2[k] = v[:50]
         meta["docx_prefill_unconfirmed"] = dpu2
-
-    # pdf_refs can grow unbounded if user regenerates PDF many times. Keep only 3 most recent.
-    pdf_refs = meta.get("pdf_refs")
-    if isinstance(pdf_refs, dict) and len(pdf_refs) > 3:
-        sorted_refs = sorted(
-            pdf_refs.items(),
-            key=lambda item: (item[1].get("created_at") or "") if isinstance(item[1], dict) else "",
-            reverse=True,
-        )
-        meta["pdf_refs"] = dict(sorted_refs[:3])
 
     event_log = meta.get("event_log")
     if isinstance(event_log, list):
@@ -4349,13 +4431,25 @@ def _tool_generate_cv_from_session(*, session_id: str, language: str | None, cli
         shrink_metadata_for_table=_shrink_metadata_for_table,
         now_iso=_now_iso,
     )
-    return tool_generate_cv_from_session(
+    result = tool_generate_cv_from_session(
         session_id=session_id,
         language=language,
         client_context=client_context,
         session=session,
         deps=deps,
     )
+    status, payload, content_type = result
+    if status == 200 and content_type == "application/pdf":
+        try:
+            store = _get_session_store()
+            sess_latest = store.get_session_with_blob_retrieval(session_id) or {}
+            cv_latest = sess_latest.get("cv_data") if isinstance(sess_latest.get("cv_data"), dict) else {}
+            meta_latest = sess_latest.get("metadata") if isinstance(sess_latest.get("metadata"), dict) else {}
+            meta_synced = _sync_job_data_table_history(session_id=session_id, cv_data=cv_latest, meta=meta_latest)
+            store.update_session_with_blob_offload(session_id, cv_latest, meta_synced)
+        except Exception as exc:
+            logging.warning("POST_CV_GENERATION_HISTORY_SYNC_FAILED session=%s err=%s", session_id, str(exc)[:240])
+    return result
 
 def _upload_pdf_blob_for_session(*, session_id: str, pdf_ref: str, pdf_bytes: bytes) -> dict[str, str] | None:
     container = product_config.STORAGE_CONTAINER_PDFS
@@ -4411,12 +4505,24 @@ def _tool_generate_cover_letter_from_session(
         now_iso=_now_iso,
         get_session_store=_get_session_store,
     )
-    return tool_generate_cover_letter_from_session(
+    result = tool_generate_cover_letter_from_session(
         session_id=session_id,
         language=language,
         session=session,
         deps=deps,
     )
+    status, payload, content_type = result
+    if status == 200 and content_type == "application/pdf":
+        try:
+            store = _get_session_store()
+            sess_latest = store.get_session_with_blob_retrieval(session_id) or {}
+            cv_latest = sess_latest.get("cv_data") if isinstance(sess_latest.get("cv_data"), dict) else {}
+            meta_latest = sess_latest.get("metadata") if isinstance(sess_latest.get("metadata"), dict) else {}
+            meta_synced = _sync_job_data_table_history(session_id=session_id, cv_data=cv_latest, meta=meta_latest)
+            store.update_session_with_blob_offload(session_id, cv_latest, meta_synced)
+        except Exception as exc:
+            logging.warning("POST_CL_GENERATION_HISTORY_SYNC_FAILED session=%s err=%s", session_id, str(exc)[:240])
+    return result
 
 
 def _tool_get_pdf_by_ref(*, session_id: str, pdf_ref: str, session: dict) -> tuple[int, dict | bytes, str]:

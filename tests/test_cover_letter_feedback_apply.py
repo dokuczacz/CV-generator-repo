@@ -53,6 +53,7 @@ def test_cover_letter_feedback_apply_stores_capsule_and_updates_draft() -> None:
         wizard_get_stage=lambda m: str(m.get("wizard_stage") or ""),
         tool_generate_cv_from_session=lambda **_kwargs: (400, {"error": "not used"}, "application/json"),
         session_get=lambda _sid: None,
+        sync_job_data_table_history=lambda **kwargs: dict(kwargs.get("meta") or {}),
     )
 
     handled, cv_out, meta_out, resp = handle_cover_pdf_actions(

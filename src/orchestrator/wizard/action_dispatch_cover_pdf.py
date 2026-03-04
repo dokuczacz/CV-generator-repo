@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -24,6 +26,7 @@ class CoverPdfActionDeps:
     wizard_get_stage: Callable[[dict], str]
     tool_generate_cv_from_session: Callable[..., tuple[int, dict | bytes, str]]
     session_get: Callable[[str], dict | None]
+    sync_job_data_table_history: Callable[..., dict]
 
 
 def handle_cover_pdf_actions(
@@ -94,6 +97,46 @@ def handle_cover_pdf_actions(
         meta2 = deps.wizard_set_stage(meta2, "review_final")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(assistant_text="Back to PDF generation.", meta_out=meta2, cv_out=cv_data)
+
+    if aid == "JOB_DATA_TABLE_OPEN":
+        latest_cv = cv_data
+        latest_meta = meta2
+        try:
+            sess_latest = deps.session_get(session_id) or {}
+            if isinstance(sess_latest.get("cv_data"), dict):
+                latest_cv = dict(sess_latest.get("cv_data") or {})
+            if isinstance(sess_latest.get("metadata"), dict):
+                latest_meta = dict(sess_latest.get("metadata") or {})
+        except Exception:
+            latest_cv = cv_data
+            latest_meta = meta2
+        try:
+            latest_meta = deps.sync_job_data_table_history(
+                session_id=session_id,
+                cv_data=latest_cv,
+                meta=latest_meta,
+            )
+        except Exception as exc:
+            try:
+                deps.log_info("JOB_DATA_TABLE_SYNC_FAILED session=%s err=%s", session_id, str(exc)[:240])
+            except Exception:
+                pass
+        latest_meta = deps.wizard_set_stage(latest_meta, "job_data_table")
+        cv_data, meta2 = deps.persist(latest_cv, latest_meta)
+        return True, cv_data, meta2, deps.wizard_resp(
+            assistant_text="Job data table is ready.",
+            meta_out=meta2,
+            cv_out=cv_data,
+        )
+
+    if aid == "JOB_DATA_TABLE_BACK":
+        meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+        cv_data, meta2 = deps.persist(cv_data, meta2)
+        return True, cv_data, meta2, deps.wizard_resp(
+            assistant_text="Back to Cover Letter.",
+            meta_out=meta2,
+            cv_out=cv_data,
+        )
 
     if aid == "COVER_LETTER_FEEDBACK_EDIT":
         meta2 = deps.wizard_set_stage(meta2, "cover_letter_feedback_edit")
@@ -228,6 +271,7 @@ def handle_cover_pdf_actions(
     
         try:
             payload = deps.build_cover_letter_render_payload(cv_data=cv_data, meta=meta2, block=cl)
+            render_start = time.time()
             pdf_bytes = deps.render_cover_letter_pdf(payload, enforce_one_page=True, use_cache=False)
         except Exception as e:
             meta2["cover_letter_error"] = str(e)[:400]
@@ -236,6 +280,10 @@ def handle_cover_pdf_actions(
             return True, cv_data, meta2, deps.wizard_resp(assistant_text=str(e)[:400], meta_out=meta2, cv_out=cv_data)
     
         pdf_ref = f"cover_letter_{uuid.uuid4().hex[:10]}"
+        render_ms = max(1, int((time.time() - render_start) * 1000))
+        pdf_sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+        target_lang = str(target_lang or meta2.get("target_language") or meta2.get("language") or "").strip().lower()
+        job_sig = str(meta2.get("current_job_sig") or "").strip()
         blob_ptr = deps.upload_pdf_blob_for_session(session_id=session_id, pdf_ref=pdf_ref, pdf_bytes=pdf_bytes)
         pdf_refs = meta2.get("pdf_refs") if isinstance(meta2.get("pdf_refs"), dict) else {}
         pdf_refs = dict(pdf_refs or {})
@@ -245,11 +293,27 @@ def handle_cover_pdf_actions(
             "blob_name": (blob_ptr or {}).get("blob_name"),
             "download_name": deps.compute_cover_letter_download_name(cv_data=cv_data, meta=meta2),
             "created_at": deps.now_iso(),
+            "sha256": pdf_sha256,
+            "size_bytes": len(pdf_bytes),
+            "render_ms": render_ms,
+            "target_language": target_lang,
+            "job_sig": job_sig,
         }
         meta2["pdf_refs"] = pdf_refs
         meta2["cover_letter_pdf_ref"] = pdf_ref
         meta2.pop("cover_letter_error", None)
         meta2.pop("cover_letter_error_details", None)
+        try:
+            meta2 = deps.sync_job_data_table_history(
+                session_id=session_id,
+                cv_data=cv_data,
+                meta=meta2,
+            )
+        except Exception as exc:
+            try:
+                deps.log_info("COVER_LETTER_HISTORY_SYNC_FAILED session=%s err=%s", session_id, str(exc)[:240])
+            except Exception:
+                pass
         meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
         try:
             deps.log_info(
@@ -283,6 +347,9 @@ def handle_cover_pdf_actions(
             sess_after = deps.session_get(session_id) or {}
             meta_after = sess_after.get("metadata") if isinstance(sess_after.get("metadata"), dict) else meta2
             cv_after = sess_after.get("cv_data") if isinstance(sess_after.get("cv_data"), dict) else cv_data
+            current_stage_after = str(deps.wizard_get_stage(meta_after) or "").strip().lower()
+            if current_stage_after == "review_final" and deps.cv_enable_cover_letter and deps.openai_enabled():
+                meta_after = deps.wizard_set_stage(dict(meta_after or {}), "cover_letter_review")
             cv_data, meta2 = deps.persist(dict(cv_after or {}), dict(meta_after or {}))
             return True, cv_data, meta2, deps.wizard_resp(
                 assistant_text="PDF is ready. You can download it now.",
