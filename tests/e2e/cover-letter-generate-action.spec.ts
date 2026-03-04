@@ -163,11 +163,10 @@ test.describe('Cover letter generate action', () => {
     expect((body.message || '').trim()).toBe('');
 
     await expect(stagePanel).toContainText('Generated draft');
-    await expect(stagePanel.getByTestId('action-COVER_LETTER_GENERATE')).toHaveText('Generate final Cover Letter PDF');
-    await expect(stagePanel.getByTestId('action-inline-download-cover-letter')).toBeVisible();
+    await expect(stagePanel.getByTestId('action-COVER_LETTER_GENERATE')).toHaveText('Pobierz Cover Letter');
 
     const callsAfterGenerate = seen.filter((r) => r.user_action?.id === 'COVER_LETTER_GENERATE').length;
-    await stagePanel.getByTestId('action-inline-download-cover-letter').click();
+    await stagePanel.getByTestId('action-COVER_LETTER_GENERATE').click();
     const callsAfterDownload = seen.filter((r) => r.user_action?.id === 'COVER_LETTER_GENERATE').length;
     expect(callsAfterDownload).toBe(callsAfterGenerate);
 

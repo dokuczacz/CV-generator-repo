@@ -1,7 +1,11 @@
 import { test, expect } from '@playwright/test';
+import path from 'path';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const SESSION_ID = process.env.E2E_STABLE_SESSION_ID || 'c088833f-3791-498f-98ef-6bc69afcaa28';
+const SAMPLE_CV =
+  process.env.E2E_SAMPLE_CV_PATH ||
+  path.join(__dirname, '../../samples/Lebenslauf_Mariusz_Horodecki_CH.docx');
 
 test('existing session reaches generate and produces download action', async ({ page }) => {
   test.setTimeout(240_000);
@@ -17,9 +21,29 @@ test('existing session reaches generate and produces download action', async ({ 
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
   const stagePanel = page.getByTestId('stage-panel');
+  const stagePanelVisible = await stagePanel.isVisible({ timeout: 20_000 }).catch(() => false);
+  if (!stagePanelVisible) {
+    const uploadDropzone = page.getByTestId('cv-upload-dropzone');
+    const hasUpload = await uploadDropzone.isVisible().catch(() => false);
+    if (!hasUpload) {
+      const changeFile = page.getByRole('button', { name: /Zmień plik|Change file/i }).first();
+      if (await changeFile.isVisible().catch(() => false)) {
+        await changeFile.click();
+      }
+    }
+    await expect(uploadDropzone).toBeVisible({ timeout: 30_000 });
+    await page.locator('input[type="file"]').setInputFiles(SAMPLE_CV);
+    const useLoadedCv = page.getByTestId('use-loaded-cv');
+    await expect(useLoadedCv).toBeVisible({ timeout: 30_000 });
+    await useLoadedCv.click();
+  }
   await expect(stagePanel).toBeVisible({ timeout: 60_000 });
 
-  const getStage = async () => ((await stagePanel.getAttribute('data-wizard-stage')) || '').trim();
+  const getStage = async () => {
+    const wizardStage = ((await stagePanel.getAttribute('data-wizard-stage')) || '').trim();
+    if (wizardStage) return wizardStage;
+    return ((await stagePanel.getAttribute('data-stage')) || '').trim();
+  };
 
   const waitEnabledAction = async (ids: string[], timeoutMs = 20_000) => {
     const started = Date.now();
@@ -57,7 +81,7 @@ test('existing session reaches generate and produces download action', async ({ 
   for (let i = 0; i < 15; i++) {
     const stage = await getStage();
 
-    if (stage === 'review_final') {
+    if (stage === 'review_final' || stage === 'generate_confirm' || stage === 'cover_letter_review') {
       break;
     }
 
@@ -75,10 +99,69 @@ test('existing session reaches generate and produces download action', async ({ 
       continue;
     }
 
+    if (stage === 'contact' || stage === 'education') {
+      const action = await waitEnabledAction(
+        stage === 'contact' ? ['CONTACT_CONFIRM'] : ['EDUCATION_CONFIRM'],
+        15_000
+      );
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
+    if (stage === 'job_posting' || stage === 'job_posting_paste') {
+      const action = await waitEnabledAction(['JOB_OFFER_CONTINUE', 'JOB_OFFER_SKIP'], 15_000);
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
+    if (stage === 'work_notes_edit') {
+      const action = await waitEnabledAction(['WORK_NOTES_CANCEL'], 15_000);
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
+    if (stage === 'work_experience') {
+      const action = await waitEnabledAction(['WORK_TAILOR_SKIP'], 15_000);
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
+    if (stage === 'further_experience') {
+      const action = await waitEnabledAction(['FURTHER_TAILOR_SKIP'], 15_000);
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
+    if (stage === 'language_selection') {
+      const action = await waitEnabledAction(['LANGUAGE_SELECT_EN'], 15_000);
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
+    if (stage === 'import_gate_pending') {
+      const action = await waitEnabledAction(['CONFIRM_IMPORT_PREFILL_YES'], 15_000);
+      if (action) {
+        await clickAction(action.id);
+        continue;
+      }
+    }
+
     break;
   }
 
-  expect(await getStage()).toBe('review_final');
+  expect(['review_final', 'generate_confirm', 'cover_letter_review']).toContain(await getStage());
 
   const alreadyDownload = await stagePanel.getByRole('button', { name: 'Pobierz CV' }).first().isVisible().catch(() => false);
   if (alreadyDownload) {

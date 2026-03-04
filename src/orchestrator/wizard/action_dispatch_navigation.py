@@ -25,8 +25,10 @@ def _major(st: str) -> int | None:
         return 4
     if s in ("it_ai_skills", "skills_notes_edit", "skills_tailor_review"):
         return 5
-    if s in ("review_final", "generate_confirm", "cover_letter_review"):
+    if s in ("review_final", "generate_confirm"):
         return 6
+    if s in ("cover_letter_review", "cover_letter_feedback_edit"):
+        return 7
     return None
 
 
@@ -70,7 +72,15 @@ def handle_navigation_actions(
         stage_history.append(cur_stage)
         meta2["stage_history"] = stage_history[-20:]
 
-    major_to_stage = {1: "contact", 2: "education", 3: "job_posting", 4: "work_experience", 5: "it_ai_skills", 6: "review_final"}
+    major_to_stage = {
+        1: "contact",
+        2: "education",
+        3: "job_posting",
+        4: "work_experience",
+        5: "it_ai_skills",
+        6: "review_final",
+        7: "cover_letter_review",
+    }
     target_stage_resolved = major_to_stage.get(tgt_major, cur_stage)
     meta2 = deps.wizard_set_stage(meta2, target_stage_resolved)
 

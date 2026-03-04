@@ -1,7 +1,11 @@
 import { test, expect } from '@playwright/test';
+import path from 'path';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const SESSION_ID = process.env.E2E_STABLE_SESSION_ID || '566a4a2c-9558-4fe7-839d-a21416a64663';
+const SAMPLE_CV =
+  process.env.E2E_SAMPLE_CV_PATH ||
+  path.join(__dirname, '../../samples/Lebenslauf_Mariusz_Horodecki_CH.docx');
 
 test.describe('Session resume button behavior', () => {
   test('resumes provided session and keeps actionable PDF/Cover controls stable', async ({ page }) => {
@@ -18,12 +22,35 @@ test.describe('Session resume button behavior', () => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
     const stagePanel = page.getByTestId('stage-panel');
+    const stagePanelVisible = await stagePanel.isVisible({ timeout: 20_000 }).catch(() => false);
+    if (!stagePanelVisible) {
+      const uploadDropzone = page.getByTestId('cv-upload-dropzone');
+      const hasUpload = await uploadDropzone.isVisible().catch(() => false);
+      if (!hasUpload) {
+        const changeFile = page.getByRole('button', { name: /Zmień plik|Change file/i }).first();
+        if (await changeFile.isVisible().catch(() => false)) {
+          await changeFile.click();
+        }
+      }
+      await expect(uploadDropzone).toBeVisible({ timeout: 30_000 });
+      await page.locator('input[type="file"]').setInputFiles(SAMPLE_CV);
+      const useLoadedCv = page.getByTestId('use-loaded-cv');
+      await expect(useLoadedCv).toBeVisible({ timeout: 30_000 });
+      await useLoadedCv.click();
+    }
     await expect(stagePanel).toBeVisible({ timeout: 60_000 });
+
+    const readStage = async () => {
+      const wizardStage = ((await stagePanel.getAttribute('data-wizard-stage')) || '').trim();
+      if (wizardStage) return wizardStage;
+      const uiStage = ((await stagePanel.getAttribute('data-stage')) || '').trim();
+      return uiStage;
+    };
 
     let stage = '';
     const waitStarted = Date.now();
     while (Date.now() - waitStarted < 90_000) {
-      stage = ((await stagePanel.getAttribute('data-wizard-stage')) || '').trim();
+      stage = await readStage();
       if (stage) break;
       await page.waitForTimeout(250);
     }
@@ -89,11 +116,21 @@ test.describe('Session resume button behavior', () => {
     };
 
     for (let i = 0; i < 12; i++) {
-      const currentStage = ((await stagePanel.getAttribute('data-wizard-stage')) || '').trim();
+      const currentStage = await readStage();
       const { actions, enabled } = await waitForEnabledActions();
 
       if (enabled.includes('REQUEST_GENERATE_PDF') || enabled.includes('COVER_LETTER_GENERATE')) {
         break;
+      }
+
+      if (currentStage === 'language_selection' && enabled.includes('LANGUAGE_SELECT_EN')) {
+        await clickAction('LANGUAGE_SELECT_EN');
+        continue;
+      }
+
+      if (currentStage === 'import_gate_pending' && enabled.includes('CONFIRM_IMPORT_PREFILL_YES')) {
+        await clickAction('CONFIRM_IMPORT_PREFILL_YES');
+        continue;
       }
 
       if (currentStage === 'contact' && enabled.includes('CONTACT_CONFIRM')) {
@@ -136,6 +173,10 @@ test.describe('Session resume button behavior', () => {
         await clickAction('SKILLS_TAILOR_RUN');
         continue;
       }
+      if (currentStage === 'it_ai_skills' && enabled.includes('SKILLS_TAILOR_SKIP')) {
+        await clickAction('SKILLS_TAILOR_SKIP');
+        continue;
+      }
       if (currentStage === 'skills_tailor_review' && enabled.includes('SKILLS_TAILOR_ACCEPT')) {
         await clickAction('SKILLS_TAILOR_ACCEPT');
         continue;
@@ -151,7 +192,7 @@ test.describe('Session resume button behavior', () => {
     const hasCoverGenerate = await coverGenerate.isVisible().catch(() => false);
 
     if (!(hasRequestGenerate || hasCoverGenerate)) {
-      const finalStage = ((await stagePanel.getAttribute('data-wizard-stage')) || '').trim();
+      const finalStage = await readStage();
       const actions = await getAvailableActions();
       throw new Error(
         `Did not reach PDF/Cover controls. finalStage='${finalStage}', actions=${JSON.stringify(actions)}`
@@ -169,14 +210,28 @@ test.describe('Session resume button behavior', () => {
         { timeout: 60_000 }
       );
 
+      const respPromise = page.waitForResponse(
+        (res) => res.url().includes('/api/process-cv') && res.request().method() === 'POST',
+        { timeout: 60_000 }
+      );
+
       await requestGenerate.click();
       await reqPromise;
+      await respPromise;
 
-      const directDownload = page.getByTestId('download-pdf');
-      const hasDirectDownload = await directDownload.isVisible().catch(() => false);
+      let hasDirectDownload = false;
+      let hasActionDownloadLabel = false;
+      const started = Date.now();
+      while (Date.now() - started < 30_000) {
+        const directDownload = page.getByTestId('download-pdf');
+        hasDirectDownload = await directDownload.isVisible().catch(() => false);
 
-      const sameActionAsDownload = stagePanel.getByRole('button', { name: 'Pobierz CV' });
-      const hasActionDownloadLabel = await sameActionAsDownload.first().isVisible().catch(() => false);
+        const sameActionAsDownload = stagePanel.getByRole('button', { name: 'Pobierz CV' });
+        hasActionDownloadLabel = await sameActionAsDownload.first().isVisible().catch(() => false);
+
+        if (hasDirectDownload || hasActionDownloadLabel) break;
+        await page.waitForTimeout(250);
+      }
 
       expect(hasDirectDownload || hasActionDownloadLabel).toBeTruthy();
     }

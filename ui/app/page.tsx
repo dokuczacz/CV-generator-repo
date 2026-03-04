@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { UploadStartSection } from './cv/sections/UploadStartSection';
 import { WizardStageSection } from './cv/sections/WizardStageSection';
 import { CvPreviewSection } from './cv/sections/CvPreviewSection';
-import { OpsSection } from './cv/sections/OpsSection';
 import { useProcessCvClient } from './cv/hooks/useProcessCvClient';
 import type { CVSessionPreview, Message, StageUpdate, StepperItem, UIAction, WizardStep } from './cv/types';
 
@@ -46,8 +45,6 @@ export default function CVGenerator() {
   const [cvPreview, setCvPreview] = useState<CVSessionPreview | null>(null);
   const [cvPreviewError, setCvPreviewError] = useState<string | null>(null);
   const [cvPreviewLoading, setCvPreviewLoading] = useState(false);
-  const [showCvJson, setShowCvJson] = useState(false);
-  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const clearLocalSession = () => {
@@ -571,14 +568,35 @@ export default function CVGenerator() {
     }
   }, [uiAction?.kind, uiAction?.fields]);
 
+  const stageToStep = {
+    contact: 1,
+    contact_edit: 1,
+    education: 2,
+    education_edit_json: 2,
+    job_posting: 3,
+    job_posting_paste: 3,
+    job_posting_invalid_input: 3,
+    interests_edit: 3,
+    work_experience: 4,
+    work_notes_edit: 4,
+    work_tailor_review: 4,
+    work_tailor_feedback: 4,
+    work_select_role: 4,
+    work_role_view: 4,
+    work_locations_edit: 4,
+    it_ai_skills: 5,
+    skills_notes_edit: 5,
+    skills_tailor_review: 5,
+    review_final: 6,
+    generate_confirm: 6,
+    cover_letter_review: 7,
+    cover_letter_feedback_edit: 7,
+  } as const;
+
   const wizardStep = (() => {
-    const title = String(uiAction?.title || '');
-    const m = title.match(/Stage\s+(\d+)\s*\/\s*(\d+)/i);
-    if (!m) return null;
-    const current = Number(m[1]);
-    const total = Number(m[2]);
-    if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return null;
-    return { current, total };
+    const fromStage = lastStage ? (stageToStep as Record<string, number>)[String(lastStage).toLowerCase()] : undefined;
+    if (fromStage) return { current: fromStage, total: 7 };
+    return null;
   })();
 
   const latestCvPdfDownloadName = (() => {
@@ -598,17 +616,19 @@ export default function CVGenerator() {
     return name || null;
   })();
 
-  const stepper = (() => {
-    if (!wizardStep || wizardStep.total !== 6) return null;
-    return [
-      { n: 1, label: 'Kontakt', targetWizardStage: 'contact' },
-      { n: 2, label: 'Edukacja', targetWizardStage: 'education' },
-      { n: 3, label: 'Oferta (opcjonalnie)', targetWizardStage: 'job_posting' },
-      { n: 4, label: 'Doświadczenie', targetWizardStage: 'work_experience' },
-      { n: 5, label: 'Skills', targetWizardStage: 'it_ai_skills' },
-      { n: 6, label: 'PDF', targetWizardStage: 'review_final' },
-    ] as const;
-  })();
+  const stepper = [
+    { n: 1, label: 'Kontakt', targetWizardStage: 'contact' },
+    { n: 2, label: 'Edukacja', targetWizardStage: 'education' },
+    { n: 3, label: 'Link do oferty', targetWizardStage: 'job_posting' },
+    { n: 4, label: 'Work tailoring', targetWizardStage: 'work_experience' },
+    { n: 5, label: 'Skills', targetWizardStage: 'it_ai_skills' },
+    { n: 6, label: 'Generuj CV', targetWizardStage: 'review_final' },
+    { n: 7, label: 'Cover Letter', targetWizardStage: 'cover_letter_review' },
+  ] as const;
+
+  const currentStepLabel = wizardStep
+    ? stepper.find((s) => s.n === wizardStep.current)?.label || `Krok ${wizardStep.current}`
+    : null;
 
   const describeMissing = (key: string): { label: string; hint: string } => {
     const map: Record<string, { label: string; hint: string }> = {
@@ -672,10 +692,6 @@ export default function CVGenerator() {
     setJobPostingText(value);
   };
 
-  const handleCopyCvJson = () => {
-    void copyText(JSON.stringify({ cv_data: cvPreview?.cv_data, readiness: cvPreview?.readiness, metadata: cvPreview?.metadata }, null, 2), 'CV JSON');
-  };
-
   const handleDownloadLatestPdf = () => {
     if (!latestCvPdfBase64) return;
     downloadPDF(latestCvPdfBase64, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
@@ -729,41 +745,37 @@ export default function CVGenerator() {
         wizardStep={wizardStep as WizardStep}
         stepper={stepper as readonly StepperItem[] | null}
         isLoading={isLoading}
+        stageUpdates={stageUpdates}
+        messages={messages}
+        onSendUserAction={handleSendUserAction}
+        onStartFresh={handleNewVersion}
+        onChangeFile={handleHardNewSession}
+      />
+
+      <CvPreviewSection
+        cvFile={cvFile}
+        sessionId={sessionId}
+        currentStepLabel={currentStepLabel}
+        currentStage={lastStage}
+        uiAction={uiAction}
+        lastStage={lastStage}
+        cvPreview={cvPreview}
+        cvPreviewError={cvPreviewError}
+        cvPreviewLoading={cvPreviewLoading}
+        actionNotice={actionNotice}
         latestCvPdfBase64={latestCvPdfBase64}
         latestCvPdfFilename={latestCvPdfFilename}
         latestCvPdfDownloadName={latestCvPdfDownloadName}
         latestCoverLetterPdfBase64={latestCoverLetterPdfBase64}
         latestCoverLetterPdfFilename={latestCoverLetterPdfFilename}
         hasGeneratedPdf={hasGeneratedPdf}
-        formDraft={formDraft}
-        stageUpdates={stageUpdates}
-        messages={messages}
-        onFormDraftChange={(key, value) => setFormDraft((prev) => ({ ...prev, [key]: value }))}
-        onSendUserAction={handleSendUserAction}
-        onStartFresh={handleNewVersion}
-        onChangeFile={handleHardNewSession}
-        onRefresh={loadCvPreview}
-        cvPreviewLoading={cvPreviewLoading}
-      />
-
-      <CvPreviewSection
-        cvFile={cvFile}
-        sessionId={sessionId}
-        cvPreview={cvPreview}
-        cvPreviewError={cvPreviewError}
-        cvPreviewLoading={cvPreviewLoading}
-        showCvJson={showCvJson}
-        copyNotice={copyNotice}
-        actionNotice={actionNotice}
-        latestCvPdfBase64={latestCvPdfBase64}
-        latestCvPdfFilename={latestCvPdfFilename}
-        latestCvPdfDownloadName={latestCvPdfDownloadName}
         isLoading={isLoading}
-        onToggleShowCvJson={() => setShowCvJson((v) => !v)}
-        onCopyCvJson={handleCopyCvJson}
+        formDraft={formDraft}
         onRefresh={loadCvPreview}
         onDownloadPdf={handleDownloadLatestPdf}
         onScrollToStagePanel={scrollToStagePanel}
+        onFormDraftChange={(key, value) => setFormDraft((prev) => ({ ...prev, [key]: value }))}
+        onSendUserAction={handleSendUserAction}
         onToggleWorkLock={handleToggleWorkLock}
         onMoveWorkRoleUp={(roleIndex) => {
           setActionNotice('Przesuwam rolę…');
@@ -775,18 +787,6 @@ export default function CVGenerator() {
         }}
         describeMissing={describeMissing}
         requiredLabel={requiredLabel}
-      />
-
-      <OpsSection
-        visible={Boolean(sessionId || cvFile)}
-        lastStage={lastStage}
-        lastTraceId={lastTraceId}
-        stageUpdates={stageUpdates}
-        messages={messages}
-        onCopyTraceId={() => {
-          if (!lastTraceId) return;
-          void copyText(lastTraceId, 'trace_id');
-        }}
       />
     </div>
   );

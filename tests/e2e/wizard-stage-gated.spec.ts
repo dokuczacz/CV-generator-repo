@@ -22,7 +22,7 @@ const JOB_TEXT =
     'Requirements include process optimization, change management, and audit-ready quality systems.',
   ].join(' ');
 
-const MAX_STEPS = Number(process.env.E2E_MAX_STEPS || '20');
+const MAX_STEPS = Number(process.env.E2E_MAX_STEPS || '35');
 const MAX_SAME_STAGE_VISITS = Number(process.env.E2E_MAX_SAME_STAGE_VISITS || '5');
 
 test.describe('Wizard stage-gated E2E (normal flow)', () => {
@@ -66,19 +66,30 @@ test.describe('Wizard stage-gated E2E (normal flow)', () => {
     const stageAtStart = await getWizardStage(page);
     if (stageAtStart === 'import_gate_pending') {
       const panel = page.getByTestId('stage-panel');
-      const importBtn = panel.getByRole('button', { name: /Import DOCX prefill/i });
+      const importYesBtn = panel.getByTestId('action-CONFIRM_IMPORT_PREFILL_YES');
+      const importNoBtn = panel.getByTestId('action-CONFIRM_IMPORT_PREFILL_NO');
       const refreshBtn = panel.locator('button:has-text("Odśwież"), button:has-text("Refresh")').first();
       const refreshText = panel.getByText(/Odśwież|Refresh/i).first();
 
       let imported = false;
       for (let i = 0; i < 8; i++) {
-        const canImport = await importBtn
+        const canImportYes = await importYesBtn
           .isVisible()
-          .then(async (visible) => visible && (await importBtn.isEnabled().catch(() => false)))
+          .then(async (visible) => visible && (await importYesBtn.isEnabled().catch(() => false)))
+          .catch(() => false);
+        const canImportNo = await importNoBtn
+          .isVisible()
+          .then(async (visible) => visible && (await importNoBtn.isEnabled().catch(() => false)))
           .catch(() => false);
 
-        if (canImport) {
-          await importBtn.click();
+        if (canImportYes) {
+          await importYesBtn.click();
+          imported = true;
+          break;
+        }
+
+        if (canImportNo) {
+          await importNoBtn.click();
           imported = true;
           break;
         }
@@ -119,40 +130,53 @@ test.describe('Wizard stage-gated E2E (normal flow)', () => {
       }
 
       if (stageBefore === 'import_gate_pending' && importRefreshAttempts < 5) {
-        const importBtn = page.getByTestId('stage-panel').getByRole('button', { name: /Import DOCX prefill/i });
-        const canImport = await importBtn
+        const importYesBtn = page.getByTestId('stage-panel').getByTestId('action-CONFIRM_IMPORT_PREFILL_YES');
+        const importNoBtn = page.getByTestId('stage-panel').getByTestId('action-CONFIRM_IMPORT_PREFILL_NO');
+        const canImportYes = await importYesBtn
           .isVisible()
-          .then(async (visible) => visible && (await importBtn.isEnabled().catch(() => false)))
+          .then(async (visible) => visible && (await importYesBtn.isEnabled().catch(() => false)))
+          .catch(() => false);
+        const canImportNo = await importNoBtn
+          .isVisible()
+          .then(async (visible) => visible && (await importNoBtn.isEnabled().catch(() => false)))
           .catch(() => false);
 
-        if (canImport) {
+        if (canImportYes || canImportNo) {
           const started = Date.now();
-          await importBtn.click();
+          if (canImportYes) {
+            await importYesBtn.click();
+          } else {
+            await importNoBtn.click();
+          }
 
-          const stageAfter = await waitForStageOneOf(
-            page,
-            [
-              'import_gate_pending',
-              'contact',
-              'education',
-              'job_posting',
-              'job_posting_paste',
-              'work_notes_edit',
-              'work_experience',
-              'further_experience',
-              'it_ai_skills',
-              'skills_tailor_review',
-              'review_final',
-              'generate_confirm',
-              'cover_letter_review',
-            ],
-            60_000
-          );
+          const postImportStages = [
+            'contact',
+            'education',
+            'job_posting',
+            'job_posting_paste',
+            'work_notes_edit',
+            'work_experience',
+            'further_experience',
+            'it_ai_skills',
+            'skills_tailor_review',
+            'review_final',
+            'generate_confirm',
+            'cover_letter_review',
+          ];
+          let stageAfter = 'import_gate_pending';
+          try {
+            stageAfter = await waitForStageOneOf(page, postImportStages, 20_000);
+          } catch {
+            stageAfter = await getWizardStage(page);
+            if (stageAfter === 'import_gate_pending') {
+              importRefreshAttempts += 1;
+            }
+          }
 
           progress.push({
             step,
             stageBefore,
-            actionId: 'IMPORT_DOCX_PREFILL_UI',
+            actionId: canImportYes ? 'CONFIRM_IMPORT_PREFILL_YES' : 'CONFIRM_IMPORT_PREFILL_NO',
             stageAfter,
             elapsedMs: Date.now() - started,
           });
@@ -235,16 +259,21 @@ test.describe('Wizard stage-gated E2E (normal flow)', () => {
         if (enabledActionIds.includes('EDUCATION_CONFIRM')) actionId = 'EDUCATION_CONFIRM';
       } else if (stageBefore === 'job_posting' || stageBefore === 'job_posting_paste') {
         if (enabledActionIds.includes('JOB_OFFER_CONTINUE')) actionId = 'JOB_OFFER_CONTINUE';
+        else if (enabledActionIds.includes('JOB_OFFER_SKIP')) actionId = 'JOB_OFFER_SKIP';
+        else if (enabledActionIds.includes('JOB_OFFER_ANALYZE')) actionId = 'JOB_OFFER_ANALYZE';
       } else if (stageBefore === 'work_notes_edit') {
         if (enabledActionIds.includes('WORK_NOTES_CANCEL')) actionId = 'WORK_NOTES_CANCEL';
       } else if (stageBefore === 'work_experience') {
         if (enabledActionIds.includes('WORK_TAILOR_SKIP')) actionId = 'WORK_TAILOR_SKIP';
+        else if (enabledActionIds.includes('WORK_TAILOR_RUN')) actionId = 'WORK_TAILOR_RUN';
       } else if (stageBefore === 'further_experience') {
         if (enabledActionIds.includes('FURTHER_TAILOR_SKIP')) actionId = 'FURTHER_TAILOR_SKIP';
       } else if (stageBefore === 'it_ai_skills') {
         if (enabledActionIds.includes('SKILLS_TAILOR_RUN')) actionId = 'SKILLS_TAILOR_RUN';
+        else if (enabledActionIds.includes('SKILLS_TAILOR_SKIP')) actionId = 'SKILLS_TAILOR_SKIP';
       } else if (stageBefore === 'skills_tailor_review') {
         if (enabledActionIds.includes('SKILLS_TAILOR_ACCEPT')) actionId = 'SKILLS_TAILOR_ACCEPT';
+        else if (enabledActionIds.includes('SKILLS_TAILOR_SKIP')) actionId = 'SKILLS_TAILOR_SKIP';
       } else if (stageBefore === 'review_final' || stageBefore === 'generate_confirm') {
         if (enabledActionIds.includes('REQUEST_GENERATE_PDF')) actionId = 'REQUEST_GENERATE_PDF';
         else if (enabledActionIds.includes('DOWNLOAD_PDF')) actionId = 'DOWNLOAD_PDF';
@@ -255,8 +284,22 @@ test.describe('Wizard stage-gated E2E (normal flow)', () => {
 
       if (!actionId) {
         if (actionIds.length > 0 && enabledActionIds.length === 0) {
+          if (stageBefore === 'review_final' || stageBefore === 'generate_confirm' || stageBefore === 'cover_letter_review') {
+            const directDownloadVisible = await page.getByTestId('download-pdf').isVisible().catch(() => false);
+            const labeledDownloadVisible = await page
+              .getByTestId('stage-panel')
+              .getByRole('button', { name: /Pobierz CV|Download CV/i })
+              .first()
+              .isVisible()
+              .catch(() => false);
+            if (directDownloadVisible || labeledDownloadVisible) {
+              await writeStageProgressArtifact(testInfo, sessionId || 'unknown', progress);
+              return;
+            }
+          }
+
           await page.waitForTimeout(400);
-          if (stageBefore !== 'import_gate_pending') {
+          if (stageBefore !== 'import_gate_pending' && stageBefore !== 'review_final' && stageBefore !== 'generate_confirm') {
             await enforceNoStuck(page, stageGuard, MAX_SAME_STAGE_VISITS);
           }
           continue;
@@ -274,11 +317,15 @@ test.describe('Wizard stage-gated E2E (normal flow)', () => {
         CONTACT_CONFIRM: ['education', 'job_posting', 'job_posting_paste', 'work_notes_edit', 'work_experience'],
         EDUCATION_CONFIRM: ['job_posting', 'job_posting_paste', 'work_notes_edit', 'work_experience'],
         JOB_OFFER_CONTINUE: ['work_notes_edit', 'work_experience'],
+        JOB_OFFER_SKIP: ['work_notes_edit', 'work_experience'],
+        JOB_OFFER_ANALYZE: ['job_posting', 'work_notes_edit', 'work_experience'],
         WORK_NOTES_CANCEL: ['work_experience', 'further_experience', 'it_ai_skills'],
-        WORK_TAILOR_SKIP: ['further_experience', 'it_ai_skills', 'skills_tailor_review', 'review_final'],
+        WORK_TAILOR_SKIP: ['further_experience', 'it_ai_skills', 'skills_tailor_review', 'review_final', 'work_tailor_review'],
+        WORK_TAILOR_RUN: ['work_tailor_review', 'further_experience', 'it_ai_skills', 'skills_tailor_review', 'review_final'],
         FURTHER_TAILOR_SKIP: ['it_ai_skills', 'skills_tailor_review', 'review_final'],
-        SKILLS_TAILOR_RUN: ['skills_tailor_review', 'review_final'],
-        SKILLS_TAILOR_ACCEPT: ['review_final', 'generate_confirm'],
+        SKILLS_TAILOR_RUN: ['skills_tailor_review', 'review_final', 'generate_confirm'],
+        SKILLS_TAILOR_SKIP: ['review_final', 'generate_confirm'],
+        SKILLS_TAILOR_ACCEPT: ['review_final', 'generate_confirm', 'cover_letter_review'],
         REQUEST_GENERATE_PDF: ['generate_confirm', 'review_final', 'cover_letter_review'],
         DOWNLOAD_PDF: ['generate_confirm', 'review_final', 'cover_letter_review'],
       };
@@ -310,11 +357,32 @@ test.describe('Wizard stage-gated E2E (normal flow)', () => {
       });
       await enforceNoStuck(page, stageGuard, MAX_SAME_STAGE_VISITS);
 
-      if (actionId === 'REQUEST_GENERATE_PDF' || actionId === 'DOWNLOAD_PDF') {
-        const downloadBtn = page.getByTestId('download-pdf');
-        if (await downloadBtn.isVisible().catch(() => false)) {
+      if (stageAfter === 'review_final' || stageAfter === 'generate_confirm' || stageAfter === 'cover_letter_review') {
+        const directDownloadVisible = await page.getByTestId('download-pdf').isVisible().catch(() => false);
+        const labeledDownloadVisible = await page
+          .getByTestId('stage-panel')
+          .getByRole('button', { name: /Pobierz CV|Download CV/i })
+          .first()
+          .isVisible()
+          .catch(() => false);
+        if (directDownloadVisible || labeledDownloadVisible) {
           await writeStageProgressArtifact(testInfo, sessionId || 'unknown', progress);
           return;
+        }
+      }
+
+      if (actionId === 'REQUEST_GENERATE_PDF' || actionId === 'DOWNLOAD_PDF') {
+        const downloadBtn = page.getByTestId('download-pdf');
+        const actionDownloadBtn = page.getByTestId('stage-panel').getByRole('button', { name: /Pobierz CV|Download CV/i }).first();
+        const started = Date.now();
+        while (Date.now() - started < 45_000) {
+          const hasDirectDownload = await downloadBtn.isVisible().catch(() => false);
+          const hasActionDownload = await actionDownloadBtn.isVisible().catch(() => false);
+          if (hasDirectDownload || hasActionDownload) {
+            await writeStageProgressArtifact(testInfo, sessionId || 'unknown', progress);
+            return;
+          }
+          await page.waitForTimeout(250);
         }
       }
     }

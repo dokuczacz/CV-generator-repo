@@ -9,9 +9,14 @@ export type StageStep = {
 };
 
 export async function getWizardStage(page: Page): Promise<string> {
-  return page
-    .getByTestId('stage-panel')
+  const panel = page.getByTestId('stage-panel');
+  const wizardStage = await panel
     .getAttribute('data-wizard-stage')
+    .then((v) => (v || '').trim())
+    .catch(() => '');
+  if (wizardStage) return wizardStage;
+  return panel
+    .getAttribute('data-stage')
     .then((v) => (v || '').trim())
     .catch(() => '');
 }
@@ -21,7 +26,15 @@ export async function waitForStagePanel(page: Page, timeoutMs = 30_000): Promise
   while (Date.now() - start < timeoutMs) {
     const panel = page.getByTestId('stage-panel');
     if (await panel.isVisible().catch(() => false)) {
-      const stage = await panel.getAttribute('data-wizard-stage').then((v) => (v || '').trim()).catch(() => '');
+      const stage =
+        (await panel
+          .getAttribute('data-wizard-stage')
+          .then((v) => (v || '').trim())
+          .catch(() => '')) ||
+        (await panel
+          .getAttribute('data-stage')
+          .then((v) => (v || '').trim())
+          .catch(() => ''));
       if (stage) return;
     }
     await page.waitForTimeout(150);

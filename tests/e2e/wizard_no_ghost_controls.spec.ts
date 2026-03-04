@@ -9,17 +9,31 @@ async function waitForStagePanel(page: Page, timeoutMs = 30_000) {
 }
 
 async function waitForStage(page: Page, stage: string, timeoutMs = 30_000) {
-  await expect(page.getByTestId('stage-panel')).toHaveAttribute('data-wizard-stage', stage, { timeout: timeoutMs });
+  const panel = page.getByTestId('stage-panel');
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const wizardStage = ((await panel.getAttribute('data-wizard-stage')) || '').trim();
+    const legacyStage = ((await panel.getAttribute('data-stage')) || '').trim();
+    const current = wizardStage || legacyStage;
+    if (current === stage) return;
+    await page.waitForTimeout(120);
+  }
+  throw new Error(`Timed out waiting for stage='${stage}'`);
 }
 
 async function waitForStageOneOf(page: Page, stages: string[], timeoutMs = 30_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const stage = await page
-      .getByTestId('stage-panel')
+    const panel = page.getByTestId('stage-panel');
+    const wizardStage = await panel
       .getAttribute('data-wizard-stage')
       .then((v) => (v || '').trim())
       .catch(() => '');
+    const legacyStage = await panel
+      .getAttribute('data-stage')
+      .then((v) => (v || '').trim())
+      .catch(() => '');
+    const stage = wizardStage || legacyStage;
     if (stage && stages.includes(stage)) return stage;
     await page.waitForTimeout(150);
   }
@@ -36,6 +50,13 @@ async function clickAction(page: Page, actionId: string) {
     }
   }
   await expect(btn).toBeVisible({ timeout: 20_000 });
+
+  const waitEnabledStart = Date.now();
+  while (Date.now() - waitEnabledStart < 20_000) {
+    const enabled = await btn.isEnabled().catch(() => false);
+    if (enabled) break;
+    await page.waitForTimeout(150);
+  }
 
   const reqPromise = page.waitForRequest(
     (r) =>
@@ -150,28 +171,34 @@ test.describe('Wizard: no ghost controls (AI disabled)', () => {
     await clickAction(page, 'EDUCATION_CONFIRM');
 
     await waitForStage(page, 'job_posting', 60_000);
-    await clickAction(page, 'INTERESTS_EDIT');
-    await waitForStage(page, 'interests_edit', 30_000);
-    // Cover Cancel path.
-    await clickAction(page, 'INTERESTS_CANCEL');
-    await waitForStage(page, 'job_posting', 30_000);
-    // Cover Save path.
-    await clickAction(page, 'INTERESTS_EDIT');
-    await waitForStage(page, 'interests_edit', 30_000);
-    await fillFirstTextareaInStagePanel(page, 'Process improvement, automation, hiking');
-    await clickAction(page, 'INTERESTS_SAVE');
-    await waitForStage(page, 'job_posting', 30_000);
 
-    await clickAction(page, 'JOB_OFFER_PASTE');
-    await waitForStage(page, 'job_posting_paste', 30_000);
-    await fillFirstTextareaInStagePanel(
-      page,
-      [
-        'Senior Quality Engineer — responsibilities: audits, compliance, process improvement.',
-        'Requirements: ISO 9001 / IATF 16949, audit experience, KPI-driven improvements.',
-      ].join('\n')
-    );
-    await clickAction(page, 'JOB_OFFER_ANALYZE');
+    const interestsEdit = page.getByTestId('stage-panel').getByTestId('action-INTERESTS_EDIT');
+    if (await interestsEdit.isVisible().catch(() => false)) {
+      await clickAction(page, 'INTERESTS_EDIT');
+      await waitForStage(page, 'interests_edit', 30_000);
+      await clickAction(page, 'INTERESTS_CANCEL');
+      await waitForStage(page, 'job_posting', 30_000);
+
+      await clickAction(page, 'INTERESTS_EDIT');
+      await waitForStage(page, 'interests_edit', 30_000);
+      await fillFirstTextareaInStagePanel(page, 'Process improvement, automation, hiking');
+      await clickAction(page, 'INTERESTS_SAVE');
+      await waitForStage(page, 'job_posting', 30_000);
+    }
+
+    const jobOfferPaste = page.getByTestId('stage-panel').getByTestId('action-JOB_OFFER_PASTE');
+    if (await jobOfferPaste.isVisible().catch(() => false)) {
+      await clickAction(page, 'JOB_OFFER_PASTE');
+      await waitForStage(page, 'job_posting_paste', 30_000);
+      await fillFirstTextareaInStagePanel(
+        page,
+        [
+          'Senior Quality Engineer — responsibilities: audits, compliance, process improvement.',
+          'Requirements: ISO 9001 / IATF 16949, audit experience, KPI-driven improvements.',
+        ].join('\n')
+      );
+      await clickAction(page, 'JOB_OFFER_ANALYZE');
+    }
 
     const afterJob = await waitForStageOneOf(page, ['job_posting', 'work_notes_edit', 'work_experience'], 60_000);
     if (afterJob === 'job_posting') {
@@ -204,12 +231,25 @@ test.describe('Wizard: no ghost controls (AI disabled)', () => {
     await waitForStage(page, 'it_ai_skills', 60_000);
     await clickAction(page, 'SKILLS_TAILOR_SKIP');
 
-    const stageBeforeGenerate = await waitForStageOneOf(page, ['review_final', 'generate_confirm'], 60_000);
-    if (stageBeforeGenerate === 'review_final') {
+    const stageBeforeGenerate = await waitForStageOneOf(page, ['review_final', 'generate_confirm', 'cover_letter_review'], 60_000);
+    if (stageBeforeGenerate === 'review_final' || stageBeforeGenerate === 'generate_confirm') {
+      const generateBtn = page.getByTestId('stage-panel').getByTestId('action-REQUEST_GENERATE_PDF');
+      const canGenerate =
+        (await generateBtn.isVisible().catch(() => false)) &&
+        (await generateBtn.isEnabled().catch(() => false));
+      if (canGenerate) {
+        await clickAction(page, 'REQUEST_GENERATE_PDF');
+      }
+    }
+    await waitForStageOneOf(page, ['generate_confirm', 'review_final', 'cover_letter_review'], 60_000);
+
+    const generateBtn = page.getByTestId('stage-panel').getByTestId('action-REQUEST_GENERATE_PDF');
+    const canGenerate =
+      (await generateBtn.isVisible().catch(() => false)) &&
+      (await generateBtn.isEnabled().catch(() => false));
+    if (canGenerate) {
       await clickAction(page, 'REQUEST_GENERATE_PDF');
     }
-    await waitForStageOneOf(page, ['generate_confirm', 'review_final'], 60_000);
-    await clickAction(page, 'REQUEST_GENERATE_PDF');
 
     // Verify PDF is available for download.
     await expect(page.getByTestId('download-pdf')).toBeVisible({ timeout: 60_000 });

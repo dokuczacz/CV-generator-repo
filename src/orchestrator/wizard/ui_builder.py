@@ -63,8 +63,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "fields": [],
                 "actions": [
                     {"id": "LANGUAGE_SELECT_EN", "label": "English", "style": "primary"},
-                    {"id": "LANGUAGE_SELECT_DE", "label": "German (Deutsch)", "style": "secondary"},
-                    {"id": "LANGUAGE_SELECT_PL", "label": "Polish (Polski)", "style": "secondary"},
+                    {"id": "LANGUAGE_SELECT_DE", "label": "Deutsch", "style": "secondary"},
                 ],
                 "disable_free_text": True,
             }
@@ -194,28 +193,13 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             job_summary = deps.format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
             has_text = bool(str(meta.get("job_posting_text") or "").strip())
             interests = str(cv_data.get("interests") or "").strip() if isinstance(cv_data, dict) else ""
-            cf = meta.get("confirmed_flags") if isinstance(meta.get("confirmed_flags"), dict) else {}
-            can_fast = bool(
-                has_text
-                and isinstance(cf, dict)
-                and cf.get("contact_confirmed")
-                and cf.get("education_confirmed")
-                and deps.openai_enabled()
-            )
             actions: list[dict] = []
-            # Keep the step simple: one clear primary action, everything else as advanced/optional.
             if has_text:
-                actions.append({"id": "JOB_OFFER_CONTINUE", "label": "Continue", "style": "primary"})
-                if can_fast:
-                    actions.append({"id": "FAST_RUN_TO_PDF", "label": "Fast tailor + PDF", "style": "secondary"})
-                actions.append({"id": "JOB_OFFER_PASTE", "label": "Edit job offer text / URL", "style": "tertiary"})
-                actions.append({"id": "JOB_OFFER_SKIP", "label": "Skip", "style": "tertiary"})
-            else:
-                actions.append({"id": "JOB_OFFER_PASTE", "label": "Paste job offer text / URL", "style": "primary"})
+                actions.append({"id": "JOB_OFFER_CONTINUE", "label": "Akceptuj", "style": "primary"})
                 actions.append({"id": "JOB_OFFER_SKIP", "label": "Skip", "style": "secondary"})
-            actions.append({"id": "INTERESTS_EDIT", "label": "Edit interests", "style": "tertiary"})
-            if has_text and deps.openai_enabled():
-                actions.append({"id": "INTERESTS_TAILOR_RUN", "label": "Tailor interests (optional)", "style": "tertiary"})
+            else:
+                actions.append({"id": "JOB_OFFER_PASTE", "label": "Wklej link / treść oferty", "style": "primary"})
+                actions.append({"id": "JOB_OFFER_SKIP", "label": "Skip", "style": "secondary"})
 
             fields: list[dict] = [
                 {
@@ -231,7 +215,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "kind": "review_form",
                 "stage": "JOB_POSTING",
                 "title": f"Stage 3/{wizard_total} — Job offer (optional)",
-                "text": "Optional: paste a job offer for tailoring, then Continue. (Interests are edited separately.) Use Fast tailor + PDF only if contact + education are confirmed.",
+                "text": "Wklej poprawny link lub treść oferty i kliknij Akceptuj. Możesz też pominąć ten krok.",
                 "fields": fields,
                 "actions": actions,
                 "disable_free_text": True,
@@ -880,8 +864,6 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
         if wizard_stage == "review_final":
             pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
             has_pdf = bool(meta.get("pdf_generated") or (isinstance(pdf_refs, dict) and len(pdf_refs) > 0))
-            target_lang = str(meta.get("target_language") or meta.get("language") or "en").strip().lower()
-
             actions: list[dict] = []
             
             # Button order (as per plan):
@@ -906,14 +888,6 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 actions.append({
                     "id": "REQUEST_GENERATE_PDF",
                     "label": "Regenerate PDF",
-                    "style": "secondary",
-                })
-
-            # Cover letter action (always after PDF actions)
-            if deps.cv_enable_cover_letter and deps.openai_enabled() and target_lang in ("en", "de"):
-                actions.append({
-                    "id": "COVER_LETTER_PREVIEW",
-                    "label": "Generate Cover Letter",
                     "style": "secondary",
                 })
 
@@ -957,17 +931,14 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "kind": "review_form",
                 "stage": "COVER_LETTER",
                 "title": f"Stage 7/{wizard_total} — Cover Letter (optional)",
-                "text": "Review your cover letter draft. You can improve the draft with feedback, then generate and download the final PDF.",
+                "text": "Review your cover letter and generate/download final PDF.",
                 "fields": fields_list,
                 "actions": [
                     {"id": "DOWNLOAD_PDF", "label": "Pobierz CV", "style": "secondary"},
-                    {"id": "COVER_LETTER_BACK", "label": "Back", "style": "secondary"},
-                    {"id": "COVER_LETTER_FEEDBACK_EDIT", "label": "Edit feedback", "style": "secondary"},
-                    {"id": "COVER_LETTER_FEEDBACK_APPLY", "label": "Improve draft", "style": "primary"},
                     {
                         "id": "COVER_LETTER_GENERATE",
                         "label": "Generate final Cover Letter PDF",
-                        "style": "secondary",
+                        "style": "primary",
                     },
                 ],
                 "disable_free_text": True,

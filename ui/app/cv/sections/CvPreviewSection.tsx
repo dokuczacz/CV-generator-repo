@@ -1,27 +1,34 @@
+import { downloadPDF } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
-import type { CVSessionPreview } from '../types';
+import type { CVSessionPreview, UIAction } from '../types';
 
 interface CvPreviewSectionProps {
   cvFile: File | null;
   sessionId: string | null;
+  currentStepLabel: string | null;
+  currentStage: string | null;
+  uiAction: UIAction | null;
+  lastStage: string | null;
   cvPreview: CVSessionPreview | null;
   cvPreviewError: string | null;
   cvPreviewLoading: boolean;
-  showCvJson: boolean;
-  copyNotice: string | null;
   actionNotice: string | null;
   latestCvPdfBase64: string | null;
   latestCvPdfFilename: string | null;
   latestCvPdfDownloadName: string | null;
+  latestCoverLetterPdfBase64: string | null;
+  latestCoverLetterPdfFilename: string | null;
+  hasGeneratedPdf: boolean;
   isLoading: boolean;
-  onToggleShowCvJson: () => void;
-  onCopyCvJson: () => void;
+  formDraft: Record<string, string>;
   onRefresh: () => void;
   onDownloadPdf: () => void;
   onScrollToStagePanel: () => void;
+  onFormDraftChange: (key: string, value: string) => void;
+  onSendUserAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
   onToggleWorkLock: (roleIndex: number) => void;
   onMoveWorkRoleUp: (roleIndex: number) => void;
   onMoveWorkRoleDown: (roleIndex: number) => void;
@@ -32,27 +39,229 @@ interface CvPreviewSectionProps {
 export function CvPreviewSection({
   cvFile,
   sessionId,
+  currentStepLabel,
+  currentStage,
+  uiAction,
+  lastStage,
   cvPreview,
   cvPreviewError,
   cvPreviewLoading,
-  showCvJson,
-  copyNotice,
   actionNotice,
   latestCvPdfBase64,
   latestCvPdfFilename,
   latestCvPdfDownloadName,
+  latestCoverLetterPdfBase64,
+  latestCoverLetterPdfFilename,
+  hasGeneratedPdf,
   isLoading,
-  onToggleShowCvJson,
-  onCopyCvJson,
+  formDraft,
   onRefresh,
   onDownloadPdf,
   onScrollToStagePanel,
+  onFormDraftChange,
+  onSendUserAction,
   onToggleWorkLock,
   onMoveWorkRoleUp,
   onMoveWorkRoleDown,
   describeMissing,
   requiredLabel,
 }: CvPreviewSectionProps) {
+  const stageLabel = uiAction?.stage || lastStage || '';
+
+  const renderActionButtons = () => {
+    if (!uiAction?.actions?.length) return null;
+    const actions = uiAction.actions || [];
+    const fields = Array.isArray(uiAction.fields) ? uiAction.fields : [];
+    const hasEditable = uiAction.kind === 'edit_form' || fields.some((f) => !!f?.editable);
+    const primaryRaw = actions.filter((a) => !(a.style === 'secondary' || a.style === 'tertiary'));
+    const primary = primaryRaw.length > 1 ? primaryRaw.slice(0, 1) : primaryRaw;
+    const secondary = actions.filter((a) => a.style === 'secondary' || a.style === 'tertiary');
+
+    const isLanguageSelection = String(uiAction.stage || '').toUpperCase() === 'LANGUAGE_SELECTION';
+    const isCoverLetterStage = String(uiAction.stage || '').toUpperCase() === 'COVER_LETTER';
+    const enabledLanguageActions = new Set(['LANGUAGE_SELECT_EN', 'LANGUAGE_SELECT_DE']);
+    const languageNote = isLanguageSelection ? 'Wybrany język docelowy ustawia wariant template PDF (EN/DE). Dla PL opcja jest jeszcze niedostępna.' : null;
+    const hasLocalCvPdf = !!latestCvPdfBase64;
+    const hasLocalCoverPdf = !!latestCoverLetterPdfBase64;
+
+    const renderButtons = (items: typeof actions) => (
+      <div className="flex flex-wrap gap-2">
+        {items.map((a) => {
+          const isSecondary = a.style === 'secondary' || a.style === 'tertiary';
+          const isCancel = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK');
+          const payload = hasEditable && !isCancel ? formDraft : undefined;
+          if (isLanguageSelection && !enabledLanguageActions.has(a.id)) {
+            return null;
+          }
+          if (String(uiAction.stage || '').toUpperCase() === 'REVIEW_FINAL' && a.id === 'COVER_LETTER_PREVIEW') {
+            return null;
+          }
+          if (isCoverLetterStage && (a.id === 'COVER_LETTER_FEEDBACK_APPLY' || a.id === 'COVER_LETTER_FEEDBACK_EDIT')) {
+            return null;
+          }
+          const wantsCvDownloadViaGenerate = a.id === 'REQUEST_GENERATE_PDF' && (hasLocalCvPdf || hasGeneratedPdf);
+
+          const label = (() => {
+            if (a.id === 'REQUEST_GENERATE_PDF') return wantsCvDownloadViaGenerate ? 'Pobierz CV' : 'Generuj PDF';
+            if (a.id === 'COVER_LETTER_GENERATE') return hasLocalCoverPdf ? 'Pobierz Cover Letter' : 'Generuj Cover Letter';
+            return a.label;
+          })();
+          return (
+            <Button
+              key={a.id}
+              variant={isSecondary ? 'secondary' : 'primary'}
+              onClick={() => {
+                if (a.id === 'REQUEST_GENERATE_PDF' && hasLocalCvPdf) {
+                  downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
+                  return;
+                }
+                if (a.id === 'COVER_LETTER_GENERATE' && hasLocalCoverPdf) {
+                  downloadPDF(latestCoverLetterPdfBase64!, latestCoverLetterPdfFilename || `CoverLetter_${Date.now()}.pdf`);
+                  return;
+                }
+                if (a.id === 'DOWNLOAD_PDF' && hasLocalCvPdf) {
+                  downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
+                  return;
+                }
+                void onSendUserAction(a.id, payload);
+              }}
+              loading={isLoading}
+              data-testid={`action-${a.id}`}
+            >
+              {label}
+            </Button>
+          );
+        })}
+        {isCoverLetterStage && (hasGeneratedPdf || hasLocalCvPdf) ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              if (hasLocalCvPdf) {
+                downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
+                return;
+              }
+              void onSendUserAction('DOWNLOAD_PDF');
+            }}
+            disabled={isLoading}
+            data-testid="action-inline-download-cv"
+          >
+            Pobierz CV
+          </Button>
+        ) : null}
+      </div>
+    );
+
+    return (
+      <div className="space-y-2">
+        {languageNote ? <div className="text-xs text-slate-600">{languageNote}</div> : null}
+        {primary.length ? renderButtons([...primary, ...secondary]) : renderButtons(actions)}
+      </div>
+    );
+  };
+
+  const renderStagePanel = () => {
+    if (!uiAction) return null;
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3" data-testid="stage-panel" data-stage={stageLabel} data-wizard-stage={lastStage || ''}>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold text-slate-900">{uiAction.title || 'Aktualny krok'}</div>
+          {uiAction.stage ? <Badge variant="accent">{uiAction.stage}</Badge> : null}
+        </div>
+
+        {uiAction.text ? <div className="text-sm text-slate-700 whitespace-pre-wrap">{uiAction.text}</div> : null}
+
+        {Array.isArray(uiAction.fields) && uiAction.fields.length ? (
+          <div className="space-y-2">
+            {uiAction.fields.map((f) => (
+              <div key={f.key} className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="text-xs font-semibold text-slate-600">{f.label}</div>
+                {uiAction.kind === 'edit_form' || f.editable ? (
+                  f.type === 'textarea' ? (
+                    <textarea
+                      value={formDraft[f.key] ?? ''}
+                      onChange={(e) => onFormDraftChange(f.key, e.target.value)}
+                      disabled={isLoading}
+                      className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
+                      rows={8}
+                      placeholder={f.placeholder}
+                    />
+                  ) : (
+                    <input
+                      value={formDraft[f.key] ?? ''}
+                      onChange={(e) => onFormDraftChange(f.key, e.target.value)}
+                      disabled={isLoading}
+                      className="mt-2 w-full rounded-md border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
+                      placeholder={f.placeholder}
+                    />
+                  )
+                ) : (
+                  (() => {
+                    const isWorkRolesPreview = String(uiAction.stage || '').toUpperCase() === 'WORK_EXPERIENCE' && f.key === 'roles_preview';
+                    if (!isWorkRolesPreview) {
+                      return <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">{f.value || ''}</div>;
+                    }
+
+                    const lines = String(f.value || '')
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter(Boolean);
+
+                    if (!lines.length) {
+                      return <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">(none)</div>;
+                    }
+
+                    return (
+                      <div className="mt-2 space-y-2">
+                        {lines.map((line, idx) => {
+                          const m = line.match(/^(\d+)\.\s*(.*)$/);
+                          const roleIdx = m ? Math.max(0, Number(m[1]) - 1) : idx;
+                          const roleText = m ? m[2] : line;
+                          return (
+                            <div key={`${roleIdx}-${roleText}`} className="flex items-start justify-between gap-2 rounded border border-slate-200 bg-slate-50 p-2">
+                              <div className="text-sm text-slate-900 break-words">{`${roleIdx + 1}. ${roleText}`}</div>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={isLoading || roleIdx <= 0}
+                                  onClick={() => {
+                                    void onSendUserAction('MOVE_WORK_EXPERIENCE_UP', { position_index: roleIdx });
+                                  }}
+                                  data-testid={`work-move-up-${roleIdx}`}
+                                >
+                                  ↑
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={isLoading || roleIdx >= lines.length - 1}
+                                  onClick={() => {
+                                    void onSendUserAction('MOVE_WORK_EXPERIENCE_DOWN', { position_index: roleIdx });
+                                  }}
+                                  data-testid={`work-move-down-${roleIdx}`}
+                                >
+                                  ↓
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {renderActionButtons()}
+        {uiAction.disable_free_text ? <div className="text-xs text-slate-600">W tym kroku wiadomości są wyłączone — użyj akcji powyżej.</div> : null}
+      </div>
+    );
+  };
+
   return (
     <div className={`${!cvFile && !sessionId ? 'hidden' : ''} flex-1 min-w-[520px]`}>
       <Card className="h-full flex flex-col">
@@ -60,17 +269,13 @@ export function CvPreviewSection({
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-slate-900">CV</div>
-              <div className="mt-1 text-xs text-slate-600">Podgląd danych CV i gotowość do PDF.</div>
+              <div className="mt-1 text-xs text-slate-600">
+                {currentStepLabel ? `Aktualny krok: ${currentStepLabel}` : 'Podgląd danych CV.'}
+                {currentStage ? ` (${currentStage})` : ''}
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              {copyNotice ? <span className="text-xs text-emerald-700">{copyNotice}</span> : null}
               {actionNotice ? <span className="text-xs text-indigo-700">{actionNotice}</span> : null}
-              <Button size="sm" variant="secondary" onClick={onToggleShowCvJson}>
-                {showCvJson ? 'Widok' : 'JSON'}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={onCopyCvJson} disabled={!cvPreview}>
-                Kopiuj
-              </Button>
               {latestCvPdfBase64 ? (
                 <Button size="sm" variant="secondary" onClick={onDownloadPdf} data-testid="download-pdf">
                   Pobierz PDF
@@ -80,7 +285,8 @@ export function CvPreviewSection({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {sessionId && uiAction ? renderStagePanel() : null}
           {!sessionId ? (
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Brak aktywnej sesji.</div>
           ) : cvPreviewError ? (
@@ -88,69 +294,18 @@ export function CvPreviewSection({
           ) : cvPreviewLoading && !cvPreview ? (
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Ładowanie…</div>
           ) : cvPreview ? (
-            showCvJson ? (
-              <pre className="overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-800">
-                {JSON.stringify({ cv_data: cvPreview.cv_data, readiness: cvPreview.readiness, metadata: cvPreview.metadata }, null, 2)}
-              </pre>
-            ) : (
               <div className="space-y-3">
                 <div className="rounded-lg border border-slate-200 bg-white p-3">
                   <div className="text-xs font-semibold text-slate-600">Gotowość</div>
                   {(() => {
                     const r = cvPreview.readiness || {};
-                    const required = (r.required_present || {}) as Record<string, boolean>;
                     const confirmed = (r.confirmed_flags || {}) as Record<string, boolean>;
-                    const missing: string[] = Array.isArray(r.missing) ? (r.missing as string[]) : [];
-                    const items = Object.entries(required).filter(([, v]) => typeof v === 'boolean') as Array<[string, boolean]>;
                     const canGenerate = !!r.can_generate;
-                    const strict = !!r.strict_template;
                     return (
-                      <div className="mt-2 space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {canGenerate ? <Badge variant="success">Gotowe do PDF</Badge> : <Badge variant="warning">Nie gotowe</Badge>}
-                          {strict ? <Badge>strict_template</Badge> : null}
-                          {confirmed?.contact_confirmed ? <Badge variant="success">Kontakt potwierdzony</Badge> : <Badge variant="warning">Kontakt niepotwierdzony</Badge>}
-                          {confirmed?.education_confirmed ? <Badge variant="success">Edukacja potwierdzona</Badge> : <Badge variant="warning">Edukacja niepotwierdzona</Badge>}
-                        </div>
-
-                        {items.length ? (
-                          <div className="space-y-1 text-sm text-slate-900">
-                            {items.map(([k, ok]) => (
-                              <div key={k} className="flex items-center justify-between gap-3">
-                                <span className="text-slate-700">{requiredLabel(k)}</span>
-                                <span className={ok ? 'text-emerald-700' : 'text-rose-700'}>{ok ? 'OK' : 'Brak'}</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-700">(brak danych readiness)</div>
-                        )}
-
-                        {missing.length ? (
-                          <div className="space-y-2">
-                            <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
-                              Braki: {missing.map((m) => describeMissing(m).label).join(', ')}
-                            </div>
-                            <div className="rounded-md border border-slate-200 bg-white p-2">
-                              <div className="text-xs font-semibold text-slate-700">Co zrobić</div>
-                              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-slate-700">
-                                {Array.from(new Set(missing)).slice(0, 10).map((m) => {
-                                  const d = describeMissing(m);
-                                  return (
-                                    <li key={m}>
-                                      <span className="font-semibold text-slate-900">{d.label}:</span> {d.hint}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                              <div className="mt-2">
-                                <Button size="sm" variant="secondary" onClick={onScrollToStagePanel}>
-                                  Otwórz krok
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {canGenerate ? <Badge variant="success">Gotowe do PDF</Badge> : <Badge variant="warning">Nie gotowe</Badge>}
+                        {confirmed?.contact_confirmed ? <Badge variant="success">Kontakt potwierdzony</Badge> : <Badge variant="warning">Kontakt niepotwierdzony</Badge>}
+                        {confirmed?.education_confirmed ? <Badge variant="success">Edukacja potwierdzona</Badge> : <Badge variant="warning">Edukacja niepotwierdzona</Badge>}
                       </div>
                     );
                   })()}
@@ -282,7 +437,6 @@ export function CvPreviewSection({
                   </div>
                 </details>
               </div>
-            )
           ) : (
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Brak danych.</div>
           )}
