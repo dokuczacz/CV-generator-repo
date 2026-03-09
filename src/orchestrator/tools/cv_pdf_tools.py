@@ -201,6 +201,7 @@ def tool_generate_cv_from_session(
     except Exception:
         cv_sig = ""
 
+    pdf_action = str((client_context or {}).get("pdf_action") or "generate").strip().lower()
     force_regen = bool((client_context or {}).get("force_pdf_regen")) or deps.cv_pdf_always_regenerate
 
     # Wave 0.1: Execution Latch (Idempotency Check)
@@ -208,9 +209,19 @@ def tool_generate_cv_from_session(
     if (not force_regen) and deps.cv_execution_latch:
         pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
         if pdf_refs:
-            # Find most recent PDF
+            # Find most recent CV PDF (ignore cover-letter refs).
+            cv_refs = {
+                k: v
+                for k, v in pdf_refs.items()
+                if isinstance(v, dict)
+                and str(v.get("kind") or "").strip().lower() != "cover_letter"
+                and not str(k or "").strip().lower().startswith("cover_letter_")
+            }
+            if not cv_refs:
+                cv_refs = {}
+
             sorted_refs = sorted(
-                pdf_refs.items(),
+                cv_refs.items(),
                 key=lambda x: x[1].get("created_at", "") if isinstance(x[1], dict) else "",
                 reverse=True
             )
@@ -221,7 +232,18 @@ def tool_generate_cv_from_session(
                 latest_cv_sig = str(latest_info.get("cv_sig") or "") if isinstance(latest_info, dict) else ""
                 current_lang = str(meta.get("target_language") or meta.get("language") or lang).strip().lower()
                 latest_lang = str(latest_info.get("target_language") or "").strip().lower() if isinstance(latest_info, dict) else ""
-                if current_job_sig and latest_job_sig and current_job_sig != latest_job_sig:
+
+                should_serve_cached = False
+                if pdf_action == "download_only":
+                    # DOWNLOAD_PDF must remain side-effect free: serve latest cached CV artifact
+                    # without triggering translation/regeneration.
+                    should_serve_cached = True
+                    logging.info(
+                        "Execution latch: download_only serving latest cached CV PDF session_id=%s pdf_ref=%s",
+                        session_id,
+                        latest_ref,
+                    )
+                elif current_job_sig and latest_job_sig and current_job_sig != latest_job_sig:
                     logging.info(
                         "Execution latch: skipping cached PDF due to job_sig mismatch session_id=%s current_job_sig=%s cached_job_sig=%s",
                         session_id,
@@ -241,19 +263,28 @@ def tool_generate_cv_from_session(
                         session_id,
                         current_lang,
                     )
-                elif cv_sig and (not latest_cv_sig or latest_cv_sig != cv_sig):
+                elif cv_sig and latest_cv_sig and latest_cv_sig != cv_sig:
                     logging.info(
                         "Execution latch: skipping cached PDF due to cv_sig mismatch session_id=%s current_cv_sig=%s cached_cv_sig=%s",
                         session_id,
                         cv_sig[:12],
-                        latest_cv_sig[:12] if latest_cv_sig else "(missing)",
+                        latest_cv_sig[:12],
                     )
+                elif cv_sig and not latest_cv_sig:
+                    logging.info(
+                        "Execution latch: cached PDF has no cv_sig (legacy metadata), reusing cache session_id=%s current_cv_sig=%s",
+                        session_id,
+                        cv_sig[:12],
+                    )
+                    should_serve_cached = True
                 else:
                     logging.info(
                         f"Execution latch: PDF already exists for session {session_id}, "
                         f"returning existing pdf_ref={latest_ref}"
                     )
+                    should_serve_cached = True
 
+                if should_serve_cached:
                     pdf_bytes_cached: bytes | None = None
                     download_error: str | None = None
                     try:
@@ -312,6 +343,15 @@ def tool_generate_cv_from_session(
                         },
                     }, "application/json"
 
+    # DOWNLOAD_PDF must never trigger translation/render. If latch had no reusable
+    # cached PDF, return a deterministic error and let caller show a clear message.
+    if pdf_action == "download_only":
+        return 400, {
+            "error": "pdf_not_available_for_download_only",
+            "message": "No cached CV PDF is available for download. Click Generate PDF first.",
+            "target_language": str(meta.get("target_language") or meta.get("language") or lang).strip().lower(),
+        }, "application/json"
+
     readiness = _compute_readiness(cv_data, meta if isinstance(meta, dict) else {})
     run_summary = {
         "stage": "generate_pdf",
@@ -357,7 +397,6 @@ def tool_generate_cv_from_session(
         meta=meta if isinstance(meta, dict) else None,
     )
     unified_mode = execution_strategy == "unified"
-    pdf_action = str((client_context or {}).get("pdf_action") or "generate").strip().lower()
     needs_bulk_translation = (
         (source_lang != target_lang or explicit_target_lang_selected)
         and str(meta.get("bulk_translated_to") or "") != target_lang

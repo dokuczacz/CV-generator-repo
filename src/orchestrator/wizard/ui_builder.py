@@ -495,15 +495,8 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "kind": "edit_form",
                 "stage": "WORK_EXPERIENCE",
                 "title": f"Stage 4/{wizard_total} — Work experience (feedback)",
-                "text": "Add feedback to improve the proposal, then Regenerate. If a proposal is available, you can Accept it; otherwise Continue.",
-                "fields": [
-                    {
-                        "key": "work_tailoring_feedback",
-                        "label": "Feedback",
-                        "value": str(meta.get("work_tailoring_feedback") or ""),
-                        "type": "textarea",
-                    }
-                ],
+                "text": "Regenerate the proposal if needed. If a proposal is available, you can Accept it; otherwise Continue.",
+                "fields": [],
                 "actions": actions,
                 "disable_free_text": True,
             }

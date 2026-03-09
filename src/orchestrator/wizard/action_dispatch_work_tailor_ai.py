@@ -176,12 +176,7 @@ def handle_work_tailor_ai_actions(
         job_summary = _job_summary_for_prompt(job_ref)
         job_text = str(meta2.get("job_posting_text") or "")
         notes = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
-        feedback = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
         target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
-    
-        if user_action_payload and "work_tailoring_feedback" in user_action_payload:
-            feedback = deps.escape_user_input_for_prompt(str(user_action_payload.get("work_tailoring_feedback") or ""))
-            meta2["work_tailoring_feedback"] = feedback[:2000]
     
         # If we only have raw job text, extract a compact job summary first.
         # This avoids sending large job text snippets to the tailoring call.
@@ -242,7 +237,6 @@ def handle_work_tailor_ai_actions(
         user_text = (
             f"[JOB_SUMMARY]\n{deps.sanitize_for_prompt(job_summary)}\n\n"
             f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
-            f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
             f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
         )
 
@@ -492,7 +486,7 @@ def handle_work_tailor_ai_actions(
     
                 e0_corpus = deps.extract_e0_corpus_from_labeled_blocks(
                     user_text,
-                    ["CURRENT_WORK_EXPERIENCE", "TAILORING_SUGGESTIONS", "TAILORING_FEEDBACK"],
+                    ["CURRENT_WORK_EXPERIENCE", "TAILORING_SUGGESTIONS"],
                 )
                 validation_errors.extend(
                     deps.find_work_e0_violations(roles=list(roles or []), e0_corpus=e0_corpus)
@@ -507,7 +501,7 @@ def handle_work_tailor_ai_actions(
                     user_text = (
                         f"[JOB_SUMMARY]\n{deps.sanitize_for_prompt(job_summary)}\n\n"
                         f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
-                        f"[TAILORING_FEEDBACK]\n"
+                        f"[VALIDATION_CONSTRAINTS]\n"
                         f"FIX_VALIDATION: Shorten bullets to fit hard limit (<= {hard_limit} chars). "
                         f"Rewrite ONLY affected bullets. Keep 4-5 bullets per role. Do NOT invent facts.\n"
                         f"E0_POLICY_ERRORS: {'; '.join(validation_errors[:6])}\n\n"
@@ -703,7 +697,7 @@ def handle_work_tailor_ai_actions(
                 bad_roles_text = "\n\n".join(bad_role_blocks) if bad_role_blocks else roles_text
                 user_text = (
                     f"[JOB_SUMMARY]\n{deps.sanitize_for_prompt(job_summary)}\n\n"
-                    f"[TAILORING_FEEDBACK]\n"
+                    f"[VALIDATION_CONSTRAINTS]\n"
                     f"MCP_VALIDATION_PAYLOAD: {payload_json} "
                     f"Reduce ONLY flagged bullets by >= 30 chars and to <= {hard_limit} chars, "
                     f"without changing tone/meaning/logic. Keep 4-5 bullets per role. Do NOT invent facts.\n\n"

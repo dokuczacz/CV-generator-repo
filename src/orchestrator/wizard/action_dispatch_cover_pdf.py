@@ -512,7 +512,7 @@ def handle_cover_pdf_actions(
         return True, cv_data, meta2, deps.wizard_resp(assistant_text="Cover letter PDF generated.", meta_out=meta2, cv_out=cv_data, pdf_bytes=pdf_bytes)
     
     if aid == "DOWNLOAD_PDF":
-        # Download previously generated PDF (no regeneration)
+        # Strict download-only path: never regenerate or invoke AI from download action.
         cc_download = dict(client_context) if isinstance(client_context, dict) else {}
         cc_download["pdf_action"] = "download_only"
         status, payload, content_type = deps.tool_generate_cv_from_session(
@@ -547,6 +547,10 @@ def handle_cover_pdf_actions(
             err_msg = "PDF not yet generated or unavailable"
             if isinstance(payload, dict) and payload.get("error"):
                 err_msg = str(payload.get("error"))[:400]
+            elif isinstance(payload, dict) and payload.get("message"):
+                err_msg = str(payload.get("message"))[:400]
+            elif isinstance(payload, dict) and payload.get("response"):
+                err_msg = str(payload.get("response"))[:400]
             meta2 = deps.wizard_set_stage(meta2, "review_final")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(assistant_text=err_msg, meta_out=meta2, cv_out=cv_data)

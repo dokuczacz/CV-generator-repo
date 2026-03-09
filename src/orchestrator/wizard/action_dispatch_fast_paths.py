@@ -296,7 +296,7 @@ def handle_fast_paths_actions(
             else:
                 job_summary = _job_summary_for_prompt(meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None)
                 notes = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
-                feedback = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
+                feedback = ""
                 role_blocks = []
                 for r in work_list[:12]:
                     if not isinstance(r, dict):
@@ -313,7 +313,6 @@ def handle_fast_paths_actions(
                 user_text = (
                     f"[JOB_SUMMARY]\n{deps.sanitize_for_prompt(job_summary)}\n\n"
                     f"[TAILORING_SUGGESTIONS]\n{notes}\n\n"
-                    f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
                     f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
                 )
     
@@ -361,7 +360,7 @@ def handle_fast_paths_actions(
     
                         e0_corpus = deps.extract_e0_corpus_from_labeled_blocks(
                             user_text,
-                            ["CURRENT_WORK_EXPERIENCE", "TAILORING_SUGGESTIONS", "TAILORING_FEEDBACK"],
+                            ["CURRENT_WORK_EXPERIENCE", "TAILORING_SUGGESTIONS"],
                         )
                         validation_errors.extend(
                             deps.find_work_e0_violations(roles=list(roles or []), e0_corpus=e0_corpus)
@@ -403,7 +402,7 @@ def handle_fast_paths_actions(
                             bad_roles_text = "\n\n".join(bad_role_blocks) if bad_role_blocks else roles_text
                             user_text = (
                                 f"[JOB_SUMMARY]\n{deps.sanitize_for_prompt(job_summary)}\n\n"
-                                f"[TAILORING_FEEDBACK]\n"
+                                f"[VALIDATION_CONSTRAINTS]\n"
                                 f"MCP_VALIDATION_PAYLOAD: {payload_json} "
                                 f"Reduce ONLY flagged bullets by >= 30 chars and to <= {hard_limit} chars, "
                                 f"without changing tone/meaning/logic. Keep 4-5 bullets per role. Do NOT invent facts.\n"
@@ -502,11 +501,6 @@ def handle_fast_paths_actions(
             job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
             job_summary = _job_summary_for_prompt(job_ref)
             tailoring_suggestions = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
-            feedback_once_raw = str(meta2.get("work_tailoring_feedback") or "").strip()
-            tailoring_feedback = deps.escape_user_input_for_prompt(feedback_once_raw)
-            if feedback_once_raw:
-                meta2.pop("work_tailoring_feedback", None)
-                meta2["work_tailoring_feedback_consumed_at"] = deps.now_iso()
             raw_docx_skills = deps.collect_raw_docx_skills_context(meta=meta2, max_items=20)
             raw_docx_skills_text = "\n".join([f"- {str(s).strip()}" for s in raw_docx_skills if str(s).strip()])
             work_blocks: list[str] = []
@@ -525,7 +519,6 @@ def handle_fast_paths_actions(
             user_text = (
                 f"[JOB_SUMMARY]\n{job_summary}\n\n"
                 f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
-                f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
                 f"[WORK_EXPERIENCE_TAILORED]\n{work_text}\n\n"
                 f"[RAW_DOCX_SKILLS]\n{raw_docx_skills_text}\n"
             )

@@ -242,7 +242,6 @@ def test_work_tailor_run_payload_matches_runtime_capsules(monkeypatch):
         "keywords": ["quality", "process improvement"],
     }
     metadata["work_tailoring_notes"] = "Focus on claims reduction and audits."
-    metadata["work_tailoring_feedback"] = "Keep bullets concise."
 
     capture = _setup(monkeypatch, cv_data=_base_cv_data(), metadata=metadata)
 
@@ -264,7 +263,7 @@ def test_work_tailor_run_payload_matches_runtime_capsules(monkeypatch):
 
     assert "[JOB_SUMMARY]" in user_text
     assert "[TAILORING_SUGGESTIONS]" in user_text
-    assert "[TAILORING_FEEDBACK]" in user_text
+    assert "[TAILORING_FEEDBACK]" not in user_text
     assert "[ALIGNMENT_POLICY]" not in user_text
     assert "[CURRENT_WORK_EXPERIENCE]" in user_text
     assert "Zielona Góra, Poland" in user_text
@@ -285,7 +284,6 @@ def test_skills_tailor_run_payload_matches_runtime_capsules(monkeypatch):
         "keywords": ["quality", "process improvement"],
     }
     metadata["work_tailoring_notes"] = "Prioritize quality transformation examples."
-    metadata["work_tailoring_feedback"] = "Emphasize measurable outcomes."
     metadata["work_experience_proposal_block"] = {"roles": [], "notes": "Prior tailoring pass notes."}
 
     capture = _setup(monkeypatch, cv_data=_base_cv_data(), metadata=metadata)
@@ -308,7 +306,7 @@ def test_skills_tailor_run_payload_matches_runtime_capsules(monkeypatch):
 
     assert "[JOB_SUMMARY]" in user_text
     assert "[TAILORING_SUGGESTIONS]" in user_text
-    assert "[TAILORING_FEEDBACK]" in user_text
+    assert "[TAILORING_FEEDBACK]" not in user_text
     assert "[WORK_EXPERIENCE_TAILORED]" in user_text
     assert "[RAW_DOCX_SKILLS]" in user_text
     assert "[WORK_TAILORING_PROPOSAL_NOTES]" not in user_text
@@ -449,7 +447,7 @@ def test_skills_tailor_run_uses_contextual_seeds_when_skills_empty(monkeypatch):
     assert "KAIZEN" in user_text
 
 
-def test_skills_tailor_feedback_is_consumed_once(monkeypatch):
+def test_skills_tailor_feedback_is_ignored(monkeypatch):
     metadata = _wizard_metadata()
     metadata["wizard_stage"] = "it_ai_skills"
     metadata["job_reference"] = {
@@ -488,29 +486,9 @@ def test_skills_tailor_feedback_is_consumed_once(monkeypatch):
     assert payload1.get("success") is True
 
     first_call = [c for c in capture.calls if c["stage"] == "it_ai_skills"][0]
-    assert "This should be sent once only." in first_call["user_text"]
+    assert "This should be sent once only." not in first_call["user_text"]
 
-    # Force stage back so we can execute SKILLS_TAILOR_RUN again on same session.
-    updated = store.get_session("s1")
-    assert updated is not None
-    updated_meta = dict(updated.get("metadata") or {})
-    updated_meta["wizard_stage"] = "it_ai_skills"
-    store.update_session("s1", updated.get("cv_data") or {}, updated_meta)
-
-    status2, payload2 = function_app._tool_process_cv_orchestrated(
-        {
-            "session_id": "s1",
-            "message": "run skills tailoring again",
-            "language": "en",
-            "user_action": {"id": "SKILLS_TAILOR_RUN", "payload": {}},
-        }
-    )
-    assert status2 == 200
-    assert payload2.get("success") is True
-
-    skill_calls = [c for c in capture.calls if c["stage"] == "it_ai_skills"]
-    assert len(skill_calls) >= 2
-    assert "This should be sent once only." not in skill_calls[1]["user_text"]
+    # No second call assertion here: dedupe/latch can skip a repeated AI invocation.
 
 
 def test_skills_tailor_run_uses_docx_raw_skill_lines(monkeypatch):

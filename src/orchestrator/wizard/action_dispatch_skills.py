@@ -206,11 +206,6 @@ def handle_skills_actions(
         job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
         job_summary = _job_summary_for_prompt(job_ref)
         tailoring_suggestions = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
-        feedback_once_raw = str(meta2.get("work_tailoring_feedback") or "").strip()
-        tailoring_feedback = deps.escape_user_input_for_prompt(feedback_once_raw)
-        if feedback_once_raw:
-            meta2.pop("work_tailoring_feedback", None)
-            meta2["work_tailoring_feedback_consumed_at"] = deps.now_iso()
         raw_docx_skills = deps.collect_raw_docx_skills_context(meta=meta2, max_items=20)
         raw_docx_skills_text = "\n".join([f"- {str(s).strip()}" for s in raw_docx_skills if str(s).strip()])
         target_lang = str(meta2.get("target_language") or cv_data.get("language") or "en").strip().lower()
@@ -232,7 +227,6 @@ def handle_skills_actions(
         user_text = (
             f"[JOB_SUMMARY]\n{job_summary}\n\n"
             f"[TAILORING_SUGGESTIONS]\n{tailoring_suggestions}\n\n"
-            f"[TAILORING_FEEDBACK]\n{tailoring_feedback}\n\n"
             f"[WORK_EXPERIENCE_TAILORED]\n{work_text}\n\n"
             f"[RAW_DOCX_SKILLS]\n{raw_docx_skills_text}\n"
         )
@@ -245,7 +239,6 @@ def handle_skills_actions(
                     target_lang,
                     deps.sha256_text(job_summary),
                     deps.sha256_text(tailoring_suggestions),
-                    deps.sha256_text(tailoring_feedback),
                     deps.sha256_text(work_text),
                     deps.sha256_text(raw_docx_skills_text),
                 ]

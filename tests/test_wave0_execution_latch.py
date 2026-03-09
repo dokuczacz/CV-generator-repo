@@ -177,6 +177,125 @@ def test_latch_allows_first_pdf_generation():
     mock_render.assert_called_once()
 
 
+def test_latch_ignores_cover_letter_refs_when_reusing_cv_pdf() -> None:
+    """If newest ref is cover letter, latch should still reuse newest CV ref."""
+
+    mock_session = {
+        "session_id": "test-session-cover-priority",
+        "cv_data": {
+            "full_name": "John Doe",
+            "email": "john@example.com",
+            "phone": "+1234567890",
+            "work_experience": [{"employer": "Acme"}],
+            "education": [{"institution": "MIT"}],
+        },
+        "metadata": {
+            "language": "en",
+            "confirmed_flags": {
+                "contact_confirmed": True,
+                "education_confirmed": True,
+            },
+            "pdf_refs": {
+                "cover_letter_newer": {
+                    "kind": "cover_letter",
+                    "container": "cv-pdfs",
+                    "blob_name": "test-session-cover-priority/cover_letter_newer.pdf",
+                    "created_at": "2026-01-27T12:00:00",
+                    "target_language": "en",
+                },
+                "cv_ref_older": {
+                    "container": "cv-pdfs",
+                    "blob_name": "test-session-cover-priority/cv_ref_older.pdf",
+                    "created_at": "2026-01-27T10:00:00",
+                    "sha256": "cvhash",
+                    "cv_sig": "",
+                    "target_language": "en",
+                    "size_bytes": 145000,
+                    "render_ms": 342,
+                    "pages": 2,
+                    "validation_passed": True,
+                    "download_name": "John_Doe_CV.pdf",
+                },
+            },
+        },
+    }
+    mock_session["metadata"]["pdf_refs"]["cv_ref_older"]["cv_sig"] = _cv_sig(mock_session["cv_data"])
+
+    from function_app import _tool_generate_cv_from_session
+
+    with patch("src.orchestrator.tools.cv_pdf_tools.CVBlobStore.download_bytes") as mock_download, patch.dict(
+        os.environ, {"CV_EXECUTION_LATCH": "1"}
+    ):
+        mock_download.return_value = b"%PDF-1.4 cached cv"
+        status, payload, content_type = _tool_generate_cv_from_session(
+            session_id="test-session-cover-priority",
+            language="en",
+            client_context=None,
+            session=mock_session,
+        )
+
+    assert status == 200
+    assert content_type == "application/pdf"
+    assert isinstance(payload, dict)
+    assert isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
+
+
+def test_download_only_reuses_cached_pdf_despite_job_sig_mismatch() -> None:
+    mock_session = {
+        "session_id": "test-session-download-only",
+        "cv_data": {
+            "full_name": "John Doe",
+            "email": "john@example.com",
+            "phone": "+1234567890",
+            "work_experience": [{"employer": "Acme"}],
+            "education": [{"institution": "MIT"}],
+        },
+        "metadata": {
+            "language": "en",
+            "target_language": "en",
+            "current_job_sig": "newjobsig123456",
+            "confirmed_flags": {
+                "contact_confirmed": True,
+                "education_confirmed": True,
+            },
+            "pdf_refs": {
+                "cv_ref_existing": {
+                    "container": "cv-pdfs",
+                    "blob_name": "test-session-download-only/cv_ref_existing.pdf",
+                    "created_at": "2026-01-27T10:00:00",
+                    "job_sig": "oldjobsig654321",
+                    "cv_sig": "",
+                    "target_language": "en",
+                    "size_bytes": 145000,
+                    "render_ms": 342,
+                    "pages": 2,
+                    "validation_passed": True,
+                    "download_name": "John_Doe_CV.pdf",
+                }
+            },
+        },
+    }
+    mock_session["metadata"]["pdf_refs"]["cv_ref_existing"]["cv_sig"] = _cv_sig(mock_session["cv_data"])
+
+    from function_app import _tool_generate_cv_from_session
+
+    with patch("src.orchestrator.tools.cv_pdf_tools.CVBlobStore.download_bytes") as mock_download, patch.dict(
+        os.environ, {"CV_EXECUTION_LATCH": "1"}
+    ):
+        mock_download.return_value = b"%PDF-1.4 cached cv"
+        status, payload, content_type = _tool_generate_cv_from_session(
+            session_id="test-session-download-only",
+            language="en",
+            client_context={"pdf_action": "download_only"},
+            session=mock_session,
+        )
+
+    assert status == 200
+    assert content_type == "application/pdf"
+    assert isinstance(payload, dict)
+    assert isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
+
+
 def test_latch_disabled_allows_regeneration():
     """Test that disabling latch allows re-generation even with existing PDF."""
 

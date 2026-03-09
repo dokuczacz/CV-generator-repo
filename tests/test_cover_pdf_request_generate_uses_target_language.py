@@ -113,3 +113,67 @@ def test_download_pdf_returns_wizard_response_shape() -> None:
     assert isinstance(resp, tuple)
     assert len(resp) == 2
     assert isinstance(resp[1], dict)
+
+
+def test_download_pdf_does_not_fallback_to_generate_when_download_only_fails() -> None:
+    calls: list[str] = []
+
+    def _wizard_set_stage(meta: dict, stage: str) -> dict:
+        out = dict(meta)
+        out["wizard_stage"] = stage
+        return out
+
+    def _persist(cv: dict, meta: dict):
+        return cv, meta
+
+    def _wizard_resp(*, assistant_text: str, meta_out: dict, cv_out: dict, **_kwargs):
+        return 200, {"assistant_text": assistant_text, "metadata": meta_out, "cv_data": cv_out, "success": True}
+
+    def _tool_generate_cv_from_session(*, session_id: str, language: str | None, client_context, session):
+        mode = str((client_context or {}).get("pdf_action") or "")
+        calls.append(mode)
+        if mode == "download_only":
+            return 400, {
+                "error": "bulk_translation_disabled_in_unified",
+                "message": "Download in unified mode does not run bulk translation.",
+            }, "application/json"
+        return 200, {"pdf_bytes": b"%PDF-1.4", "pdf_metadata": {"pdf_ref": "abc"}}, "application/pdf"
+
+    deps = CoverPdfActionDeps(
+        wizard_set_stage=_wizard_set_stage,
+        persist=_persist,
+        wizard_resp=_wizard_resp,
+        cv_enable_cover_letter=False,
+        log_info=lambda *_args, **_kwargs: None,
+        openai_enabled=lambda: True,
+        generate_cover_letter_block_via_openai=lambda **_kwargs: (False, None, "unused"),
+        friendly_schema_error_message=lambda msg: str(msg),
+        validate_cover_letter_block=lambda **_kwargs: (True, []),
+        build_cover_letter_render_payload=lambda **_kwargs: {},
+        render_cover_letter_pdf=lambda *_args, **_kwargs: b"",
+        upload_pdf_blob_for_session=lambda **_kwargs: None,
+        compute_cover_letter_download_name=lambda **_kwargs: "cover.pdf",
+        now_iso=lambda: "2026-03-02T15:00:00Z",
+        wizard_get_stage=lambda m: str(m.get("wizard_stage") or ""),
+        tool_generate_cv_from_session=_tool_generate_cv_from_session,
+        session_get=lambda _sid: {"cv_data": {}, "metadata": {"target_language": "de", "language": "en"}},
+        sync_job_data_table_history=lambda **kwargs: dict(kwargs.get("meta") or {}),
+    )
+
+    handled, _cv_out, _meta_out, resp = handle_cover_pdf_actions(
+        aid="DOWNLOAD_PDF",
+        user_action_payload=None,
+        cv_data={},
+        meta2={"target_language": "de", "language": "en", "wizard_stage": "review_final"},
+        session_id="sess-3",
+        trace_id="trace-3",
+        stage_now="review_final",
+        language="en",
+        client_context=None,
+        deps=deps,
+    )
+
+    assert handled is True
+    assert isinstance(resp, tuple)
+    assert resp[0] == 200
+    assert calls == ["download_only"]
