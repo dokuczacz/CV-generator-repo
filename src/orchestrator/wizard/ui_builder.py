@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Callable
 
@@ -21,7 +22,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
     # Stage is stored in metadata under wizard_stage; stage argument is used as fallback only.
     if isinstance(meta, dict) and meta.get("flow_mode") == "wizard":
         wizard_stage = str(meta.get("wizard_stage") or stage or "").strip().lower()
-        wizard_total = 7 if deps.cv_enable_cover_letter else 6
+        wizard_total = 8 if deps.cv_enable_cover_letter else 6
 
         def _join_lines(items: list[dict], *, key: str, prefix: str = "") -> str:
             lines = []
@@ -169,8 +170,6 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             }
 
         if wizard_stage == "education_edit_json":
-            import json
-
             edu = cv_data.get("education", []) if isinstance(cv_data, dict) else []
             edu_list = edu if isinstance(edu, list) else []
             return {
@@ -192,10 +191,12 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else None
             job_summary = deps.format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
             has_text = bool(str(meta.get("job_posting_text") or "").strip())
-            interests = str(cv_data.get("interests") or "").strip() if isinstance(cv_data, dict) else ""
+            job_url = str(meta.get("job_posting_url") or "").strip()
+            target_lang = str(meta.get("target_language") or meta.get("language") or cv_data.get("language") or "en").strip().lower() or "en"
             actions: list[dict] = []
             if has_text:
                 actions.append({"id": "JOB_OFFER_CONTINUE", "label": "Akceptuj", "style": "primary"})
+                actions.append({"id": "JOB_OFFER_PASTE", "label": "Zmień link / treść oferty", "style": "secondary"})
                 actions.append({"id": "JOB_OFFER_SKIP", "label": "Skip", "style": "secondary"})
             else:
                 actions.append({"id": "JOB_OFFER_PASTE", "label": "Wklej link / treść oferty", "style": "primary"})
@@ -204,12 +205,25 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             fields: list[dict] = [
                 {
                     "key": "job_posting_text_present",
-                    "label": "Job offer text",
-                    "value": "(present)" if has_text else "(none)",
+                    "label": "Job offer source",
+                    "value": job_url if job_url else ("(pasted text)" if has_text else "(none)"),
                 }
             ]
             if job_summary:
                 fields.append({"key": "job_reference", "label": "Job summary", "value": job_summary})
+            fields.append(
+                {
+                    "key": "target_language",
+                    "label": "Language of final CV",
+                    "value": target_lang,
+                    "type": "select",
+                    "editable": True,
+                    "options": [
+                        {"value": "en", "label": "English"},
+                        {"value": "de", "label": "Deutsch"},
+                    ],
+                }
+            )
 
             return {
                 "kind": "review_form",
@@ -249,6 +263,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
 
         if wizard_stage == "job_posting_paste":
             analyze_label = "Analyze" if deps.openai_enabled() else "Save"
+            target_lang = str(meta.get("target_language") or meta.get("language") or cv_data.get("language") or "en").strip().lower() or "en"
             return {
                 "kind": "edit_form",
                 "stage": "JOB_POSTING",
@@ -260,7 +275,18 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                         "label": "Job offer text (or paste a URL)",
                         "value": str(meta.get("job_posting_text") or ""),
                         "type": "textarea",
-                    }
+                    },
+                    {
+                        "key": "target_language",
+                        "label": "Language of final CV",
+                        "value": target_lang,
+                        "type": "select",
+                        "editable": True,
+                        "options": [
+                            {"value": "en", "label": "English"},
+                            {"value": "de", "label": "Deutsch"},
+                        ],
+                    },
                 ],
                 "actions": [
                     {"id": "JOB_OFFER_CANCEL", "label": "Cancel", "style": "secondary"},
@@ -406,6 +432,9 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 isinstance(meta.get("job_reference"), dict) or str(meta.get("job_posting_text") or "").strip()
             )
             allow_run = bool(has_job_context and deps.openai_enabled())
+            current_target_lang = str(meta.get("target_language") or meta.get("language") or "en").strip().lower()
+            if current_target_lang not in ("en", "de"):
+                current_target_lang = "en"
             actions = [
                 {"id": "WORK_NOTES_CANCEL", "label": "Cancel", "style": "secondary"},
                 {"id": "WORK_NOTES_SAVE", "label": "Save notes", "style": "secondary"},
@@ -421,6 +450,16 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "title": f"Stage 4/{wizard_total} — Work experience",
                 "text": "List concrete achievements or outcomes you want reflected in the CV (numbers, scope, impact). One line per achievement is enough.",
                 "fields": [
+                    {
+                        "key": "target_language",
+                        "label": "Target CV language",
+                        "value": current_target_lang,
+                        "type": "select",
+                        "options": [
+                            {"value": "en", "label": "English"},
+                            {"value": "de", "label": "Deutsch"},
+                        ],
+                    },
                     {
                         "key": "work_tailoring_notes",
                         "label": "Tailoring notes",
@@ -473,10 +512,11 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             proposal = meta.get("work_experience_proposal") if isinstance(meta.get("work_experience_proposal"), list) else []
             proposal_notes = str((proposal_block or {}).get("notes") or "").strip()
             lines: list[str] = []
+            proposal_role_lines: list[str] = []
             if isinstance(proposal_block, dict):
                 # Display structured roles
                 roles = proposal_block.get("roles") if isinstance(proposal_block.get("roles"), list) else []
-                for r in roles[:5]:  # Max 5 roles
+                for idx, r in enumerate(roles[:5]):  # Max 5 roles
                     if not isinstance(r, dict):
                         continue
                     title = str(r.get("title") or "").strip()
@@ -496,6 +536,8 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                     bullet_lines = "\n".join([f"- {str(b).strip()}" for b in bullets if str(b).strip()][:8])
                     if header or bullet_lines:
                         lines.append(f"**{header}**\n{bullet_lines}".strip() if header else bullet_lines)
+                    role_head = " | ".join([p for p in [title, company, date_range] if p]) or f"Role #{idx+1}"
+                    proposal_role_lines.append(f"{idx+1}. {role_head}")
             else:
                 for item in proposal[:10]:
                     if not isinstance(item, dict):
@@ -509,13 +551,19 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "kind": "review_form",
                 "stage": "WORK_EXPERIENCE",
                 "title": f"Stage 4/{wizard_total} — Work experience (proposal)",
-                "text": "Review the proposed tailored bullets. Accept to apply to your CV.",
+                "text": "Review the proposed tailored bullets. You can reorder roles before accepting.",
                 "fields": [
+                    {
+                        "key": "proposal_roles_preview",
+                        "label": f"Proposed roles order ({len(proposal_role_lines)} total)",
+                        "value": "\n".join(proposal_role_lines) if proposal_role_lines else "(no roles in proposal)",
+                    },
                     {"key": "proposal", "label": "Proposed work experience", "value": "\n\n".join(lines) if lines else "(no proposal)"},
                     {"key": "notes", "label": "Notes", "value": proposal_notes or "(no notes)"},
                 ],
                 "actions": [
                     {"id": "WORK_TAILOR_ACCEPT", "label": "Accept proposal", "style": "primary"},
+                    {"id": "WORK_TAILOR_RUN", "label": "Regenerate proposal", "style": "secondary"},
                     {"id": "WORK_TAILOR_FEEDBACK", "label": "Improve (feedback)", "style": "secondary"},
                     {"id": "WORK_ADD_TAILORING_NOTES", "label": "Edit notes", "style": "secondary"},
                     {"id": "WORK_TAILOR_SKIP", "label": "Skip tailoring", "style": "secondary"},
@@ -864,6 +912,8 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
         if wizard_stage == "review_final":
             pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
             has_pdf = bool(meta.get("pdf_generated") or (isinstance(pdf_refs, dict) and len(pdf_refs) > 0))
+            execution_strategy = str(meta.get("execution_strategy") or "").strip().lower()
+            unified_mode = execution_strategy == "unified"
             actions: list[dict] = []
             
             # Button order (as per plan):
@@ -879,17 +929,18 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                     "style": "primary",
                 })
             else:
-                # After PDF generation: show download first, then optional regenerate
+                # After PDF generation: in unified mode, hide regenerate to avoid extra paid calls.
                 actions.append({
                     "id": "DOWNLOAD_PDF",
                     "label": "Pobierz CV",
                     "style": "primary",
                 })
-                actions.append({
-                    "id": "REQUEST_GENERATE_PDF",
-                    "label": "Regenerate PDF",
-                    "style": "secondary",
-                })
+                if not unified_mode:
+                    actions.append({
+                        "id": "REQUEST_GENERATE_PDF",
+                        "label": "Regenerate PDF",
+                        "style": "secondary",
+                    })
 
             return {
                 "kind": "review_form",
@@ -903,7 +954,17 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
 
         if wizard_stage == "cover_letter_review":
             cl = meta.get("cover_letter_block") if isinstance(meta.get("cover_letter_block"), dict) else None
+            execution_strategy = str(meta.get("execution_strategy") or "").strip().lower()
+            unified_mode = execution_strategy == "unified"
             feedback_value = str(meta.get("cover_letter_feedback") or "").strip()
+            cover_notes_value = str(meta.get("cover_letter_tailoring_notes") or "").strip()
+            cover_notes_variant = str(meta.get("cover_letter_notes_variant") or "work_plus_cover").strip().lower()
+            if cover_notes_variant not in ("work_plus_cover", "cover_only"):
+                cover_notes_variant = "work_plus_cover"
+            pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
+            has_cv_pdf = bool(meta.get("pdf_generated") or (isinstance(pdf_refs, dict) and len(pdf_refs) > 0))
+            cover_pdf_ref = str(meta.get("cover_letter_pdf_ref") or "").strip()
+            has_cover_pdf = bool(cover_pdf_ref and isinstance(pdf_refs.get(cover_pdf_ref), dict))
             fields_list: list[dict] = []
             if isinstance(cl, dict):
                 fields_list.append({"key": "opening", "label": "Opening", "value": str(cl.get("opening_paragraph") or "").strip()})
@@ -914,6 +975,29 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                     fields_list.append({"key": "core2", "label": "Core paragraph 2", "value": str(core[1] or "").strip()})
                 fields_list.append({"key": "closing", "label": "Closing", "value": str(cl.get("closing_paragraph") or "").strip()})
                 fields_list.append({"key": "signoff", "label": "Sign-off", "value": str(cl.get("signoff") or "").strip()})
+            fields_list.append(
+                {
+                    "key": "cover_letter_notes_variant",
+                    "label": "Cover-letter notes variant",
+                    "value": cover_notes_variant,
+                    "type": "select",
+                    "editable": True,
+                    "options": [
+                        {"value": "work_plus_cover", "label": "Work tailoring notes + cover letter notes"},
+                        {"value": "cover_only", "label": "Only cover letter notes"},
+                    ],
+                }
+            )
+            fields_list.append(
+                {
+                    "key": "cover_letter_tailoring_notes",
+                    "label": "Cover letter tailoring notes",
+                    "value": cover_notes_value,
+                    "type": "textarea",
+                    "editable": True,
+                    "placeholder": "Np. Podkresl praktyczne doswiadczenie z Komax i skroc opening do 2 zdan.",
+                }
+            )
             fields_list.append(
                 {
                     "key": "cover_letter_feedback",
@@ -927,30 +1011,130 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             if not fields_list:
                 fields_list = [{"key": "cover_letter", "label": "Cover letter", "value": "(not generated)"}]
 
+            actions: list[dict] = []
+            if has_cv_pdf:
+                actions.append({"id": "DOWNLOAD_PDF", "label": "Pobierz CV", "style": "secondary"})
+            else:
+                actions.append(
+                    {
+                        "id": "REQUEST_GENERATE_PDF",
+                        "label": "Generate CV PDF",
+                        "style": "secondary",
+                    }
+                )
+
+            if not unified_mode:
+                actions.append(
+                    {
+                        "id": "COVER_LETTER_PREVIEW",
+                        "label": "Regenerate Cover Letter draft" if isinstance(cl, dict) else "Generate Cover Letter draft",
+                        "style": "secondary",
+                    }
+                )
+                actions.append(
+                    {
+                        "id": "COVER_LETTER_FEEDBACK_EDIT",
+                        "label": "Edit draft instructions",
+                        "style": "secondary",
+                    }
+                )
+
+            actions.append({"id": "JOB_DATA_TABLE_OPEN", "label": "Dane oferty (tabela)", "style": "secondary"})
+            actions.append(
+                {
+                    "id": "COVER_LETTER_GENERATE",
+                    "label": "Regenerate final Cover Letter PDF" if has_cover_pdf else "Generate final Cover Letter PDF",
+                    "style": "primary",
+                }
+            )
+
             return {
                 "kind": "review_form",
                 "stage": "COVER_LETTER",
                 "title": f"Stage 7/{wizard_total} — Cover Letter (optional)",
                 "text": "Review your cover letter and generate/download final PDF.",
                 "fields": fields_list,
-                "actions": [
-                    {"id": "DOWNLOAD_PDF", "label": "Pobierz CV", "style": "secondary"},
+                "actions": actions,
+                "disable_free_text": True,
+            }
+
+        if wizard_stage == "job_data_table":
+            history = meta.get("job_data_table_history") if isinstance(meta.get("job_data_table_history"), list) else []
+            rows: list[dict] = []
+            for item in history:
+                if not isinstance(item, dict):
+                    continue
+                rows.append(
                     {
-                        "id": "COVER_LETTER_GENERATE",
-                        "label": "Generate final Cover Letter PDF",
-                        "style": "primary",
-                    },
+                        "position_name": str(item.get("position_name") or "").strip(),
+                        "company_name": str(item.get("company_name") or "").strip(),
+                        "company_address": str(item.get("company_address") or "").strip(),
+                        "company_email": str(item.get("company_email") or "").strip(),
+                        "company_phone": str(item.get("company_phone") or "").strip(),
+                        "cv_generated_at": str(item.get("cv_generated_at") or "").strip(),
+                        "updated_at": str(item.get("updated_at") or "").strip(),
+                    }
+                )
+            if not rows:
+                rows = [
+                    {
+                        "position_name": "",
+                        "company_name": "",
+                        "company_address": "",
+                        "company_email": "",
+                        "company_phone": "",
+                        "cv_generated_at": "",
+                        "updated_at": "",
+                    }
+                ]
+
+            return {
+                "kind": "review_form",
+                "stage": "JOB_DATA_TABLE",
+                "title": f"Stage 8/{wizard_total} — Job data table (optional)",
+                "text": "Historical user table (auto-appended per CV). This step is outside the main CV generation flow.",
+                "fields": [
+                    {
+                        "key": "job_data_table_json",
+                        "label": "Tabela danych firm",
+                        "value": json.dumps(rows, ensure_ascii=False),
+                    }
+                ],
+                "actions": [
+                    {"id": "JOB_DATA_TABLE_BACK", "label": "Back to Cover Letter", "style": "primary"},
                 ],
                 "disable_free_text": True,
             }
 
         if wizard_stage == "cover_letter_feedback_edit":
+            cover_notes_value = str(meta.get("cover_letter_tailoring_notes") or "")
+            cover_notes_variant = str(meta.get("cover_letter_notes_variant") or "work_plus_cover").strip().lower()
+            if cover_notes_variant not in ("work_plus_cover", "cover_only"):
+                cover_notes_variant = "work_plus_cover"
             return {
                 "kind": "edit_form",
                 "stage": "COVER_LETTER",
                 "title": f"Stage 7/{wizard_total} — Cover Letter feedback",
                 "text": "Add short feedback, then improve the draft.",
                 "fields": [
+                    {
+                        "key": "cover_letter_notes_variant",
+                        "label": "Cover-letter notes variant",
+                        "value": cover_notes_variant,
+                        "type": "select",
+                        "editable": True,
+                        "options": [
+                            {"value": "work_plus_cover", "label": "Work tailoring notes + cover letter notes"},
+                            {"value": "cover_only", "label": "Only cover letter notes"},
+                        ],
+                    },
+                    {
+                        "key": "cover_letter_tailoring_notes",
+                        "label": "Cover letter tailoring notes",
+                        "value": cover_notes_value,
+                        "type": "textarea",
+                        "placeholder": "Np. Uwzglednij konkretne osiagniecia i skroc closing.",
+                    },
                     {
                         "key": "cover_letter_feedback",
                         "label": "Feedback",

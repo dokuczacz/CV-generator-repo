@@ -14,7 +14,8 @@ export interface UIActionField {
   key: string;
   label: string;
   value: string;
-  type?: 'text' | 'textarea';
+  type?: 'text' | 'textarea' | 'select';
+  options?: Array<{ value: string; label: string }>;
   editable?: boolean;
   placeholder?: string;
 }
@@ -53,3 +54,5 @@ export type StepperItem = {
   label: string;
   targetWizardStage: string;
 };
+
+export type ExecutionStrategy = 'auto' | 'separate' | 'unified';

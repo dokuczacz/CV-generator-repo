@@ -9,12 +9,13 @@ import { UploadStartSection } from './cv/sections/UploadStartSection';
 import { WizardStageSection } from './cv/sections/WizardStageSection';
 import { CvPreviewSection } from './cv/sections/CvPreviewSection';
 import { useProcessCvClient } from './cv/hooks/useProcessCvClient';
-import type { CVSessionPreview, Message, StageUpdate, StepperItem, UIAction, WizardStep } from './cv/types';
+import type { CVSessionPreview, ExecutionStrategy, Message, StageUpdate, StepperItem, UIAction, WizardStep } from './cv/types';
 
 const SESSION_ID_KEY = 'cvgen:session_id';
 const JOB_URL_KEY = 'cvgen:job_posting_url';
 const JOB_TEXT_KEY = 'cvgen:job_posting_text';
 const FAST_PROFILE_KEY = 'cvgen:fast_path_profile';
+const EXECUTION_STRATEGY_KEY = 'cvgen:execution_strategy';
 const SESSION_TIMESTAMP_KEY = 'cvgen:session_timestamp';
 const DEBUG_STAGE = process.env.NEXT_PUBLIC_CV_DEBUG_STAGE === '1';
 
@@ -33,6 +34,7 @@ export default function CVGenerator() {
   const [jobPostingUrl, setJobPostingUrl] = useState<string | null>(null);
   const [jobPostingText, setJobPostingText] = useState<string | null>(null);
   const [fastPathProfile, setFastPathProfile] = useState(true);
+  const [executionStrategy, setExecutionStrategy] = useState<ExecutionStrategy>('auto');
   const [uiAction, setUiAction] = useState<UIAction | null>(null);
   const [resumeFailed, setResumeFailed] = useState<string | null>(null);
   const [latestCvPdfBase64, setLatestCvPdfBase64] = useState<string | null>(null);
@@ -72,6 +74,19 @@ export default function CVGenerator() {
     }
   };
 
+  const isMissingSessionResponse = (result: any): boolean => {
+    if (!result || typeof result !== 'object') return false;
+    if (result.session_id === null) return true;
+
+    const responseText = typeof result.response === 'string' ? result.response : '';
+    if (/session\s+is\s+no\s+longer\s+available|session\s+not\s+found\s+or\s+expired/i.test(responseText)) {
+      return true;
+    }
+
+    const runSteps = Array.isArray(result.run_summary?.steps) ? result.run_summary.steps : [];
+    return runSteps.some((s: any) => String(s?.step || '').toLowerCase() === 'session_missing');
+  };
+
   const resumeStoredSession = useCallback(
     async (storedSessionId: string, opts?: { silent?: boolean }) => {
       const silent = !!opts?.silent;
@@ -91,6 +106,16 @@ export default function CVGenerator() {
         }
 
         const result = response.json;
+        if (isMissingSessionResponse(result)) {
+          clearLocalSession();
+          const missingMsg = '⚠️ Poprzednia sesja wygasła lub nie istnieje. Wgraj CV ponownie, aby rozpocząć nową sesję.';
+          if (!silent) {
+            setMessages((prev) => [...prev, { role: 'assistant', content: missingMsg }]);
+          }
+          setResumeFailed(missingMsg);
+          return;
+        }
+
         if (Array.isArray(result.stage_updates)) {
           setStageUpdates(result.stage_updates as StageUpdate[]);
         }
@@ -132,6 +157,7 @@ export default function CVGenerator() {
     try {
       const storedSessionId = window.localStorage.getItem(SESSION_ID_KEY);
       const storedFastProfile = window.localStorage.getItem(FAST_PROFILE_KEY);
+      const storedExecutionStrategy = window.localStorage.getItem(EXECUTION_STRATEGY_KEY);
 
       if (storedSessionId) {
         setSessionId(storedSessionId);
@@ -147,6 +173,9 @@ export default function CVGenerator() {
       }
       if (storedFastProfile === '0' || storedFastProfile === '1') {
         setFastPathProfile(storedFastProfile === '1');
+      }
+      if (storedExecutionStrategy === 'auto' || storedExecutionStrategy === 'separate' || storedExecutionStrategy === 'unified') {
+        setExecutionStrategy(storedExecutionStrategy);
       }
     } catch {
       // ignore
@@ -165,7 +194,19 @@ export default function CVGenerator() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) {
-        throw new Error(String(json?.error || `HTTP ${res.status}`));
+        const apiError = String(json?.error || `HTTP ${res.status}`);
+        if (/session\s+not\s+found|expired/i.test(apiError)) {
+          clearLocalSession();
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: '⚠️ Bieżąca sesja wygasła lub została usunięta. Wgraj CV ponownie, aby kontynuować.',
+            },
+          ]);
+          return;
+        }
+        throw new Error(apiError);
       }
       setCvPreview({ cv_data: json.cv_data, metadata: json.metadata, readiness: json.readiness });
     } catch (e) {
@@ -298,7 +339,17 @@ export default function CVGenerator() {
         session_id: sessionId,
         job_posting_url: jobPostingUrl,
         job_posting_text: jobPostingText,
-        user_action: actionPayload ? { id: actionId, payload: actionPayload } : { id: actionId },
+        user_action: {
+          id: actionId,
+          payload: {
+            ...(actionPayload || {}),
+            execution_strategy: executionStrategy,
+          },
+        },
+        client_context: {
+          fast_path_profile: fastPathProfile,
+          execution_strategy: executionStrategy,
+        },
       };
 
       const response = await postProcessCv(requestBody);
@@ -324,6 +375,18 @@ export default function CVGenerator() {
       }
 
       const result = response.json;
+      if (isMissingSessionResponse(result)) {
+        clearLocalSession();
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '⚠️ Sesja wygasła lub została usunięta. Wgraj CV ponownie, aby kontynuować.',
+          },
+        ]);
+        return;
+      }
+
       if (Array.isArray(result.stage_updates)) {
         setStageUpdates(result.stage_updates as StageUpdate[]);
       } else {
@@ -508,6 +571,7 @@ export default function CVGenerator() {
           job_posting_text: jobPostingText || '',
           client_context: {
             fast_path_profile: fastPathProfile,
+            execution_strategy: executionStrategy,
           },
         });
 
@@ -545,7 +609,7 @@ export default function CVGenerator() {
         setIsLoading(false);
       }
     },
-    [isLoading, sessionId, jobPostingUrl, jobPostingText, fastPathProfile, postProcessCv]
+    [isLoading, sessionId, jobPostingUrl, jobPostingText, fastPathProfile, executionStrategy, postProcessCv]
   );
 
   useEffect(() => {
@@ -591,12 +655,19 @@ export default function CVGenerator() {
     generate_confirm: 6,
     cover_letter_review: 7,
     cover_letter_feedback_edit: 7,
+    job_data_table: 8,
   } as const;
 
   const wizardStep = (() => {
     const fromStage = lastStage ? (stageToStep as Record<string, number>)[String(lastStage).toLowerCase()] : undefined;
-    if (fromStage) return { current: fromStage, total: 7 };
+    if (fromStage) return { current: fromStage, total: 8 };
     return null;
+  })();
+
+  const maxUnlockedStep = (() => {
+    const current = wizardStep?.current || 0;
+    const fromMeta = Number(((cvPreview?.metadata as Record<string, unknown> | undefined)?.wizard_max_major as number | undefined) || 0);
+    return Math.max(current, Number.isFinite(fromMeta) ? fromMeta : 0);
   })();
 
   const latestCvPdfDownloadName = (() => {
@@ -624,6 +695,7 @@ export default function CVGenerator() {
     { n: 5, label: 'Skills', targetWizardStage: 'it_ai_skills' },
     { n: 6, label: 'Generuj CV', targetWizardStage: 'review_final' },
     { n: 7, label: 'Cover Letter', targetWizardStage: 'cover_letter_review' },
+    { n: 8, label: 'Dane oferty', targetWizardStage: 'job_data_table' },
   ] as const;
 
   const currentStepLabel = wizardStep
@@ -688,6 +760,15 @@ export default function CVGenerator() {
     }
   };
 
+  const handleExecutionStrategyChange = (value: ExecutionStrategy) => {
+    setExecutionStrategy(value);
+    try {
+      window.localStorage.setItem(EXECUTION_STRATEGY_KEY, value);
+    } catch {
+      // ignore
+    }
+  };
+
   const handleJobPostingTextChange = (value: string) => {
     setJobPostingText(value);
   };
@@ -723,6 +804,7 @@ export default function CVGenerator() {
           cvFile={cvFile}
           isLoading={isLoading}
           fastPathProfile={fastPathProfile}
+          executionStrategy={executionStrategy}
           jobPostingUrl={jobPostingUrl}
           jobPostingText={jobPostingText}
           onUseLoadedCv={() => {
@@ -731,6 +813,7 @@ export default function CVGenerator() {
           }}
           onChangeFile={() => setCvFile(null)}
           onFastPathChange={handleFastPathChange}
+          onExecutionStrategyChange={handleExecutionStrategyChange}
           onJobUrlChange={handleJobUrlChange}
           onJobPostingTextChange={handleJobPostingTextChange}
           onNewSession={handleHardNewSession}
@@ -743,11 +826,14 @@ export default function CVGenerator() {
         lastStage={lastStage}
         lastTraceId={lastTraceId}
         wizardStep={wizardStep as WizardStep}
+        maxUnlockedStep={maxUnlockedStep}
         stepper={stepper as readonly StepperItem[] | null}
         isLoading={isLoading}
+        executionStrategy={executionStrategy}
         stageUpdates={stageUpdates}
         messages={messages}
         onSendUserAction={handleSendUserAction}
+        onExecutionStrategyChange={handleExecutionStrategyChange}
         onStartFresh={handleNewVersion}
         onChangeFile={handleHardNewSession}
       />

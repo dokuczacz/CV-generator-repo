@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
-import type { Message, StepperItem, UIAction, StageUpdate, WizardStep } from '../types';
+import type { ExecutionStrategy, Message, StepperItem, UIAction, StageUpdate, WizardStep } from '../types';
 
 interface WizardStageSectionProps {
   sessionId: string | null;
@@ -10,11 +10,14 @@ interface WizardStageSectionProps {
   lastStage: string | null;
   lastTraceId: string | null;
   wizardStep: WizardStep;
+  maxUnlockedStep: number;
   stepper: readonly StepperItem[] | null;
   isLoading: boolean;
+  executionStrategy: ExecutionStrategy;
   stageUpdates: StageUpdate[];
   messages: Message[];
   onSendUserAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
+  onExecutionStrategyChange: (value: ExecutionStrategy) => void;
   onStartFresh: () => void;
   onChangeFile: () => void;
 }
@@ -25,11 +28,14 @@ export function WizardStageSection({
   lastStage,
   lastTraceId,
   wizardStep,
+  maxUnlockedStep,
   stepper,
   isLoading,
+  executionStrategy,
   stageUpdates,
   messages,
   onSendUserAction,
+  onExecutionStrategyChange,
   onStartFresh,
   onChangeFile,
 }: WizardStageSectionProps) {
@@ -42,6 +48,20 @@ export function WizardStageSection({
             <div>
               <div className="text-sm font-semibold text-slate-900">Krok</div>
               <div className="mt-1 text-xs text-slate-600">Aktualny etap kreatora i akcje.</div>
+              <div className="mt-2">
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Tryb wykonania</label>
+                <select
+                  value={executionStrategy}
+                  onChange={(e) => onExecutionStrategyChange(e.target.value as ExecutionStrategy)}
+                  disabled={isLoading}
+                  data-testid="execution-strategy-select-session"
+                  className="w-full max-w-[240px] text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="separate">Separate</option>
+                  <option value="unified">Unified (1 prompt)</option>
+                </select>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="secondary" onClick={onStartFresh} title="Zaczyna nową sesję dla tego samego CV">
@@ -79,17 +99,21 @@ export function WizardStageSection({
                   <div className="mt-2 space-y-2">
                     {stepper.map((s) => {
                       const isCurrent = wizardStep?.current === s.n;
-                      const isPast = (wizardStep?.current || 0) > s.n;
-                      const isFuture = (wizardStep?.current || 0) < s.n;
+                      const isUnlocked = s.targetWizardStage === 'job_data_table' || s.n <= (maxUnlockedStep || 0);
+                      const isFutureLocked = !isUnlocked;
                       return (
                         <Button
                           key={s.n}
                           size="sm"
                           variant={isCurrent ? 'primary' : 'secondary'}
-                          disabled={!isPast}
-                          title={isFuture ? 'Dokończ bieżący krok, aby przejść dalej.' : isCurrent ? 'Bieżący krok' : 'Wróć do kroku'}
+                          disabled={!isUnlocked}
+                          title={isFutureLocked ? 'Krok nie jest jeszcze odblokowany.' : isCurrent ? 'Bieżący krok' : 'Przejdź do kroku'}
                           onClick={() => {
-                            if (!isPast) return;
+                            if (!isUnlocked) return;
+                            if (s.targetWizardStage === 'job_data_table') {
+                              void onSendUserAction('JOB_DATA_TABLE_OPEN');
+                              return;
+                            }
                             void onSendUserAction('WIZARD_GOTO_STAGE', { target_stage: s.targetWizardStage });
                           }}
                           className="w-full justify-start"
@@ -99,7 +123,7 @@ export function WizardStageSection({
                       );
                     })}
                   </div>
-                  <div className="mt-2 text-[11px] text-slate-600">Możesz wracać do poprzednich kroków. Przyszłe kroki są zablokowane.</div>
+                  <div className="mt-2 text-[11px] text-slate-600">Możesz wracać do odblokowanych kroków. „Dane oferty” jest dostępne niezależnie.</div>
                 </div>
               ) : null}
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from src import product_config
+from src.orchestrator.wizard.execution_strategy import resolve_execution_strategy
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,19 @@ def handle_cover_pdf_actions(
     client_context: dict | None,
     deps: CoverPdfActionDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    def _notes_variant(payload: dict | None, meta: dict) -> str:
+        payload_val = str((payload or {}).get("cover_letter_notes_variant") or "").strip().lower()
+        meta_val = str(meta.get("cover_letter_notes_variant") or "").strip().lower()
+        candidate = payload_val or meta_val or "work_plus_cover"
+        if candidate not in {"work_plus_cover", "cover_only"}:
+            candidate = "work_plus_cover"
+        return candidate
+
+    def _is_unified_mode(payload: dict | None, meta: dict) -> bool:
+        experiment_mode = str(product_config.EXPERIMENT_MODE or "baseline").strip().lower()
+        execution_strategy, _strategy_source = resolve_execution_strategy(payload=payload, meta=meta)
+        return execution_strategy == "unified" or experiment_mode == "variant_unified"
+
     if aid == "WORK_CONFIRM_STAGE":
         meta2 = deps.wizard_set_stage(meta2, "further_experience")
         cv_data, meta2 = deps.persist(cv_data, meta2)
@@ -52,6 +69,12 @@ def handle_cover_pdf_actions(
         )
     
     if aid == "COVER_LETTER_PREVIEW":
+        payload = user_action_payload if isinstance(user_action_payload, dict) else {}
+        force_regenerate = bool(payload.get("force_regenerate")) if isinstance(payload, dict) else False
+        if isinstance(payload, dict) and "cover_letter_tailoring_notes" in payload:
+            meta2["cover_letter_tailoring_notes"] = str(payload.get("cover_letter_tailoring_notes") or "").strip()[:2000]
+        notes_variant = _notes_variant(payload, meta2)
+        meta2["cover_letter_notes_variant"] = notes_variant
         target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
         allowed_langs = {"en", "de"}
         try:
@@ -73,6 +96,77 @@ def handle_cover_pdf_actions(
         if not deps.openai_enabled():
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(assistant_text="AI is not configured. Cover letter generation is unavailable.", meta_out=meta2, cv_out=cv_data)
+
+        # In unified mode, never regenerate CL via OpenAI from this button.
+        unified_mode = _is_unified_mode(payload, meta2)
+        execution_strategy, _strategy_source = resolve_execution_strategy(payload=payload, meta=meta2)
+        meta2["execution_strategy"] = execution_strategy
+        if unified_mode:
+            if isinstance(meta2.get("cover_letter_block"), dict):
+                meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text="Unified mode: reusing cover letter draft from unified output.",
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="Unified mode: cover letter draft is unavailable. Re-run Work tailoring in unified mode.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+
+        # Inline shortcut: reuse unified cover letter draft generated in work stage.
+        experiment_mode = str(product_config.EXPERIMENT_MODE or "baseline").strip().lower()
+        if (
+            (execution_strategy == "unified" or experiment_mode == "variant_unified")
+            and not force_regenerate
+            and isinstance(meta2.get("cover_letter_block"), dict)
+            and str(meta2.get("cover_letter_input_sig") or "").strip()
+        ):
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="Loaded cover letter draft from unified experiment output.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+
+        input_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "target_lang": target_lang,
+                    "job_sig": str(meta2.get("current_job_sig") or ""),
+                    "notes_variant": notes_variant,
+                    "feedback": str(meta2.get("cover_letter_feedback") or ""),
+                    "work_tailoring_notes": str(meta2.get("work_tailoring_notes") or "") if notes_variant != "cover_only" else "",
+                    "cover_letter_tailoring_notes": str(meta2.get("cover_letter_tailoring_notes") or ""),
+                    "skills_ranking_notes": str(meta2.get("skills_ranking_notes") or ""),
+                    "cv_sig": hashlib.sha256(
+                        json.dumps(cv_data or {}, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="ignore")
+                    ).hexdigest(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8", errors="ignore")
+        ).hexdigest()
+        if (
+            not force_regenerate
+            and isinstance(meta2.get("cover_letter_block"), dict)
+            and str(meta2.get("cover_letter_input_sig") or "") == input_fingerprint
+        ):
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text=(
+                    "Loaded existing cover letter draft for unchanged CV/job context. "
+                    "Edit context or use force regenerate to create a new draft."
+                ),
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
     
         ok_cl, cl_block, err_cl = deps.generate_cover_letter_block_via_openai(
             cv_data=cv_data,
@@ -88,6 +182,7 @@ def handle_cover_pdf_actions(
             return True, cv_data, meta2, deps.wizard_resp(assistant_text=deps.friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
     
         meta2["cover_letter_block"] = cl_block
+        meta2["cover_letter_input_sig"] = input_fingerprint
         meta2.pop("cover_letter_error", None)
         meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
         cv_data, meta2 = deps.persist(cv_data, meta2)
@@ -149,6 +244,10 @@ def handle_cover_pdf_actions(
 
     if aid == "COVER_LETTER_FEEDBACK_APPLY":
         payload = user_action_payload if isinstance(user_action_payload, dict) else {}
+        if isinstance(payload, dict) and "cover_letter_tailoring_notes" in payload:
+            meta2["cover_letter_tailoring_notes"] = str(payload.get("cover_letter_tailoring_notes") or "").strip()[:2000]
+        notes_variant = _notes_variant(payload, meta2)
+        meta2["cover_letter_notes_variant"] = notes_variant
         feedback_text = ""
         if isinstance(payload, dict):
             feedback_text = str(payload.get("cover_letter_feedback") or "").strip()
@@ -159,11 +258,22 @@ def handle_cover_pdf_actions(
         meta2["cover_letter_feedback"] = feedback_text
         meta2["cover_letter_feedback_applied_at"] = deps.now_iso()
 
+        if _is_unified_mode(payload, meta2):
+            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="Unified mode: draft improvement via separate OpenAI call is disabled.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+
         capsule_context = {
             "job_reference": meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else {},
             "cover_letter_block": meta2.get("cover_letter_block") if isinstance(meta2.get("cover_letter_block"), dict) else {},
             "work_experience": cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else [],
-            "work_tailoring_notes": str(meta2.get("work_tailoring_notes") or "")[:2000],
+            "work_tailoring_notes": str(meta2.get("work_tailoring_notes") or "")[:2000] if notes_variant != "cover_only" else "",
+            "cover_letter_tailoring_notes": str(meta2.get("cover_letter_tailoring_notes") or "")[:2000],
+            "cover_letter_notes_variant": notes_variant,
             "feedback": feedback_text,
         }
         meta2["cover_letter_feedback_capsule"] = capsule_context
@@ -217,11 +327,17 @@ def handle_cover_pdf_actions(
     
     if aid == "COVER_LETTER_GENERATE":
         # Always regenerate cover letter from current CV state.
+        payload = user_action_payload if isinstance(user_action_payload, dict) else {}
+        force_regenerate = bool(payload.get("force_regenerate")) if isinstance(payload, dict) else False
+        if isinstance(payload, dict) and "cover_letter_tailoring_notes" in payload:
+            meta2["cover_letter_tailoring_notes"] = str(payload.get("cover_letter_tailoring_notes") or "").strip()[:2000]
+        notes_variant = _notes_variant(payload, meta2)
+        meta2["cover_letter_notes_variant"] = notes_variant
         target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
         allowed_langs = {"en", "de"}
         try:
             deps.log_info(
-                "COVER_ACTION aid=%s session=%s stage_before=%s target_lang=%s mode=always_regenerate",
+                "COVER_ACTION aid=%s session=%s stage_before=%s target_lang=%s mode=reuse_or_regenerate",
                 aid,
                 session_id,
                 stage_now,
@@ -245,20 +361,76 @@ def handle_cover_pdf_actions(
             meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(assistant_text="AI is not configured. Cover letter generation is unavailable.", meta_out=meta2, cv_out=cv_data)
-    
-        ok_cl, cl_block, err_cl = deps.generate_cover_letter_block_via_openai(
-            cv_data=cv_data,
-            meta=meta2,
-            trace_id=trace_id,
-            session_id=session_id,
-            target_language=target_lang,
-        )
-        if not ok_cl or not isinstance(cl_block, dict):
-            meta2["cover_letter_error"] = str(err_cl)[:400]
+
+        unified_mode = _is_unified_mode(payload, meta2)
+
+        input_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "target_lang": target_lang,
+                    "job_sig": str(meta2.get("current_job_sig") or ""),
+                    "notes_variant": notes_variant,
+                    "feedback": str(meta2.get("cover_letter_feedback") or ""),
+                    "work_tailoring_notes": str(meta2.get("work_tailoring_notes") or "") if notes_variant != "cover_only" else "",
+                    "cover_letter_tailoring_notes": str(meta2.get("cover_letter_tailoring_notes") or ""),
+                    "skills_ranking_notes": str(meta2.get("skills_ranking_notes") or ""),
+                    "cv_sig": hashlib.sha256(
+                        json.dumps(cv_data or {}, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="ignore")
+                    ).hexdigest(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8", errors="ignore")
+        ).hexdigest()
+
+        existing_pdf_ref = str(meta2.get("cover_letter_pdf_ref") or "")
+        pdf_refs = meta2.get("pdf_refs") if isinstance(meta2.get("pdf_refs"), dict) else {}
+        if (
+            not force_regenerate
+            and existing_pdf_ref
+            and isinstance(pdf_refs.get(existing_pdf_ref), dict)
+            and str(meta2.get("cover_letter_pdf_input_sig") or "") == input_fingerprint
+        ):
             meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
             cv_data, meta2 = deps.persist(cv_data, meta2)
-            return True, cv_data, meta2, deps.wizard_resp(assistant_text=deps.friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
-        cl = cl_block
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="Using existing cover letter PDF artifact for unchanged CV/job context.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+    
+        if unified_mode:
+            if isinstance(meta2.get("cover_letter_block"), dict):
+                cl = dict(meta2.get("cover_letter_block") or {})
+            else:
+                meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text="Unified mode: missing cover letter draft. Re-run Work tailoring in unified mode.",
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
+        elif (
+            not force_regenerate
+            and isinstance(meta2.get("cover_letter_block"), dict)
+            and str(meta2.get("cover_letter_input_sig") or "") == input_fingerprint
+        ):
+            cl = dict(meta2.get("cover_letter_block") or {})
+        else:
+            ok_cl, cl_block, err_cl = deps.generate_cover_letter_block_via_openai(
+                cv_data=cv_data,
+                meta=meta2,
+                trace_id=trace_id,
+                session_id=session_id,
+                target_language=target_lang,
+            )
+            if not ok_cl or not isinstance(cl_block, dict):
+                meta2["cover_letter_error"] = str(err_cl)[:400]
+                meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(assistant_text=deps.friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
+            cl = cl_block
+            meta2["cover_letter_input_sig"] = input_fingerprint
         meta2["cover_letter_block"] = cl
     
         ok2, errs2 = deps.validate_cover_letter_block(block=cl, cv_data=cv_data)
@@ -301,6 +473,7 @@ def handle_cover_pdf_actions(
         }
         meta2["pdf_refs"] = pdf_refs
         meta2["cover_letter_pdf_ref"] = pdf_ref
+        meta2["cover_letter_pdf_input_sig"] = input_fingerprint
         meta2.pop("cover_letter_error", None)
         meta2.pop("cover_letter_error_details", None)
         try:
@@ -330,10 +503,12 @@ def handle_cover_pdf_actions(
     
     if aid == "DOWNLOAD_PDF":
         # Download previously generated PDF (no regeneration)
+        cc_download = dict(client_context) if isinstance(client_context, dict) else {}
+        cc_download["pdf_action"] = "download_only"
         status, payload, content_type = deps.tool_generate_cv_from_session(
             session_id=session_id,
             language=language,
-            client_context=client_context,
+            client_context=cc_download,
             session=deps.session_get(session_id) or {"cv_data": cv_data, "metadata": meta2},
         )
         
@@ -369,11 +544,13 @@ def handle_cover_pdf_actions(
     if aid == "REQUEST_GENERATE_PDF":
         # Generate on first click (avoid the "clicked but nothing happened" UX).
         effective_language = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower() or "en"
+        unified_mode = _is_unified_mode(user_action_payload if isinstance(user_action_payload, dict) else None, meta2)
     
         def _try_generate(*, force_regen: bool) -> tuple[int, dict | bytes, str]:
             cc = client_context if isinstance(client_context, dict) else {}
+            cc = dict(cc or {})
+            cc["pdf_action"] = "generate"
             if force_regen:
-                cc = dict(cc or {})
                 cc["force_pdf_regen"] = True
             return deps.tool_generate_cv_from_session(
                 session_id=session_id,
@@ -391,7 +568,7 @@ def handle_cover_pdf_actions(
             and isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
         ):
             pdf_bytes = bytes(payload["pdf_bytes"])
-        else:
+        elif not unified_mode:
             # If we hit the execution latch but couldn't download cached bytes, force a regeneration.
             status, payload, content_type = _try_generate(force_regen=True)
             if (
@@ -440,11 +617,14 @@ def handle_cover_pdf_actions(
         # IMPORTANT: _tool_generate_cv_from_session persists pdf_refs/pdf_generated.
         # Reload latest metadata and only adjust wizard_stage, to avoid overwriting new PDF metadata with stale meta2.
         if pdf_bytes is None:
-            # PDF generation failed - shouldn't reach here (should return error above), but safety check.
+            # Unified mode skips force-regenerate retry; surface the first-attempt error.
+            err = None
+            if isinstance(payload, dict):
+                err = payload.get("error") or payload.get("message") or payload.get("details")
             meta2 = deps.wizard_set_stage(meta2, "review_final")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(
-                assistant_text="PDF generation did not return valid bytes.",
+                assistant_text=str(err or "PDF generation did not return valid bytes.")[:400],
                 meta_out=meta2,
                 cv_out=cv_data,
             )

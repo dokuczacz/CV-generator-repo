@@ -2,6 +2,7 @@ import type { HTMLAttributes, InputHTMLAttributes } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import type { ExecutionStrategy } from '../types';
 
 interface UploadStartSectionProps {
   resumeFailed: string | null;
@@ -11,11 +12,13 @@ interface UploadStartSectionProps {
   cvFile: File | null;
   isLoading: boolean;
   fastPathProfile: boolean;
+  executionStrategy: ExecutionStrategy;
   jobPostingUrl: string | null;
   jobPostingText: string | null;
   onUseLoadedCv: () => void;
   onChangeFile: () => void;
   onFastPathChange: (value: boolean) => void;
+  onExecutionStrategyChange: (value: ExecutionStrategy) => void;
   onJobUrlChange: (value: string) => void;
   onJobPostingTextChange: (value: string) => void;
   onNewSession: () => void;
@@ -29,11 +32,13 @@ export function UploadStartSection({
   cvFile,
   isLoading,
   fastPathProfile,
+  executionStrategy,
   jobPostingUrl,
   jobPostingText,
   onUseLoadedCv,
   onChangeFile,
   onFastPathChange,
+  onExecutionStrategyChange,
   onJobUrlChange,
   onJobPostingTextChange,
   onNewSession,
@@ -87,6 +92,22 @@ export function UploadStartSection({
             </div>
           </div>
         ) : null}
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1">Tryb budowania CV/CL</label>
+          <select
+            value={executionStrategy}
+            onChange={(e) => onExecutionStrategyChange(e.target.value as ExecutionStrategy)}
+            disabled={isLoading}
+            data-testid="execution-strategy-select"
+            className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
+          >
+            <option value="auto">Auto (domyślny flow)</option>
+            <option value="separate">Separate (Work + Skills + CL osobno)</option>
+            <option value="unified">Unified (1 prompt: CV + CL)</option>
+          </select>
+          <div className="mt-1 text-[11px] text-slate-600">Wysyłane do backendu jako `execution_strategy` przy akcjach wizarda.</div>
+        </div>
 
         <div>
           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">

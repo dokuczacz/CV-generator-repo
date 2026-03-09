@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from src.blob_store import BlobPointer, CVBlobStore
 from src.normalize import normalize_cv_data
+from src.orchestrator.wizard.execution_strategy import resolve_execution_strategy
 from src.render import count_pdf_pages, render_pdf
 from src.schema_validator import validate_canonical_schema
 from src.validator import validate_cv
@@ -351,11 +352,23 @@ def tool_generate_cv_from_session(
     target_lang = str(meta.get("target_language") or meta.get("language") or lang).strip().lower()
     source_lang = str(meta.get("source_language") or cv_data.get("language") or "en").strip().lower()
     explicit_target_lang_selected = bool(meta.get("target_language"))
+    execution_strategy, _execution_strategy_source = resolve_execution_strategy(
+        payload=client_context if isinstance(client_context, dict) else None,
+        meta=meta if isinstance(meta, dict) else None,
+    )
+    unified_mode = execution_strategy == "unified"
+    pdf_action = str((client_context or {}).get("pdf_action") or "generate").strip().lower()
     needs_bulk_translation = (
         (source_lang != target_lang or explicit_target_lang_selected)
         and str(meta.get("bulk_translated_to") or "") != target_lang
     )
     if needs_bulk_translation:
+        if unified_mode and pdf_action == "download_only":
+            return 400, {
+                "error": "bulk_translation_disabled_in_unified",
+                "message": "Download in unified mode does not run bulk translation. Click Generate PDF for the selected target language first.",
+                "target_language": target_lang,
+            }, "application/json"
         if not _openai_enabled():
             return 400, {
                 "error": "bulk_translation_required",

@@ -56,7 +56,12 @@ from src.session_store import CVSessionStore
 from src.structured_response import parse_structured_response, format_user_message_for_ui
 from src.validator import validate_cv
 from src.cv_fsm import CVStage, SessionState, ValidationState, resolve_stage, detect_edit_intent
-from src.job_reference import get_job_reference_response_format, parse_job_reference, format_job_reference_for_display
+from src.job_reference import (
+    get_job_reference_response_format,
+    parse_job_reference,
+    format_job_reference_for_display,
+    format_job_reference_for_prompt,
+)
 from src.work_experience_proposal import get_work_experience_bullets_proposal_response_format, parse_work_experience_bullets_proposal
 from src.cover_letter_proposal import get_cover_letter_proposal_response_format, parse_cover_letter_proposal
 from src.skills_unified_proposal import (
@@ -94,7 +99,10 @@ _SCHEMA_REPAIR_HINTS_BY_STAGE: dict[str, str] = {
     "job_posting": (
         "Return ONLY valid JSON (no markdown/code fences, no prose). "
         "Do not include literal newline characters inside JSON strings; use spaces instead. "
-        "Keep strings concise."
+        "Keep strings concise. "
+        "Use exact keys only: role_title, company, location, seniority, employment_type, "
+        "responsibilities, must_haves, nice_to_haves, tools_tech, keywords. "
+        "Keep list fields as arrays of short strings (deduplicated)."
     ),
     "work_experience": (
         "Return ONLY valid JSON (no markdown/code fences, no prose). "
@@ -1549,9 +1557,9 @@ def _build_job_data_table_row(*, cv_data: dict, meta: dict, session_id: str | No
     row = {
         "position_name": str(job_ref.get("role_title") or first_role.get("title") or first_role.get("position") or "").strip()[:300],
         "company_name": str(job_ref.get("company") or first_role.get("company") or first_role.get("employer") or "").strip()[:300],
-        "company_address": str(job_ref.get("location") or first_role.get("location") or first_role.get("city") or "").strip()[:300],
-        "company_email": str(meta.get("company_email") or "").strip()[:180],
-        "company_phone": str(meta.get("company_phone") or "").strip()[:80],
+        "company_address": str(job_ref.get("company_address") or job_ref.get("location") or first_role.get("location") or first_role.get("city") or "").strip()[:300],
+        "company_email": str(meta.get("company_email") or job_ref.get("company_email") or "").strip()[:180],
+        "company_phone": str(meta.get("company_phone") or job_ref.get("company_phone") or "").strip()[:80],
         "cv_generated_at": cv_generated_at[:40],
         "session_id": str(session_id or "")[:80],
         "updated_at": row_updated_at,
@@ -1839,8 +1847,75 @@ def _update_section_hashes_in_metadata(session_id: str, cv_data: dict) -> None:
     metadata["section_hashes_updated_at"] = _now_iso()
     
     # Update metadata only (cv_data already updated by caller)
-    store.update_session(session_id, cv_data, metadata)
+    _safe_update_session(store, session_id, cv_data, metadata)
     logging.debug(f"Updated section hashes for session {session_id}")
+
+
+def _safe_update_session(
+    store: Any,
+    session_id: str,
+    cv_data: dict,
+    metadata: dict,
+) -> bool:
+    """Persist session with blob-offload and shrink fallback.
+
+    Some call paths still perform direct metadata/session writes outside the wizard
+    `_persist` helper. This utility keeps those writes resilient to Azure Table
+    Storage size limits by trying blob offload first and retrying once with
+    shrunk metadata on known entity/property size errors.
+    """
+
+    persisted = False
+    persist_error: Exception | None = None
+    meta_out = dict(metadata or {}) if isinstance(metadata, dict) else {}
+    cv_out = dict(cv_data or {}) if isinstance(cv_data, dict) else {}
+
+    update_with_offload = getattr(store, "update_session_with_blob_offload", None)
+    if callable(update_with_offload):
+        try:
+            persisted = bool(update_with_offload(session_id, cv_out, meta_out))
+        except Exception as exc:
+            persist_error = exc
+
+    if not persisted:
+        try:
+            persisted = bool(store.update_session(session_id, cv_out, meta_out))
+        except Exception as exc:
+            persist_error = exc
+
+    should_shrink_retry = False
+    if not persisted and persist_error is not None:
+        err_text = str(persist_error)
+        should_shrink_retry = any(
+            marker in err_text
+            for marker in (
+                "PropertyValueTooLarge",
+                "EntityTooLarge",
+                "larger than the maximum allowed size",
+            )
+        )
+
+    if should_shrink_retry:
+        shrunk_meta = _shrink_metadata_for_table(meta_out)
+        if callable(update_with_offload):
+            try:
+                persisted = bool(update_with_offload(session_id, cv_out, shrunk_meta))
+            except Exception as exc:
+                persist_error = exc
+        if not persisted:
+            try:
+                persisted = bool(store.update_session(session_id, cv_out, shrunk_meta))
+            except Exception as exc:
+                persist_error = exc
+
+    if not persisted:
+        logging.error(
+            "SAFE_PERSIST_FAILED session=%s err=%s",
+            session_id,
+            str(persist_error)[:400] if persist_error else "unknown",
+        )
+
+    return bool(persisted)
 
 
 def _normalize_stage_env_key(stage: str) -> str:
@@ -2240,6 +2315,113 @@ def _shrink_metadata_for_table(metadata: dict) -> dict:
                 e2["assistant_text"] = e2["assistant_text"][:800]
             trimmed.append(e2)
         meta["event_log"] = trimmed
+
+    # Bound long proposal artifacts kept in metadata (large nested role+bullet payloads).
+    for proposal_key in ("work_experience_proposal_block", "skills_proposal_block"):
+        proposal_val = meta.get(proposal_key)
+        if isinstance(proposal_val, dict):
+            proposal2 = dict(proposal_val)
+            notes_val = proposal2.get("notes")
+            if isinstance(notes_val, str) and len(notes_val) > 1200:
+                proposal2["notes"] = notes_val[:1200]
+            roles_val = proposal2.get("roles")
+            if isinstance(roles_val, list) and len(roles_val) > 6:
+                proposal2["roles"] = roles_val[:6]
+            meta[proposal_key] = proposal2
+
+    # Keep job table history bounded in table metadata (full history lives in profile/artifacts).
+    jh = meta.get("job_data_table_history")
+    if isinstance(jh, list):
+        compact_rows: list[dict] = []
+        for row in jh[-80:]:
+            if not isinstance(row, dict):
+                continue
+            compact_rows.append(
+                {
+                    "position_name": str(row.get("position_name") or "")[:140],
+                    "company_name": str(row.get("company_name") or "")[:140],
+                    "company_address": str(row.get("company_address") or "")[:220],
+                    "company_email": str(row.get("company_email") or "")[:140],
+                    "company_phone": str(row.get("company_phone") or "")[:60],
+                    "cv_generated_at": str(row.get("cv_generated_at") or "")[:40],
+                    "updated_at": str(row.get("updated_at") or "")[:40],
+                }
+            )
+        meta["job_data_table_history"] = compact_rows
+
+    # Keep pdf_refs compact and bounded for Azure Table entity size constraints.
+    pdf_refs = meta.get("pdf_refs")
+    if isinstance(pdf_refs, dict):
+        entries = [(k, v) for k, v in pdf_refs.items() if isinstance(v, dict)]
+        entries.sort(key=lambda x: str(x[1].get("created_at") or ""), reverse=True)
+        compact_refs: dict[str, dict] = {}
+        for key, value in entries[:60]:
+            compact_refs[str(key)] = {
+                "container": value.get("container"),
+                "blob_name": value.get("blob_name"),
+                "created_at": value.get("created_at"),
+                "sha256": value.get("sha256"),
+                "size_bytes": value.get("size_bytes"),
+                "render_ms": value.get("render_ms"),
+                "pages": value.get("pages"),
+                "download_name": value.get("download_name"),
+                "target_language": value.get("target_language"),
+                "job_sig": value.get("job_sig"),
+            }
+        meta["pdf_refs"] = compact_refs
+
+    # Hard byte budget for metadata_json (entity-wide size protection).
+    # Azure Table entity max is 1MB, but we keep metadata far below to leave room for cv_data and columns.
+    def _meta_size_bytes(obj: dict) -> int:
+        try:
+            return len(json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        except Exception:
+            return 0
+
+    max_meta_bytes = 45000
+    if _meta_size_bytes(meta) > max_meta_bytes:
+        # First pass: reduce verbose arrays/strings further.
+        if isinstance(meta.get("event_log"), list):
+            out_events: list[dict] = []
+            for e in list(meta.get("event_log") or [])[-4:]:
+                if not isinstance(e, dict):
+                    continue
+                e2 = dict(e)
+                for tk in ("text", "assistant_text", "preview"):
+                    if isinstance(e2.get(tk), str) and len(e2[tk]) > 200:
+                        e2[tk] = e2[tk][:200]
+                out_events.append(e2)
+            meta["event_log"] = out_events
+
+        if isinstance(meta.get("job_data_table_history"), list):
+            hist = [r for r in meta.get("job_data_table_history") if isinstance(r, dict)]
+            meta["job_data_table_history"] = hist[-30:]
+            meta["job_data_table_history_count"] = len(hist)
+
+        if isinstance(meta.get("pdf_refs"), dict):
+            refs_items = list(meta.get("pdf_refs", {}).items())
+            refs_items.sort(key=lambda x: str((x[1] or {}).get("created_at") or ""), reverse=True)
+            reduced_refs = dict(refs_items[:20])
+            meta["pdf_refs"] = reduced_refs
+            meta["pdf_refs_count"] = len(refs_items)
+
+    if _meta_size_bytes(meta) > max_meta_bytes:
+        # Final guard: keep only latest PDF ref + summary counters.
+        if isinstance(meta.get("pdf_refs"), dict) and meta.get("pdf_refs"):
+            refs_items = list(meta.get("pdf_refs", {}).items())
+            refs_items.sort(key=lambda x: str((x[1] or {}).get("created_at") or ""), reverse=True)
+            meta["pdf_refs"] = dict(refs_items[:1])
+        for k in (
+            "work_experience_proposal_block",
+            "skills_proposal_block",
+            "docx_prefill_unconfirmed",
+            "event_log",
+        ):
+            meta.pop(k, None)
+        jpt2 = meta.get("job_posting_text")
+        if isinstance(jpt2, str) and len(jpt2) > 500:
+            meta["job_posting_text"] = jpt2[:500]
+
     return meta
 
 
@@ -2447,6 +2629,87 @@ def _build_cover_letter_render_payload(*, cv_data: dict, meta: dict, block: dict
     }
 
 
+def _bulk_translation_response_format(*, mode: str = "storage") -> dict:
+    """Return bulk translation response format schema.
+
+    `storage` mirrors the canonical backend contract persisted in sessions.
+    `render` excludes fields that are currently not rendered by the PDF template.
+    """
+    render_props = {
+        "work_experience": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "employer": {"type": "string"},
+                    "title": {"type": "string"},
+                    "date_range": {"type": "string"},
+                    "location": {"type": "string"},
+                    "bullets": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["employer", "title", "date_range", "location", "bullets"],
+            },
+        },
+        "education": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "title": {"type": "string"},
+                    "institution": {"type": "string"},
+                    "date_range": {"type": "string"},
+                    "specialization": {"type": "string"},
+                    "details": {"type": "array", "items": {"type": "string"}},
+                    "location": {"type": "string"},
+                },
+                "required": ["title", "institution", "date_range", "specialization", "details", "location"],
+            },
+        },
+        "it_ai_skills": {"type": "array", "items": {"type": "string"}},
+        "technical_operational_skills": {"type": "array", "items": {"type": "string"}},
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "interests": {"type": "string"},
+        "references": {"type": "string"},
+    }
+
+    selected_mode = str(mode or "storage").strip().lower()
+    props = dict(render_props)
+    if selected_mode == "storage":
+        props = {
+            "profile": {"type": "string"},
+            "further_experience": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "title": {"type": "string"},
+                        "organization": {"type": "string"},
+                        "date_range": {"type": "string"},
+                        "location": {"type": "string"},
+                        "bullets": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["title", "organization", "date_range", "location", "bullets"],
+                },
+            },
+            **render_props,
+        }
+
+    return {
+        "type": "json_schema",
+        "name": "bulk_translation",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": props,
+            "required": list(props.keys()),
+        },
+    }
+
+
 def _run_bulk_translation(
     *,
     cv_data: dict,
@@ -2465,80 +2728,7 @@ def _run_bulk_translation(
         user_text=json.dumps(cv_payload, ensure_ascii=False),
         trace_id=trace_id,
         session_id=session_id,
-        response_format={
-            "type": "json_schema",
-            "name": "bulk_translation",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "profile": {"type": "string"},
-                    "work_experience": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "employer": {"type": "string"},
-                                "title": {"type": "string"},
-                                "date_range": {"type": "string"},
-                                "location": {"type": "string"},
-                                "bullets": {"type": "array", "items": {"type": "string"}},
-                            },
-                            "required": ["employer", "title", "date_range", "location", "bullets"],
-                        },
-                    },
-                    "further_experience": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "title": {"type": "string"},
-                                "organization": {"type": "string"},
-                                "date_range": {"type": "string"},
-                                "location": {"type": "string"},
-                                "bullets": {"type": "array", "items": {"type": "string"}},
-                            },
-                            "required": ["title", "organization", "date_range", "location", "bullets"],
-                        },
-                    },
-                    "education": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "title": {"type": "string"},
-                                "institution": {"type": "string"},
-                                "date_range": {"type": "string"},
-                                "specialization": {"type": "string"},
-                                "details": {"type": "array", "items": {"type": "string"}},
-                                "location": {"type": "string"},
-                            },
-                            "required": ["title", "institution", "date_range", "specialization", "details", "location"],
-                        },
-                    },
-                    "it_ai_skills": {"type": "array", "items": {"type": "string"}},
-                    "technical_operational_skills": {"type": "array", "items": {"type": "string"}},
-                    "languages": {"type": "array", "items": {"type": "string"}},
-                    "interests": {"type": "string"},
-                    "references": {"type": "string"},
-                },
-                "required": [
-                    "profile",
-                    "work_experience",
-                    "further_experience",
-                    "education",
-                    "it_ai_skills",
-                    "technical_operational_skills",
-                    "languages",
-                    "interests",
-                    "references",
-                ],
-            },
-        },
+        response_format=_bulk_translation_response_format(mode="storage"),
         max_output_tokens=product_config.CV_BULK_TRANSLATION_MAX_OUTPUT_TOKENS,
         stage="bulk_translation",
     )
@@ -2615,7 +2805,7 @@ def _generate_cover_letter_block_via_openai(
     target_language: str,
 ) -> tuple[bool, dict | None, str]:
     job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else None
-    job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+    job_summary = format_job_reference_for_prompt(job_ref) if isinstance(job_ref, dict) else ""
     job_text = str(meta.get("job_posting_text") or "")
 
     # If we only have raw job text, extract a compact job summary first (best-effort).
@@ -2635,7 +2825,7 @@ def _generate_cover_letter_block_via_openai(
                 meta["job_reference"] = jr.dict()
                 meta["job_reference_status"] = "ok"
                 job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else None
-                job_summary = format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+                job_summary = format_job_reference_for_prompt(job_ref) if isinstance(job_ref, dict) else ""
             except Exception as e:
                 meta["job_reference_error"] = str(e)[:400]
                 meta["job_reference_status"] = "parse_failed"
@@ -2683,8 +2873,26 @@ def _generate_cover_letter_block_via_openai(
 
     style_profile = _infer_style_profile(cv_data)
     feedback_text = str(meta.get("cover_letter_feedback") or "").strip()[:2000]
+    cover_letter_tailoring_notes = str(meta.get("cover_letter_tailoring_notes") or "").strip()[:2000]
+    cover_letter_notes_variant = str(meta.get("cover_letter_notes_variant") or "work_plus_cover").strip().lower()
+    if cover_letter_notes_variant not in ("work_plus_cover", "cover_only"):
+        cover_letter_notes_variant = "work_plus_cover"
+    work_tailoring_notes = str(meta.get("work_tailoring_notes") or "").strip()[:2000]
+    work_tailoring_notes_effective = work_tailoring_notes if cover_letter_notes_variant != "cover_only" else ""
+    skills_ranking_notes = str(meta.get("skills_ranking_notes") or "").strip()[:2000]
     capsule_context = meta.get("cover_letter_feedback_capsule") if isinstance(meta.get("cover_letter_feedback_capsule"), dict) else {}
-    capsule_json = json.dumps(capsule_context, ensure_ascii=False)[:4000] if capsule_context else ""
+    effective_capsule_context = dict(capsule_context or {})
+    if work_tailoring_notes_effective and "work_tailoring_notes" not in effective_capsule_context:
+        effective_capsule_context["work_tailoring_notes"] = work_tailoring_notes_effective
+    if cover_letter_tailoring_notes and "cover_letter_tailoring_notes" not in effective_capsule_context:
+        effective_capsule_context["cover_letter_tailoring_notes"] = cover_letter_tailoring_notes
+    if "cover_letter_notes_variant" not in effective_capsule_context:
+        effective_capsule_context["cover_letter_notes_variant"] = cover_letter_notes_variant
+    if skills_ranking_notes and "skills_ranking_notes" not in effective_capsule_context:
+        effective_capsule_context["skills_ranking_notes"] = skills_ranking_notes
+    if feedback_text and "feedback" not in effective_capsule_context:
+        effective_capsule_context["feedback"] = feedback_text
+    capsule_json = json.dumps(effective_capsule_context, ensure_ascii=False)[:4000] if effective_capsule_context else ""
 
     user_text = (
         f"[JOB_REFERENCE]\n{_sanitize_for_prompt(job_summary)}\n\n"
@@ -2692,6 +2900,8 @@ def _generate_cover_letter_block_via_openai(
         f"[ROLE_CHECKLIST]\n{_sanitize_for_prompt(role_checklist_text)}\n\n"
         f"[WORK_EXPERIENCE]\n{roles_text}\n\n"
         f"[SKILLS]\n{_sanitize_for_prompt(skills_text[:2000])}\n"
+        f"\n[WORK_TAILORING_NOTES]\n{_sanitize_for_prompt(work_tailoring_notes_effective)}\n"
+        f"\n[COVER_LETTER_TAILORING_NOTES]\n{_sanitize_for_prompt(cover_letter_tailoring_notes)}\n"
         f"\n[COVER_LETTER_FEEDBACK]\n{_sanitize_for_prompt(feedback_text)}\n"
         f"\n[CAPSULE_CONTEXT]\n{_sanitize_for_prompt(capsule_json)}\n"
     )
@@ -2699,7 +2909,8 @@ def _generate_cover_letter_block_via_openai(
         str(cv_data.get("profile") or ""),
         str(roles_text or ""),
         str(skills_text or ""),
-        str(meta.get("work_tailoring_notes") or ""),
+        str(work_tailoring_notes_effective or ""),
+        str(cover_letter_tailoring_notes or ""),
     ])
 
     def _role_tokens(item: dict[str, str]) -> list[str]:
@@ -3131,7 +3342,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         meta = dict(sess.get("metadata") or {})
         if meta.get("language") != language:
             meta["language"] = language
-            store.update_session(session_id, (sess.get("cv_data") or {}), meta)
+            _safe_update_session(store, session_id, (sess.get("cv_data") or {}), meta)
             sess = _session_get(session_id) or sess
 
     meta = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else {}
@@ -3163,7 +3374,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             logging.info(f"Clearing pending_confirmation due to edit intent")
             meta = _clear_pending_confirmation(meta)
             try:
-                store.update_session(session_id, cv_data, meta)
+                _safe_update_session(store, session_id, cv_data, meta)
             except Exception as e:
                 logging.warning(f"Failed to clear pending_confirmation: {e}")
         
@@ -3311,12 +3522,20 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                     persist_error = exc
 
             # Last-chance shrink fallback for Azure Table 64KB limit issues.
-            if (
-                not persisted
-                and persist_error is not None
-                and "PropertyValueTooLarge" in str(persist_error)
-                and callable(update_with_offload)
-            ):
+            if not persisted and persist_error is not None and callable(update_with_offload):
+                err_text = str(persist_error)
+                should_shrink_retry = any(
+                    marker in err_text
+                    for marker in (
+                        "PropertyValueTooLarge",
+                        "EntityTooLarge",
+                        "larger than the maximum allowed size",
+                    )
+                )
+            else:
+                should_shrink_retry = False
+
+            if should_shrink_retry:
                 try:
                     shrunk_meta = _shrink_metadata_for_table(persisted_meta)
                     persisted = bool(update_with_offload(session_id, cv_out, shrunk_meta))
@@ -3363,6 +3582,10 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         try:
             if isinstance(client_context, dict) and "fast_path_profile" in client_context:
                 meta2["fast_path_profile"] = bool(client_context.get("fast_path_profile"))
+            if isinstance(client_context, dict) and "execution_strategy" in client_context:
+                raw_strategy = str(client_context.get("execution_strategy") or "").strip().lower()
+                if raw_strategy in {"auto", "separate", "unified"}:
+                    meta2["execution_strategy"] = raw_strategy
         except Exception:
             pass
         if job_posting_url:
@@ -3508,6 +3731,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 get_job_reference_response_format=get_job_reference_response_format,
                 parse_job_reference=parse_job_reference,
                 format_job_reference_for_display=format_job_reference_for_display,
+                format_job_reference_for_prompt=format_job_reference_for_prompt,
                 escape_user_input_for_prompt=_escape_user_input_for_prompt,
                 sanitize_for_prompt=_sanitize_for_prompt,
                 get_work_experience_bullets_proposal_response_format=get_work_experience_bullets_proposal_response_format,
@@ -3740,6 +3964,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 build_work_bullet_violation_payload=_build_work_bullet_violation_payload,
                 select_roles_by_violation_indices=_select_roles_by_violation_indices,
                 snapshot_session=_snapshot_session,
+                format_job_reference_for_prompt=format_job_reference_for_prompt,
             )
             handled, cv_data, meta2, work_tailor_ai_resp = handle_work_tailor_ai_actions(
                 aid=aid,
@@ -3808,6 +4033,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
                 dedupe_strings_case_insensitive=_dedupe_strings_case_insensitive,
                 find_work_bullet_hard_limit_violations=_find_work_bullet_hard_limit_violations,
                 snapshot_session=_snapshot_session,
+                format_job_reference_for_prompt=format_job_reference_for_prompt,
             )
             handled, cv_data, meta2, skills_resp = handle_skills_actions(
                 aid=aid,
@@ -3957,7 +4183,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             pending_confirmation = _get_pending_confirmation(meta)
             # Persist immediately; stage may not change on this turn, but the confirmation gate must.
             try:
-                store.update_session(session_id, cv_data, meta)
+                _safe_update_session(store, session_id, cv_data, meta)
                 sess = store.get_session(session_id) or sess
                 meta = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else meta
 
@@ -4058,7 +4284,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
     # Persist stage transitions (backend-owned).
     if next_stage != current_stage:
         meta = _set_stage_in_metadata(meta, next_stage)
-        store.update_session(session_id, cv_data, meta)
+        _safe_update_session(store, session_id, cv_data, meta)
         sess = store.get_session(session_id) or sess
         meta = sess.get("metadata") if isinstance(sess.get("metadata"), dict) else meta
         cv_data = sess.get("cv_data") if isinstance(sess.get("cv_data"), dict) else cv_data
@@ -4066,7 +4292,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
         # Stage didn't change; persist turn counter if still in REVIEW
         if next_stage == CVStage.REVIEW:
             try:
-                store.update_session(session_id, cv_data, meta)
+                _safe_update_session(store, session_id, cv_data, meta)
             except Exception:
                 pass
 
@@ -4115,7 +4341,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             # Mark that this specific confirmation was handled (entering CONFIRM stage is the confirmation).
             meta_conf = _clear_pending_confirmation(meta_conf)
             logging.info(f"Cleared pending_confirmation (kind={pc.get('kind')}) on CONFIRM stage entry")
-            store.update_session(session_id, cv_conf, meta_conf)
+            _safe_update_session(store, session_id, cv_conf, meta_conf)
             sess = store.get_session(session_id) or sess
         except Exception as e:
             logging.error(f"Failed to clear pending_confirmation on CONFIRM entry: {e}")
@@ -4127,7 +4353,7 @@ def _tool_process_cv_orchestrated(params: dict) -> tuple[int, dict]:
             # Force back to REVIEW if user did not explicitly request generation.
             next_stage = CVStage.REVIEW
             meta = _set_stage_in_metadata(meta, next_stage)
-            store.update_session(session_id, cv_data, meta)
+            _safe_update_session(store, session_id, cv_data, meta)
             stage = "review_session"
 
     readiness = _compute_readiness(sess.get("cv_data") or {}, sess.get("metadata") or {})
