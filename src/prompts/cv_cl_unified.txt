@@ -1,0 +1,103 @@
+This is a unified semantic generation task. 
+You must generate CV for Swiss market.
+You are given:
+1) Candidate CV blocks
+2) Job posting context
+3) Optional positioning_mode preference
+
+Core principles:
+- No fabrication.
+- Candidate evidence is the only source of truth for experience claims (E0 discipline).
+- Job posting is for alignment, ranking, and phrasing only; it is not evidence of candidate experience.
+- Cover-letter claims must be grounded in candidate CV evidence only.
+- Cross-output consistency is mandatory: professional identity, themes, and concrete claims must match across CV and cover letter.
+
+Narrative control:
+- First infer 3-5 anchor themes from the intersection of candidate evidence and job-posting priorities.
+- Use the same anchor themes consistently across both outputs.
+- Prefer repeating a few well-supported themes across CV and cover letter rather than expanding into loosely supported areas.
+- Do not let the cover letter present a different role identity than the CV.
+
+Evidence selection:
+- Rank candidate evidence by relevance and strength before generating output.
+- Prefer explicit, role-relevant, recent, and operational evidence.
+- Prefer evidence with concrete scope, context, or outcome over broad summaries.
+- Use weaker or indirect evidence only as secondary support.
+- If evidence supports contribution but not ownership, use cautious wording.
+
+Job-posting alignment constraints:
+- Use job-posting keywords only to prioritize, reorder, or lightly rephrase supported evidence.
+- Do not introduce unsupported tools, methods, frameworks, industries, or responsibilities.
+- Do not copy specialized posting terms unless explicitly present or clearly defensible from candidate evidence.
+- If a posting concept is only partially supported, generalize instead of mirroring the term.
+- Do not over-index on weak matches.
+- Keywords from posting may be used only when a defensible semantic equivalent exists in E0 evidence.
+
+CV writing rules:
+- Use concise, ATS-friendly language.
+- Write bullets in the format: action + scope/context + outcome.
+- One idea per bullet when possible.
+- Avoid repetitive bullets across roles.
+- Metrics are allowed only if explicit in candidate evidence.
+- Keep the strongest and most target-relevant evidence highest in the role narrative.
+
+Cover-letter writing rules:
+- Keep the letter evidence-grounded, specific, and role-focused.
+- Length constraints: 220-320 words.
+- Every concrete claim must be traceable to evidence that also appears in the generated CV.
+- The letter may synthesize evidence clusters, but may not add new project types, tools, ownership claims, seniority signals, or achievements.
+- Avoid generic enthusiasm. Emphasize fit through validated experience themes.
+- If a required area from the posting is not supported by evidence, do not claim it; either omit it or refer to adjacent supported experience in cautious language.
+
+Cross-output consistency checks:
+- Cover-letter concrete claims must be derivable from generated CV bullets.
+- If a claim cannot be defended from E0 evidence, remove it or generalize it.
+- The final CV and cover letter must reflect the same positioning and the same evidence priorities.
+
+Gap handling:
+- Do not compensate for missing evidence by speculative phrasing.
+- When a target requirement is unsupported, prioritize adjacent validated evidence rather than inferred equivalence.
+
+Language:
+- Output text in {target_language}.
+
+Formatting:
+- Output valid JSON only.
+- Keep all JSON string values single-line.
+- Do not use markdown.
+- Do not include commentary outside the JSON.
+
+Output schema (exact shape):
+{
+  "combined_cv": {
+    "roles": [
+      {
+        "title": "string",
+        "company": "string",
+        "date_range": "string",
+        "location": "string",
+        "bullets": ["string", "string", "string", "string"]
+      }
+    ],
+    "it_ai_skills": ["string"],
+    "technical_operational_skills": ["string"],
+    "notes": "string"
+  },
+  "cover_letter": {
+    "header": {
+      "sender_name": "",
+      "sender_email": "",
+      "sender_phone": "",
+      "sender_address": "",
+      "date": "",
+      "recipient_company": "",
+      "recipient_job_title": ""
+    },
+    "opening_paragraph": "string",
+    "core_paragraphs": ["string"],
+    "closing_paragraph": "string",
+    "signoff": "string",
+    "notes": "string"
+  },
+  "alignment_notes": "Anchor themes used: ...; Strongest evidence selected: ...; Unsupported job-posting concepts intentionally excluded: ...; Main positioning choice: ..."
+}

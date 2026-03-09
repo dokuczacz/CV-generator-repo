@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -37,8 +38,43 @@ def tool_extract_and_store_cv(
     except Exception as e:
         return 400, {"error": "Invalid base64 encoding", "details": str(e)}
 
+    source_docx_sha256 = hashlib.sha256(docx_bytes).hexdigest()
+
     store = deps.get_session_store()
     deps.cleanup_expired_once(store)
+
+    # Idempotent upload: if this exact DOCX was already processed, reuse that session.
+    try:
+        find_by_hash = getattr(store, "find_latest_session_by_source_docx_hash", None)
+        if callable(find_by_hash):
+            existing_session_id = find_by_hash(source_docx_sha256)
+            if existing_session_id:
+                get_hydrated = getattr(store, "get_session_with_blob_retrieval", None)
+                if callable(get_hydrated):
+                    existing_session = get_hydrated(existing_session_id)
+                else:
+                    existing_session = store.get_session(existing_session_id)
+                if isinstance(existing_session, dict):
+                    cv_existing = existing_session.get("cv_data") if isinstance(existing_session.get("cv_data"), dict) else {}
+                    summary_existing = {
+                        "has_photo": bool((cv_existing or {}).get("photo_url")),
+                        "fields_populated": [k for k, v in (cv_existing or {}).items() if v],
+                        "fields_empty": [k for k, v in (cv_existing or {}).items() if not v],
+                    }
+                    return 200, {
+                        "success": True,
+                        "session_id": existing_session_id,
+                        "reused_session": True,
+                        "reuse_reason": "same_docx_hash",
+                        "source_docx_sha256": source_docx_sha256,
+                        "cv_data_summary": summary_existing,
+                        "photo_extracted": bool((cv_existing or {}).get("photo_url")),
+                        "photo_storage": "reused",
+                        "photo_omitted_reason": None,
+                        "expires_at": existing_session.get("expires_at"),
+                    }
+    except Exception as exc:
+        logging.warning("DOCX hash reuse probe failed: %s", exc)
 
     extracted_photo = None
     photo_extracted = False
@@ -99,6 +135,7 @@ def tool_extract_and_store_cv(
             "education_confirmed": False,
             "confirmed_at": None,
         },
+        "source_docx_sha256": source_docx_sha256,
     }
     if job_posting_url:
         metadata["job_posting_url"] = job_posting_url
@@ -192,6 +229,8 @@ def tool_extract_and_store_cv(
     return 200, {
         "success": True,
         "session_id": session_id,
+        "reused_session": False,
+        "source_docx_sha256": source_docx_sha256,
         "cv_data_summary": summary,
         "photo_extracted": photo_extracted,
         "photo_storage": photo_storage,

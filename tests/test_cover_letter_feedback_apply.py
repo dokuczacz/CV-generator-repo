@@ -6,13 +6,23 @@ from src.orchestrator.wizard.action_dispatch_cover_pdf import CoverPdfActionDeps
 def test_cover_letter_feedback_apply_stores_capsule_and_updates_draft() -> None:
     cv_data = {
         "work_experience": [
-            {"title": "Operations Manager", "employer": "Company A", "date_range": "2020-01 - 2024-01", "bullets": ["Led operations"]}
+            {
+                "title": "Operations Manager",
+                "employer": "Company A",
+                "date_range": "2020-01 - 2024-01",
+                "bullets": ["Led operations"],
+            }
         ]
     }
     meta = {
         "wizard_stage": "cover_letter_review",
         "job_reference": {"title": "Ops"},
-        "cover_letter_block": {"opening_paragraph": "Old", "core_paragraphs": ["Old core"], "closing_paragraph": "Old close", "signoff": "Kind regards,\nJane"},
+        "cover_letter_block": {
+            "opening_paragraph": "Old",
+            "core_paragraphs": ["Old core"],
+            "closing_paragraph": "Old close",
+            "signoff": "Kind regards,\nJane",
+        },
         "work_tailoring_notes": "Focus on regulated manufacturing.",
     }
 
@@ -78,3 +88,170 @@ def test_cover_letter_feedback_apply_stores_capsule_and_updates_draft() -> None:
     assert isinstance(capsule, dict)
     assert capsule.get("feedback") == "Please mention all roles and tighten opening."
     assert isinstance(meta_out.get("cover_letter_block"), dict)
+
+
+def test_cover_letter_generate_path_computes_fingerprint_without_nameerror() -> None:
+    cv_data = {
+        "full_name": "Jane Doe",
+        "work_experience": [
+            {
+                "title": "Operations Manager",
+                "employer": "Company A",
+                "date_range": "2020-01 - 2024-01",
+                "bullets": ["Led operations"],
+            }
+        ],
+    }
+    meta = {
+        "wizard_stage": "cover_letter_review",
+        "language": "en",
+        "target_language": "de",
+        "current_job_sig": "job-sig-1",
+        "job_reference": {"title": "Ops"},
+        "job_posting_text": "Some valid job posting text",
+    }
+
+    def wizard_set_stage(m: dict, stage: str) -> dict:
+        out = dict(m)
+        out["wizard_stage"] = stage
+        return out
+
+    def persist(cv: dict, m: dict):
+        return cv, m
+
+    def wizard_resp(*, assistant_text: str, meta_out: dict, cv_out: dict, **_kwargs):
+        return 200, {"success": True, "response": assistant_text, "metadata": meta_out, "cv_data": cv_out}
+
+    def generate_cover_letter_block_via_openai(**_kwargs):
+        return True, {
+            "opening_paragraph": "Updated opening with Company A.",
+            "core_paragraphs": ["Updated core paragraph."],
+            "closing_paragraph": "Updated closing.",
+            "signoff": "Mit freundlichen Gruessen,\nJane Doe",
+        }, ""
+
+    deps = CoverPdfActionDeps(
+        wizard_set_stage=wizard_set_stage,
+        persist=persist,
+        wizard_resp=wizard_resp,
+        cv_enable_cover_letter=True,
+        log_info=lambda *_args, **_kwargs: None,
+        openai_enabled=lambda: True,
+        generate_cover_letter_block_via_openai=generate_cover_letter_block_via_openai,
+        friendly_schema_error_message=lambda msg: msg,
+        validate_cover_letter_block=lambda **_kwargs: (True, []),
+        build_cover_letter_render_payload=lambda **_kwargs: {},
+        render_cover_letter_pdf=lambda *_args, **_kwargs: b"%PDF-1.4 test",
+        upload_pdf_blob_for_session=lambda **_kwargs: {"container": "cv-pdfs", "blob_name": "sess/cover.pdf"},
+        compute_cover_letter_download_name=lambda **_kwargs: "cover-letter.pdf",
+        now_iso=lambda: "2026-03-06T10:30:00Z",
+        wizard_get_stage=lambda m: str(m.get("wizard_stage") or ""),
+        tool_generate_cv_from_session=lambda **_kwargs: (400, {"error": "not used"}, "application/json"),
+        session_get=lambda _sid: None,
+        sync_job_data_table_history=lambda **kwargs: dict(kwargs.get("meta") or {}),
+    )
+
+    handled, _cv_out, meta_out, resp = handle_cover_pdf_actions(
+        aid="COVER_LETTER_GENERATE",
+        user_action_payload={},
+        cv_data=cv_data,
+        meta2=meta,
+        session_id="sess",
+        trace_id="trace",
+        stage_now="cover_letter_review",
+        language="en",
+        client_context=None,
+        deps=deps,
+    )
+
+    assert handled is True
+    assert isinstance(resp, tuple)
+    assert resp[0] == 200
+    assert str(meta_out.get("cover_letter_pdf_ref") or "").startswith("cover_letter_")
+    assert str(meta_out.get("cover_letter_pdf_input_sig") or "")
+
+
+def test_cover_letter_generate_persists_cover_letter_notes_and_variant() -> None:
+    cv_data = {
+        "full_name": "Jane Doe",
+        "work_experience": [
+            {
+                "title": "Operations Manager",
+                "employer": "Company A",
+                "date_range": "2020-01 - 2024-01",
+                "bullets": ["Led operations"],
+            }
+        ],
+    }
+    meta = {
+        "wizard_stage": "cover_letter_review",
+        "language": "en",
+        "target_language": "de",
+        "current_job_sig": "job-sig-1",
+        "job_reference": {"title": "Ops"},
+        "job_posting_text": "Some valid job posting text",
+        "work_tailoring_notes": "existing-work-note",
+    }
+
+    def wizard_set_stage(m: dict, stage: str) -> dict:
+        out = dict(m)
+        out["wizard_stage"] = stage
+        return out
+
+    def persist(cv: dict, m: dict):
+        return cv, m
+
+    def wizard_resp(*, assistant_text: str, meta_out: dict, cv_out: dict, **_kwargs):
+        return 200, {"success": True, "response": assistant_text, "metadata": meta_out, "cv_data": cv_out}
+
+    def generate_cover_letter_block_via_openai(**_kwargs):
+        return True, {
+            "opening_paragraph": "Updated opening with Company A.",
+            "core_paragraphs": ["Updated core paragraph."],
+            "closing_paragraph": "Updated closing.",
+            "signoff": "Mit freundlichen Gruessen,\nJane Doe",
+        }, ""
+
+    deps = CoverPdfActionDeps(
+        wizard_set_stage=wizard_set_stage,
+        persist=persist,
+        wizard_resp=wizard_resp,
+        cv_enable_cover_letter=True,
+        log_info=lambda *_args, **_kwargs: None,
+        openai_enabled=lambda: True,
+        generate_cover_letter_block_via_openai=generate_cover_letter_block_via_openai,
+        friendly_schema_error_message=lambda msg: msg,
+        validate_cover_letter_block=lambda **_kwargs: (True, []),
+        build_cover_letter_render_payload=lambda **_kwargs: {},
+        render_cover_letter_pdf=lambda *_args, **_kwargs: b"%PDF-1.4 test",
+        upload_pdf_blob_for_session=lambda **_kwargs: {"container": "cv-pdfs", "blob_name": "sess/cover.pdf"},
+        compute_cover_letter_download_name=lambda **_kwargs: "cover-letter.pdf",
+        now_iso=lambda: "2026-03-06T10:30:00Z",
+        wizard_get_stage=lambda m: str(m.get("wizard_stage") or ""),
+        tool_generate_cv_from_session=lambda **_kwargs: (400, {"error": "not used"}, "application/json"),
+        session_get=lambda _sid: None,
+        sync_job_data_table_history=lambda **kwargs: dict(kwargs.get("meta") or {}),
+    )
+
+    payload = {
+        "cover_letter_tailoring_notes": "focus on automotive ramp-up",
+        "cover_letter_notes_variant": "cover_only",
+    }
+    handled, _cv_out, meta_out, resp = handle_cover_pdf_actions(
+        aid="COVER_LETTER_GENERATE",
+        user_action_payload=payload,
+        cv_data=cv_data,
+        meta2=meta,
+        session_id="sess",
+        trace_id="trace",
+        stage_now="cover_letter_review",
+        language="en",
+        client_context=None,
+        deps=deps,
+    )
+
+    assert handled is True
+    assert isinstance(resp, tuple)
+    assert resp[0] == 200
+    assert meta_out.get("cover_letter_tailoring_notes") == "focus on automotive ramp-up"
+    assert meta_out.get("cover_letter_notes_variant") == "cover_only"

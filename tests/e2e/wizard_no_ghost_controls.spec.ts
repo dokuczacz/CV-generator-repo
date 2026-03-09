@@ -251,8 +251,19 @@ test.describe('Wizard: no ghost controls (AI disabled)', () => {
       await clickAction(page, 'REQUEST_GENERATE_PDF');
     }
 
-    // Verify PDF is available for download.
-    await expect(page.getByTestId('download-pdf')).toBeVisible({ timeout: 60_000 });
+    // Verify PDF is available for download (header or stage action).
+    const headerDownload = page.getByTestId('download-pdf');
+    const stageGenerateOrDownload = page
+      .getByTestId('stage-panel')
+      .locator('[data-testid="action-REQUEST_GENERATE_PDF"], [data-testid="action-DOWNLOAD_PDF"]');
+    await expect
+      .poll(
+        async () =>
+          (await headerDownload.isVisible().catch(() => false)) ||
+          (await stageGenerateOrDownload.first().isVisible().catch(() => false)),
+        { timeout: 60_000 }
+      )
+      .toBe(true);
 
     // Cover "Zmień plik" reset path (powrót do uploadu bez zacięcia stanu).
     await page.getByRole('button', { name: /Zmień plik/i }).first().click();

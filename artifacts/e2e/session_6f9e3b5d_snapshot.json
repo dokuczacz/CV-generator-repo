@@ -1,0 +1,475 @@
+{
+  "scenario_id": "6f9e3b5d-50d9-41e1-8112-74e7f2d4db23",
+  "created_at": "2026-03-03T22:48:33.275461",
+  "updated_at": "2026-03-03T23:34:16.347070",
+  "cv_data": {
+    "__blob_ref__": "cv-artifacts/6f9e3b5d-50d9-41e1-8112-74e7f2d4db23/cv_data_20260303_233416.json",
+    "__offloaded__": true,
+    "size_bytes": 3240555
+  },
+  "metadata": {
+    "language": "en",
+    "source_language": "en",
+    "target_language": "de",
+    "created_from": "docx",
+    "stage": "PREPARE",
+    "stage_updated_at": "2026-03-03T22:48:33.275461",
+    "flow_mode": "wizard",
+    "wizard_stage": "education",
+    "wizard_stage_updated_at": "2026-03-03T23:34:16.099447",
+    "prefill_summary": {
+      "has_name": true,
+      "has_email": true,
+      "has_phone": true,
+      "work_experience_count": 4,
+      "education_count": 2,
+      "languages_count": 4,
+      "it_ai_skills_count": 8,
+      "interests_chars": 212
+    },
+    "docx_prefill_unconfirmed": {
+      "full_name": "Mariusz Horodecki",
+      "email": "horodecki.mariusz@gmail.com",
+      "phone": "+41 77 952 24 37",
+      "address_lines": [
+        "Zer Chirchu 20, 3933 Staldenried"
+      ],
+      "profile": "",
+      "work_experience": [
+        {
+          "date_range": "2020-01 - 2025-10",
+          "employer": "",
+          "location": "",
+          "title": "Director, GL Solutions Sp. Z o.o., Zielona Góra, Poland",
+          "bullets": [
+            "Led planning and execution of road construction and infrastructure projects delivering 30–40 k",
+            "EUR jobs, improving on-time delivery and contract compliance.",
+            "Coordinated site compliance to reduce rework and delays via schedules, improving daily operations with machines / tools reducing labor work.",
+            "Managed operational delivery of public and private contracts, maintaining regulatory",
+            "documentation and requirements"
+          ]
+        },
+        {
+          "date_range": "2018-11 - 2020-01",
+          "employer": "",
+          "location": "",
+          "title": "Head of Quality & Product Service, Expondo Polska Sp. z o.o., Zielona Góra, Poland",
+          "bullets": [
+            "Led three departments (35 staff) to standardize procedures and KPI dashboards, improving",
+            "quality oversight and team performance.",
+            "Reduced customer claims by 70% through targeted product fixes and process controls, restoring",
+            "OEM acceptance and supplier reliability.",
+            "Optimized warehouse workflows to halve pick/put steps by reorganizing locations, cutting handling",
+            "time and stock discrepancies."
+          ]
+        },
+        {
+          "date_range": "2016-08 - 2018-11",
+          "employer": "",
+          "location": "",
+          "title": "Quality Manager, SE Bordnetze SRL, Greenfield project Orhei, Moldova",
+          "bullets": [
+            "Established Greenfield plant quality systems and processes, achieving IATF certification at first",
+            "attempt and passing multiple customer audits.",
+            "Implemented VDA, Formel-Q and IATF standards across five sections (80 employees) to raise",
+            "production quality and OEM readiness.",
+            "Served as primary contact for OEM customers and certification bodies, reducing audit",
+            "nonconformities and improving supplier transparency."
+          ]
+        },
+        {
+          "date_range": "2011-03 - 2016-07",
+          "employer": "",
+          "location": "",
+          "title": "Global Process Improvement Specialist, Sumitomo Electric Bordnetze SE, Wolfsburg,",
+          "bullets": [
+            "Germany",
+            "Optimized workstations and processes, conducted time studies",
+            "Reduced costs through efficient production solutions",
+            "Lead auditor (PK) – coordinated global audits, benchmarking, and alignment with customer",
+            "requirements",
+            "IT & AI Skills",
+            "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+            "Power Point (stakeholder presentations, reporting decks)",
+            "Word (SOPs, work instructions, process documentation)",
+            "Outlook/Calendar (planning, coordination)",
+            "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+            "Data summarization and insight extraction for KPI reviews and problem-solving",
+            "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+            "Responsible use & data privacy (compliance-aware)",
+            "Technical & Operational Skills",
+            "Project Management (CAPEX/OPEX)",
+            "Process Engineering",
+            "Quality Management (IATF, VDA, Formel-Q)",
+            "Functional specifications and requirements",
+            "KPI dashboards and reporting",
+            "Standardization & Kaizen implementation",
+            "Root cause analysis (FMEA, 5 Why, PDCA)",
+            "Construction/site management"
+          ]
+        }
+      ],
+      "education": [
+        {
+          "date_range": "2012-2015",
+          "institution": "Poznań University of Technology,",
+          "title": "",
+          "details": [
+            "Master of Science in Electrical Engineering",
+            "specialization: Industrial and automotive systems"
+          ]
+        },
+        {
+          "date_range": "2008-2012",
+          "institution": "Poznań University of Technology,",
+          "title": "",
+          "details": [
+            "Bachelor of Engineering in Electrical Engineering",
+            "specialization: Microprocessor control systems"
+          ]
+        }
+      ],
+      "languages": [
+        "Polish (native)",
+        "English (fluent)",
+        "German (intermediate)",
+        "Russian and Romanian (basic knowledge)"
+      ],
+      "it_ai_skills": [
+        "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+        "Power Point (stakeholder presentations, reporting decks)",
+        "Word (SOPs, work instructions, process documentation)",
+        "Outlook/Calendar (planning, coordination)",
+        "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+        "Data summarization and insight extraction for KPI reviews and problem-solving",
+        "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+        "Responsible use & data privacy (compliance-aware)"
+      ],
+      "technical_operational_skills": [
+        "Project Management (CAPEX/OPEX)",
+        "Process Engineering",
+        "Quality Management (IATF, VDA, Formel-Q)",
+        "Functional specifications and requirements",
+        "KPI dashboards and reporting",
+        "Standardization & Kaizen implementation",
+        "Root cause analysis (FMEA, 5 Why, PDCA)",
+        "Construction/site management"
+      ],
+      "skills_raw_lines": [
+        "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+        "Power Point (stakeholder presentations, reporting decks)",
+        "Word (SOPs, work instructions, process documentation)",
+        "Outlook/Calendar (planning, coordination)",
+        "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+        "Data summarization and insight extraction for KPI reviews and problem-solving",
+        "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+        "Responsible use & data privacy (compliance-aware)",
+        "Project Management (CAPEX/OPEX)",
+        "Process Engineering",
+        "Quality Management (IATF, VDA, Formel-Q)",
+        "Functional specifications and requirements",
+        "KPI dashboards and reporting",
+        "Standardization & Kaizen implementation",
+        "Root cause analysis (FMEA, 5 Why, PDCA)",
+        "Construction/site management"
+      ],
+      "further_experience": [],
+      "interests": "Systems thinking & workflow optimization, process automation & planning architectures, long-distance cycling, outdoor, activities, hiking, fiction (e.g., fantasy/sci-fi) and non-fiction (decision psychology, NLP)"
+    },
+    "confirmed_flags": {
+      "contact_confirmed": true,
+      "education_confirmed": true,
+      "confirmed_at": "2026-03-03T22:55:53.561667"
+    },
+    "job_posting_url": "https://www.jobs.ch/de/stellenangebote/detail/30122d7d-32d0-4fad-b690-0a3d7aadb525/",
+    "job_fetch_status": "success",
+    "job_posting_text": "Production Engineer — Ypsomed AG — Burgdorf Switzerland\n\nBei Ypsomed entwickeln wir innovative Medizintechniklösungen, die Menschen mit chronischen Erkrankungen weltweit ein selbstbestimmtes Leben ermöglichen. Unsere Mitarbeitenden arbeiten in interdisziplinären Teams, übernehmen Verantwortung und gestalten mit modernster Technologie die Gesundheitsversorgung von morgen. Wir fördern eine offene, inklusive Unternehmenskultur, in der Vielfalt geschätzt wird, neue Perspektiven willkommen sind und sinnstiftende Arbeit im Mittelpunkt steht.   Als Production Engineer verantworten Sie die Inbetriebnahme, Qualifizierung und kontinuierliche Optimierung unserer Produktionsanlagen und sorgen dafür, dass unsere Herstellungsprozesse höchsten Qualitätsanforderungen entsprechen.   Production Engineer | 100%   Ref-Nr. 7935   Arbeitsort:&nbsp;Burgdorf   Entwickeln Sie sich zusammen mit uns weiter und produzieren Sie Medizintechnik-Lösungen, welche je länger je mehr gefragt sind.   Ihre Hauptaufgaben       Inbetriebnahme, Qualifizierung und Validierung von Produktionsanlagen    Entwickeln und Realisieren von Optimierungslösungen zur Verbesserung der Produktqualität    Analyse und Behebung von Schwachstellen in Herstellungsprozessen    Bearbeitung von qualitätsbezogenen Aufgaben (Audit, CAPA/NC, etc.)    Unterstützung bei Reparatur- und Instandhaltungsmassnahmen    Industrialisieren und Validieren von Prozessen    Ansprechperson bezüglich Produkte-/Prozess Gruppen für interne sowie externe Stakeholder       Ihr Profil       Abgeschlossene Grundausbildung im technischen Umfeld und abgeschlossene technische Weiterbildung FH / HF    Mindestens 3 Jahre Berufserfahrung in einer vergleichbaren Funktion    Hohe Problemlösungskompetenz sowie bereichsübergreifendes Denken    Fundierte Kenntnisse im Bereich Qualitätsmanagement    Erfahrung und Bereitschaft im regulierten Umfeld (GxP) zu arbeiten    Sehr gute mündliche und schriftliche Deutschkenntnisse (C1), gute Englischkenntnisse (B1)       Darum Ypsomed – die Behandlung von chronischen Erkrankungen möglich machen   Die weltweit über 2200 Mitarbeitenden der Ypsomed Gruppe entwickeln und produzieren Injektions- und Infusionssysteme für die Selbstmedikation. Wir sind ein erfolgreiches, rasch wachsendes, familiengeführtes Unternehmen mit Hauptsitz in Burgdorf (CH) und weltweit verschiedenen Produktionsstandorten und Tochtergesellschaften. Mit unseren marktführenden Produkten und Lösungen ermöglichen wir Menschen auf der ganzen Welt die Selbstbehandlung. Trotz chronischen Erkrankungen wie Diabetes, Fettleibigkeit oder gewissen Arten von Krebs erhalten sie damit grösstmögliche Freiheit.   Kontakt     Annina Kistler   Human Resources Expert Recruiting   +41&nbsp;(0)&nbsp;34&nbsp;424&nbsp;24&nbsp;07   Ihr zukünftiger Arbeitsort   Burgdorf",
+    "job_fetch_timestamp": "2026-03-03T22:48:33.875500",
+    "job_input_status": "ok",
+    "photo_blob": {
+      "container": "cv-photos",
+      "blob_name": "photos/b368dc71-0031-4578-8a5e-c3173d7f9fbb.png",
+      "content_type": "image/png"
+    },
+    "fast_path_profile": true,
+    "current_job_sig": "83f0cd5dec4e45875dc45907202d6cb3223d007d9ad89fe42dcbf7cddaae0005",
+    "job_changed_at": "2026-03-03T22:48:33.924121",
+    "pdf_generated": true,
+    "job_reference_sig": "",
+    "work_experience_proposal_sig": "",
+    "skills_proposal_sig": "",
+    "pending_confirmation": null,
+    "event_log": [
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T22:48:33.966687"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T22:53:08.713377"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T22:55:53.608426"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T22:58:46.878499"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:03:58.233175"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:03:58.255376"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:07:44.904520"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:09:19.013053"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:09:19.031379"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:09:26.586916"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:11:18.174720"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:18:51.176250"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:28:21.262954"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-03-03T23:34:16.341469"
+      }
+    ],
+    "bulk_translation_prompt_trace": [
+      {
+        "ts_utc": "2026-03-03T22:55:53.529964",
+        "target_language": "de",
+        "prompt_id_used": "pmpt_696f593c42148195ab41b3a3aaeaa55d029c2c08c553971f",
+        "effective_system_prompt_hash": "0e46a306bb8b6276c043021e4e35285a9fb7e5a69d02de6656f614723fe9c507",
+        "user_payload_hash": "4e65928e8dde24fd4698f5cecf34fbfd8b3da4524c3abc88800453dd85ea2463",
+        "user_payload_chars": 4038
+      }
+    ],
+    "cv_state_original_hash": "f76b2b58fe6a937a876fe3b24bedafae77e9235c6eda0512293be2d4cc20e312",
+    "cv_state_original_ref": "cv-artifacts/6f9e3b5d-50d9-41e1-8112-74e7f2d4db23/cv_original_20260303_225553.json",
+    "bulk_translated_to": "de",
+    "bulk_translation_status": "ok",
+    "bulk_translation_source_hash": "4e65928e8dde24fd4698f5cecf34fbfd8b3da4524c3abc88800453dd85ea2463",
+    "bulk_translation_cache": {
+      "de": "4e65928e8dde24fd4698f5cecf34fbfd8b3da4524c3abc88800453dd85ea2463"
+    },
+    "active_cv_state_id": "translated:de:482c81a0169c",
+    "active_cv_state_lang": "de",
+    "active_cv_state_hash": "482c81a0169c2321c996155262872501bd9e29a767a4f9d91e6b6ce8b24764e2",
+    "cv_state_translated_refs": {
+      "de": "cv-artifacts/6f9e3b5d-50d9-41e1-8112-74e7f2d4db23/cv_translated_de_20260303_225553.json"
+    },
+    "fast_profile_applied": true,
+    "fast_profile_user_id": "f2601a5af1ccec0c1e370ed65af2de2b55d222c2351e03685b46038400c9c870",
+    "fast_profile_saved_at": "2026-03-03T09:22:59.096695",
+    "fast_profile_lang": "de",
+    "job_reference": {
+      "role_title": "Production Engineer",
+      "company": "Ypsomed AG",
+      "location": "Burgdorf",
+      "seniority": "",
+      "employment_type": "100%",
+      "responsibilities": [
+        "Inbetriebnahme, Qualifizierung und Validierung von Produktionsanlagen",
+        "Entwickeln und Realisieren von Optimierungslösungen zur Verbesserung der Produktqualität",
+        "Analyse und Behebung von Schwachstellen in Herstellungsprozessen",
+        "Bearbeitung von qualitätsbezogenen Aufgaben (Audit, CAPA/NC)",
+        "Unterstützung bei Reparatur- und Instandhaltungsmassnahmen",
+        "Industrialisieren und Validieren von Prozessen",
+        "Ansprechperson für Produkte-/Prozessgruppen gegenüber internen und externen Stakeholdern"
+      ],
+      "must_haves": [
+        "Abgeschlossene Grundausbildung im technischen Umfeld und technische Weiterbildung FH / HF",
+        "Mindestens 3 Jahre Berufserfahrung in vergleichbarer Funktion",
+        "Hohe Problemlösungskompetenz und bereichsübergreifendes Denken",
+        "Fundierte Kenntnisse im Qualitätsmanagement",
+        "Erfahrung und Bereitschaft im regulierten Umfeld (GxP) zu arbeiten",
+        "Sehr gute mündliche und schriftliche Deutschkenntnisse (C1)",
+        "Gute Englischkenntnisse (B1)"
+      ],
+      "nice_to_haves": [],
+      "tools_tech": [],
+      "keywords": [
+        "Inbetriebnahme",
+        "Qualifizierung",
+        "Validierung",
+        "Prozessoptimierung",
+        "Qualitätsmanagement",
+        "GxP",
+        "CAPA",
+        "Audit",
+        "Industrialisierung",
+        "Instandhaltung"
+      ]
+    },
+    "job_reference_status": "ok",
+    "work_tailoring_notes": "here also some key achivements from work\n1. Director, GL Solutions Sp. Z o.o.: co-partner with building from  scratches construction company capable to deliver 30-40k eur jobs, also for public sector,\n\n2. in Head of Quality & Product Service, Expondo Polska Sp. z o.o.: technically solved issue with 3 years old company headache - good seller - bad quality, claims reduced by 70%, improved multiple workflows, eg. reduction number of steps in warehouse by half by rearranging the locations, after 3 months got rid of old department leftovers (no high-level overdue actions), introduced work classification --> simple job, agency staff, technical work --> technician\n\n3. in Quality Manager, SE Bordnetze SRL, Greenfield project Orhei, Moldova: basically from scraches build quality team taking care of product being actually send to oem production lines, capable to deliver right quality, IATF passed at first try, passed many customer audits, build team from local people, hand over process of position planned and started 6 months ahead, this refer to job positon in moldova quality manager\n\n4. Sumitomo Electric Bordnetze SE — Global Process Improvement Specialist (2011-03 – 2016-07):\naround 60% of time in production plants in random locations,\nfire-fighter - i was being sent to critical status plants to put down fires, usually customer-high-level concerns (eg. lack of output, very bad quality),\nmanaged international project of shop floor standardisation and KAIZEN implementation, highest level expert in concern-wide, eg. agreeing which of japanese shareholders applies to our business branch (technically), agreeing concern audits schedule, being main contact person, advicing implementation ideas,\nleaded very company wide improvements, training systems, production managment",
+    "work_experience_proposal_block": {
+      "roles": [
+        {
+          "title": "Qualitätsmanager",
+          "company": "SE Bordnetze SRL",
+          "date_range": "2016-08 - 2018-11",
+          "location": "Greenfield-Projekt Orhei, Moldau",
+          "bullets": [
+            "Aufgebautes Qualitätsmanagementsystem führte zur IATF-Zertifizierung beim ersten Versuch (Greenfield-Werk).",
+            "Implementiert VDA/Formel-Q/IATF-Standards für 80 Mitarbeiter zur Steigerung der OEM-Tauglichkeit.",
+            "Koordiniert OEM- und Zertifizierungs-Audits und reduzierte Audit-Nichtkonformitäten messbar.",
+            "Eingeführt strukturierter Qualitätsprozesse zur Übergabe und Einarbeitung; Übergabeprozess 6 Monate vorgeplant."
+          ]
+        },
+        {
+          "title": "Globaler Spezialist Prozessverbesserung",
+          "company": "Sumitomo Electric Bordnetze SE",
+          "date_range": "2011-03 - 2016-07",
+          "location": "Wolfsburg, Deutschland",
+          "bullets": [
+            "Leitete konzernweite Shopfloor-Standardisierung und KAIZEN-Implementierung mit messbarer Effizienzsteigerung.",
+            "Eingesetzt als Firefighter in Produktionswerken; ca. 60% der Zeit vor Ort zur raschen Problemlösung bei Kundenkritik.",
+            "Koordiniert globale Audits als Lead Auditor (PK) und harmonisierte Auditpläne mit Stakeholdern.",
+            "Durchgeführt Zeitstudien und Arbeitsplatzoptimierungen zur Kostensenkung und Durchsatzsteigerung."
+          ]
+        },
+        {
+          "title": "Leiter Qualität & Produktsupport",
+          "company": "Expondo Polska Sp. z o.o.",
+          "date_range": "2018-11 - 2020-01",
+          "location": "Zielona Góra, Polen",
+          "bullets": [
+            "Führte 35 Mitarbeiter in drei Abteilungen und standardisierte Verfahren mit KPI-Dashboards zur Qualitätskontrolle.",
+            "Reduzierte Kundenreklamationen um 70% durch technische Korrekturen und Prozesskontrollen.",
+            "Reorganisierte Lagerplätze und halbierte Kommissionier- und Einlagerungsschritte zur Reduktion von Handlingzeiten.",
+            "Wiederhergestellt OEM-Akzeptanz und Lieferantenverlässlichkeit durch gezielte Lieferanten- und Qualitätsmaßnahmen."
+          ]
+        },
+        {
+          "title": "Direktor",
+          "company": "GL Solutions Sp. z o.o.",
+          "date_range": "2020-01 - 2025-10",
+          "location": "Zielona Góra, Polen",
+          "bullets": [
+            "Planung und Umsetzung von Straßenbauprojekten im Volumen von 30–40 k EUR mit verbesserter Termintreue.",
+            "Koordiniert Baustellen-Compliance und regulatorische Dokumentation zur Reduktion von Nacharbeiten.",
+            "Optimierte tägliche Abläufe mit Maschinen und Werkzeugen zur Verringerung manueller Arbeit und Ausfallzeiten.",
+            "Operative Steuerung öffentlicher und privater Aufträge unter Einhaltung vertraglicher Anforderungen."
+          ]
+        }
+      ],
+      "notes": "Erstellt fokussierte, rollenorientierte Bulletpoints mit Betonung auf Qualitätsmanagement, Prozessoptimierung, Audits und messbaren Ergebnissen; Metriken aus CV beibehalten.",
+      "created_at": "2026-03-03T23:03:58.157471"
+    },
+    "work_experience_proposal_input_sig": "0ca7a9804fc956da455b3d55c8cb2e4754e3b80e88cad9d37e56fd55605a0353",
+    "work_experience_tailored": true,
+    "work_experience_proposal_accepted_at": "2026-03-03T23:07:44.806586",
+    "work_experience_order_source": "model_relevance_after_accept",
+    "skills_proposal_block": {
+      "it_ai_skills": [
+        "MS Office (Excel, PowerPoint, Word, Outlook)",
+        "Excel-Analyse & Reporting (Pivot, Formeln, Charts)",
+        "KPI-Dashboards & Berichterstattung",
+        "Datenaufbereitung und Insight-Extraktion für KPI-Reviews",
+        "Prompt-Engineering für strukturierte Outputs",
+        "KI-unterstützte Workflow-Automatisierung (strukturierte Reports)"
+      ],
+      "technical_operational_skills": [
+        "Qualitätsmanagement (IATF, VDA, Formel-Q)",
+        "Prozessoptimierung & Shopfloor-Standardisierung (KAIZEN)",
+        "Root-Cause-Methoden (FMEA, 5 Why, PDCA)",
+        "Produktionsinterventionen und Effizienzsteigerung (Zeitstudien, Firefighting)",
+        "Projektmanagement CAPEX/OPEX",
+        "Baustellen- und Bauprojektsteuerung"
+      ],
+      "notes": "Skills wurden strikt aus CV- und RAW-Skills-Einträgen abgeleitet; IT/AI-Sektion fasst explizit genannte Tools, Reporting- und KI-Fähigkeiten. Technisch/operativ priorisiert nach nachgewiesener Qualitäts- und Prozessverantwortung, Audit- und Produktionsinterventionserfahrung; Job-Anforderungen (Qualität, GxP-Relevanz, Prozessoptimierung) dienten nur zur Reihenfolgepriorisierung.",
+      "openai_response_id": "resp_09fd5a3302eb09340069a76a0ec094819e840646f6c7390004",
+      "created_at": "2026-03-03T23:09:18.930970"
+    },
+    "it_ai_skills_tailored": true,
+    "skills_proposal_accepted_at": "2026-03-03T23:09:26.511782",
+    "pdf_refs": {
+      "6f9e3b5d-50d9-41e1-8112-74e7f2d4db23-beae025497c94d109161b5d728098a39": {
+        "container": "cv-pdfs",
+        "blob_name": "6f9e3b5d-50d9-41e1-8112-74e7f2d4db23/6f9e3b5d-50d9-41e1-8112-74e7f2d4db23-beae025497c94d109161b5d728098a39.pdf",
+        "created_at": "2026-03-03T23:11:17.445163",
+        "sha256": "d214fe5e8b417538263ed12e61f69e4d272bb43cf3314feffc560a4a9705b2bb",
+        "cv_sig": "7692d7531d1df199dfe9dc905e658fdb6139ab172986020a69210d66553bd770",
+        "size_bytes": 3133817,
+        "render_ms": 1,
+        "pages": 2,
+        "validation_passed": true,
+        "download_name": "CV_Mariusz_Horodecki_Ypsomed_AG_2026-03-03.pdf",
+        "target_language": "de",
+        "job_sig": "83f0cd5dec4e45875dc45907202d6cb3223d007d9ad89fe42dcbf7cddaae0005"
+      }
+    },
+    "cv_data_blob_ref": "cv-artifacts/6f9e3b5d-50d9-41e1-8112-74e7f2d4db23/cv_data_20260303_233416.json",
+    "cv_data_offloaded_at": "2026-03-03T23:34:16.181706"
+  },
+  "job_posting": "",
+  "artifacts": {
+    "photo_blob": {
+      "container": "cv-photos",
+      "blob_name": "photos/b368dc71-0031-4578-8a5e-c3173d7f9fbb.png",
+      "content_type": "image/png"
+    },
+    "pdf_refs": {
+      "6f9e3b5d-50d9-41e1-8112-74e7f2d4db23-beae025497c94d109161b5d728098a39": {
+        "container": "cv-pdfs",
+        "blob_name": "6f9e3b5d-50d9-41e1-8112-74e7f2d4db23/6f9e3b5d-50d9-41e1-8112-74e7f2d4db23-beae025497c94d109161b5d728098a39.pdf",
+        "created_at": "2026-03-03T23:11:17.445163",
+        "sha256": "d214fe5e8b417538263ed12e61f69e4d272bb43cf3314feffc560a4a9705b2bb",
+        "cv_sig": "7692d7531d1df199dfe9dc905e658fdb6139ab172986020a69210d66553bd770",
+        "size_bytes": 3133817,
+        "render_ms": 1,
+        "pages": 2,
+        "validation_passed": true,
+        "download_name": "CV_Mariusz_Horodecki_Ypsomed_AG_2026-03-03.pdf",
+        "target_language": "de",
+        "job_sig": "83f0cd5dec4e45875dc45907202d6cb3223d007d9ad89fe42dcbf7cddaae0005"
+      }
+    },
+    "skills_json_path": null
+  },
+  "template_version": "CV_template_2pages_2025",
+  "dod_commands": [
+    "python scripts/diagnose_session.py 6f9e3b5d-50d9-41e1-8112-74e7f2d4db23",
+    "npm run pretest",
+    "pytest tests/test_*.py -v",
+    "npm run test"
+  ]
+}

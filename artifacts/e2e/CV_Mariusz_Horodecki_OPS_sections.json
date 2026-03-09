@@ -1,0 +1,17 @@
+{
+  "source_docx": "C:\\Users\\horod\\Desktop\\CV\\CV_Mariusz_Horodecki_OPS.docx",
+  "prefill_json": "artifacts\\e2e\\CV_Mariusz_Horodecki_OPS_prefill.json",
+  "pdf_file": "artifacts\\e2e\\CV_Mariusz_Horodecki_OPS.pdf",
+  "pages": 2,
+  "strict_render_ok": true,
+  "section_locations": {
+    "WORK EXPERIENCE": 1,
+    "IT / AI SKILLS": 2,
+    "TECHNICAL / OPERATIONAL SKILLS": 2,
+    "EDUCATION": 2,
+    "LANGUAGES": 2,
+    "INTERESTS": 2,
+    "REFERENCES": 2
+  },
+  "work_bullets_contain_skills_heading": false
+}

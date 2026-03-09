@@ -21,13 +21,18 @@ Language:
 Rules:
 - Keep bullets 1-2 lines max (aim <= 180 chars; hard max 200 chars each).
 - Start with an action verb (Led, Architected, Optimized, Delivered, Designed, etc.).
-- Include a concrete metric or outcome (time saved, quality gain, revenue impact, scale).
-- Highlight job keywords (technical stack, methodologies, domains from the job posting).
+- Prioritize concrete outcomes; include metrics only when the metric value is explicit in E0 evidence.
+- Use job-posting keywords only as ranking/reordering signals for bullet selection.
+- Do not inject a tool/method/domain keyword from job posting unless it is explicit in E0 evidence.
 - Remove generic phrases ("responsible for", "helped with", "in charge of").
 - Use 4-5 bullets per role; pick the strongest role-aligned bullets based on job relevance.
 - Order roles by relevance to the job offer (most relevant role first, least relevant last).
 - Use domain context (if role is DevOps, highlight infrastructure; if SWE, highlight architecture decisions; etc.).
 - Keep all JSON string values single-line (no literal newlines).
+
+Validation gate before final output:
+- Reject any bullet that contains unsupported metric values, unsupported tools, or unsupported methodology claims.
+- If evidence is descriptive but non-numeric, keep outcome phrasing without invented numbers.
 
 Output JSON schema (must match exactly):
 {

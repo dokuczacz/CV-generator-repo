@@ -301,6 +301,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             reason_map = {
                 "too_short": "Text is too short to represent a real job posting.",
                 "looks_like_candidate_notes": "Input looks like candidate notes/achievements, not a job offer.",
+                "looks_like_web_boilerplate": "CRITICAL: fetched content is webpage boilerplate (CSS/JS/cookies), not a real job description.",
                 "not_job_like": "Input does not look like a job posting.",
             }
             reason_label = reason_map.get(reason, "Input is not suitable for job summary extraction.")

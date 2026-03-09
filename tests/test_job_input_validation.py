@@ -35,3 +35,17 @@ def test_job_posting_text_rejects_too_short_input():
     ok, reason = _looks_like_job_posting_text("Senior engineer role")
     assert ok is False
     assert reason == "too_short"
+
+
+def test_job_posting_text_rejects_web_boilerplate_blob():
+    text = (
+        "Industrialization Engineer (w/m) Stellendetails | komaxag "
+        ".custom-header-image { width: 85% !important; } "
+        "body{display:none !important;} "
+        "if (self === top) { var antiClickjack = document.getElementById('antiClickjack'); } "
+        "Wir verwenden Cookies, um Ihnen die bestmogliche Erfahrung mit der Website bieten zu konnen. "
+        "utm_campaign=jobsch&utm_source=jobsch"
+    )
+    ok, reason = _looks_like_job_posting_text(text)
+    assert ok is False
+    assert reason == "looks_like_web_boilerplate"

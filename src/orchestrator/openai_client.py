@@ -62,6 +62,148 @@ def _extract_openai_output_text(resp: object) -> str:
     return "\n".join(chunks).strip()
 
 
+def _stage_required_markers(stage: str | None) -> list[str]:
+    st = str(stage or "").strip().lower()
+    if st == "bulk_translation":
+        return ["work_experience", "education"]
+    if st == "job_posting":
+        # Job posting input may be multilingual and often won't contain literal
+        # English marker words like "job" or "posting".
+        # Keep preflight non-blocking here and rely on dedicated job-text validators.
+        return []
+    if st == "work_experience":
+        return ["work_experience", "job"]
+    if st == "it_ai_skills":
+        return ["skills", "job"]
+    if st == "cover_letter":
+        return ["cover", "job", "work_experience"]
+    return []
+
+
+def _dry_test_preflight(
+    *,
+    stage: str | None,
+    system_prompt: str,
+    user_text: str,
+    response_format: dict,
+) -> tuple[bool, dict]:
+    issues: list[str] = []
+    if not str(system_prompt or "").strip():
+        issues.append("system_prompt_empty")
+    if not str(user_text or "").strip():
+        issues.append("user_text_empty")
+    if not isinstance(response_format, dict) or not response_format:
+        issues.append("response_format_missing")
+
+    marker_misses: list[str] = []
+    low = str(user_text or "").lower()
+    for marker in _stage_required_markers(stage):
+        if marker not in low:
+            marker_misses.append(marker)
+    if marker_misses:
+        issues.append("missing_markers:" + ",".join(marker_misses))
+
+    payload = {
+        "stage": str(stage or ""),
+        "system_prompt_chars": len(system_prompt or ""),
+        "user_text_chars": len(user_text or ""),
+        "response_format_keys": sorted(list((response_format or {}).keys())) if isinstance(response_format, dict) else [],
+        "marker_misses": marker_misses,
+        "issues": issues,
+        "ok": len(issues) == 0,
+    }
+    return len(issues) == 0, payload
+
+
+def _persist_dry_test_artifact(*, payload: dict, trace_id: str | None, session_id: str | None) -> None:
+    if not product_config.DRY_TEST_ARTIFACTS:
+        return
+    try:
+        out_dir = str(product_config.DRY_TEST_ARTIFACTS_DIR or "tmp/preflight").strip()
+        os.makedirs(out_dir, exist_ok=True)
+        ts = str(int(time.time() * 1000))
+        trace_part = (str(trace_id or "") or "na").replace(os.sep, "_")[:80]
+        sess_part = (str(session_id or "") or "na").replace(os.sep, "_")[:80]
+        path = os.path.join(out_dir, f"preflight_{ts}_{trace_part}_{sess_part}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
+
+
+def _should_capture_presend(stage: str | None) -> bool:
+    if not product_config.CV_OPENAI_PRESEND_CAPTURE:
+        return False
+    st = str(stage or "").strip().lower()
+    return st in {
+        "work_experience",
+        "it_ai_skills",
+        "cover_letter",
+        "cv_combined",
+        "cv_cl_unified",
+        "bulk_translation",
+    }
+
+
+def _persist_presend_payload_artifact(
+    *,
+    stage: str | None,
+    trace_id: str | None,
+    session_id: str | None,
+    call_seq: str,
+    req: dict,
+) -> None:
+    if not _should_capture_presend(stage):
+        return
+    try:
+        out_dir = str(product_config.CV_OPENAI_PRESEND_DIR or "tmp/openai_presend").strip()
+        os.makedirs(out_dir, exist_ok=True)
+        ts = str(int(time.time() * 1000))
+        st = (str(stage or "na") or "na").replace(os.sep, "_")[:80]
+        tr = (str(trace_id or "na") or "na").replace(os.sep, "_")[:80]
+        sid = (str(session_id or "na") or "na").replace(os.sep, "_")[:80]
+        seq = (str(call_seq or "attempt") or "attempt").replace(os.sep, "_")[:40]
+        path = os.path.join(out_dir, f"presend_{ts}_{st}_{tr}_{sid}_{seq}.json")
+
+        input_items = req.get("input") if isinstance(req.get("input"), list) else []
+        developer_text = ""
+        user_text = ""
+        for item in input_items:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "")
+            content = str(item.get("content") or "")
+            if role == "developer":
+                developer_text += content
+            elif role == "user":
+                user_text += content
+
+        payload = {
+            "stage": str(stage or ""),
+            "trace_id": str(trace_id or ""),
+            "session_id": str(session_id or ""),
+            "call_seq": seq,
+            "request": {
+                "model": req.get("model"),
+                "prompt": req.get("prompt"),
+                "text": req.get("text"),
+                "max_output_tokens": req.get("max_output_tokens"),
+                "reasoning": req.get("reasoning"),
+                "input": input_items,
+            },
+            "input_audit": {
+                "developer_len": len(developer_text),
+                "developer_sha256": hashlib.sha256(developer_text.encode("utf-8", errors="ignore")).hexdigest(),
+                "user_len": len(user_text),
+                "user_sha256": hashlib.sha256(user_text.encode("utf-8", errors="ignore")).hexdigest(),
+            },
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
+
+
 def openai_json_schema_call(
     *,
     deps: OpenAIJsonSchemaDeps,
@@ -77,9 +219,44 @@ def openai_json_schema_call(
     if not deps.openai_enabled():
         return False, None, "OPENAI_API_KEY missing or CV_ENABLE_AI=0"
     try:
+        preflight_ok, preflight_payload = _dry_test_preflight(
+            stage=stage,
+            system_prompt=system_prompt,
+            user_text=user_text,
+            response_format=response_format,
+        )
+        preflight_payload.update(
+            {
+                "trace_id": str(trace_id or ""),
+                "session_id": str(session_id or ""),
+                "dry_test_mode": str(product_config.DRY_TEST_MODE or "required"),
+            }
+        )
+        _persist_dry_test_artifact(payload=preflight_payload, trace_id=trace_id, session_id=session_id)
+
+        if not preflight_ok:
+            mode = str(product_config.DRY_TEST_MODE or "required").strip().lower()
+            msg = "DRY_TEST_PRECHECK_FAILED: " + "; ".join(preflight_payload.get("issues") or ["unknown"])
+            if mode == "required":
+                logging.warning(
+                    "Blocking OpenAI call due to dry-test failure stage=%s trace_id=%s issues=%s",
+                    stage,
+                    trace_id,
+                    preflight_payload.get("issues"),
+                )
+                return False, None, msg
+            if mode == "warn":
+                logging.warning(
+                    "Dry-test warning (continuing) stage=%s trace_id=%s issues=%s",
+                    stage,
+                    trace_id,
+                    preflight_payload.get("issues"),
+                )
+
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), timeout=60.0)
         prompt_id = deps.get_openai_prompt_id(stage)
         model_override = (os.environ.get("OPENAI_MODEL") or "").strip() or None
+        experiment_model = str(product_config.EXPERIMENT_MODEL or "").strip() or None
 
         max_attempts = product_config.OPENAI_JSON_SCHEMA_MAX_ATTEMPTS
         if max_attempts < 1:
@@ -141,8 +318,10 @@ def openai_json_schema_call(
 
         if prompt_id:
             req["prompt"] = {"id": prompt_id, "variables": {"stage": stage or "json_schema_call", "phase": "preparation"}}
+            if experiment_model:
+                req["model"] = experiment_model
         else:
-            req["model"] = model_override or deps.openai_model()
+            req["model"] = experiment_model or model_override or deps.openai_model()
 
         logging.info(
             "Calling OpenAI for stage=%s max_output_tokens=%s has_prompt_id=%s prompt_source_mode=%s system_prompt_hash=%s",
@@ -244,6 +423,13 @@ def openai_json_schema_call(
         while attempt < max_attempts:
             attempt += 1
             try:
+                _persist_presend_payload_artifact(
+                    stage=stage,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    call_seq=f"attempt_{attempt}",
+                    req=req,
+                )
                 logging.info(
                     "OpenAI request attempt stage=%s call_seq=%s max_attempts=%s prompt_source_mode=%s has_prompt_id=%s",
                     str(stage or "json_schema_call"),
@@ -441,6 +627,18 @@ def openai_json_schema_call(
                         except Exception:
                             cur = max_output_tokens or 800
                         repair_req["max_output_tokens"] = max(cur, min(8192, int(cur * 2)))
+                    logging.info(
+                        "Capturing pre-send payload for schema repair stage=%s call_seq=%s",
+                        str(stage or "json_schema_call"),
+                        f"schema_repair_{attempt}",
+                    )
+                    _persist_presend_payload_artifact(
+                        stage=stage,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        call_seq=f"schema_repair_{attempt}",
+                        req=repair_req,
+                    )
                     logging.info(
                         "OpenAI request attempt stage=%s call_seq=%s max_attempts=%s prompt_source_mode=%s has_prompt_id=%s",
                         str(stage or "json_schema_call"),

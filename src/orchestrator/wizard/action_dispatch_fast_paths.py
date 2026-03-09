@@ -42,6 +42,7 @@ class FastPathsActionDeps:
     get_session: Callable[[str], dict | None]
     work_experience_hard_limit_chars: int
     log_warning: Callable[..., Any]
+    format_job_reference_for_prompt: Callable[[dict], str] | None = None
 
 
 def handle_fast_paths_actions(
@@ -57,6 +58,26 @@ def handle_fast_paths_actions(
     client_context: dict | None,
     deps: FastPathsActionDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    def _invalid_job_input_message(reason: str) -> str:
+        reason_norm = str(reason or "").strip().lower()
+        if reason_norm == "looks_like_web_boilerplate":
+            return (
+                "FAST_RUN CRITICAL: fetched page content is website boilerplate (CSS/JS/cookie banner), "
+                "not a real job posting. Use a direct vacancy link (e.g. jobs.ch detail page) "
+                "or paste the full job description text."
+            )
+        if reason_norm == "looks_like_candidate_notes":
+            return "FAST_RUN: input looks like notes, not a job posting. Choose how to proceed."
+        if reason_norm == "too_short":
+            return "FAST_RUN: input is too short for a job summary. Choose: correct URL, paste proper job text, or continue without summary."
+        return "FAST_RUN: input cannot be used as a job posting source. Choose how to proceed."
+
+    def _job_summary_for_prompt(job_ref: dict | None) -> str:
+        if not isinstance(job_ref, dict):
+            return ""
+        formatter = deps.format_job_reference_for_prompt or deps.format_job_reference_for_display
+        return formatter(job_ref)
+
     if aid == "NEW_VERSION_RESET":
         meta2 = deps.reset_metadata_for_new_version(meta2)
         # Keep language/translation/cache metadata and canonical CV state intact.
@@ -79,6 +100,11 @@ def handle_fast_paths_actions(
                 meta2["work_tailoring_notes"] = str(payload.get("work_tailoring_notes") or "").strip()[:2000]
             if isinstance(payload, dict) and "skills_ranking_notes" in payload:
                 meta2["skills_ranking_notes"] = str(payload.get("skills_ranking_notes") or "").strip()[:2000]
+            if isinstance(payload, dict) and "target_language" in payload:
+                target_language_raw = str(payload.get("target_language") or "").strip().lower()
+                if target_language_raw in ("en", "de", "pl"):
+                    meta2["target_language"] = target_language_raw
+                    meta2["language"] = target_language_raw
         except Exception:
             pass
     
@@ -116,6 +142,7 @@ def handle_fast_paths_actions(
             stage_updates.append({"step": "job_text", "ok": False, "error": "too_short"})
             meta2["job_input_status"] = "invalid"
             meta2["job_input_invalid_reason"] = "too_short"
+            meta2["job_input_critical_error"] = False
             meta2["job_posting_invalid_draft"] = str(job_text or "")[:2000]
             meta2["job_posting_text"] = ""
             meta2 = deps.wizard_set_stage(meta2, "job_posting_invalid_input")
@@ -132,12 +159,13 @@ def handle_fast_paths_actions(
             stage_updates.append({"step": "job_text", "ok": False, "error": reason_job_text})
             meta2["job_input_status"] = "invalid"
             meta2["job_input_invalid_reason"] = reason_job_text
+            meta2["job_input_critical_error"] = reason_job_text == "looks_like_web_boilerplate"
             meta2["job_posting_invalid_draft"] = str(job_text or "")[:2000]
             meta2["job_posting_text"] = ""
             meta2 = deps.wizard_set_stage(meta2, "job_posting_invalid_input")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(
-                assistant_text="FAST_RUN: input looks like notes, not a job posting. Choose how to proceed.",
+                assistant_text=_invalid_job_input_message(reason_job_text),
                 meta_out=meta2,
                 cv_out=cv_data,
                 stage_updates=stage_updates,
@@ -247,10 +275,16 @@ def handle_fast_paths_actions(
                 meta2["job_reference_status"] = "parse_failed"
                 stage_updates.append({"step": "job_reference", "ok": False, "error": str(e)[:200]})
     
-        # 2) Work experience tailoring (cacheable per job_sig + base_sig)
+        target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
+        if target_lang not in ("en", "de", "pl"):
+            target_lang = "en"
+        work_sig = deps.sha256_text(f"{job_sig}|{target_lang}")
+        skills_sig = deps.sha256_text(f"{job_sig}|{target_lang}")
+
+        # 2) Work experience tailoring (cacheable per job_sig + target_lang + base_sig)
         if (
             isinstance(meta2.get("work_experience_proposal_block"), dict)
-            and str(meta2.get("work_experience_proposal_sig") or "") == job_sig
+            and str(meta2.get("work_experience_proposal_sig") or "") == work_sig
             and str(meta2.get("work_experience_proposal_base_sig") or "") == base_sig
         ):
             stage_updates.append({"step": "work_tailor", "mode": "cache", "ok": True})
@@ -260,11 +294,9 @@ def handle_fast_paths_actions(
             if not work_list:
                 stage_updates.append({"step": "work_tailor", "ok": False, "error": "no_work_experience"})
             else:
-                job_summary = deps.format_job_reference_for_display(meta2.get("job_reference")) if isinstance(meta2.get("job_reference"), dict) else ""
+                job_summary = _job_summary_for_prompt(meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None)
                 notes = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
                 feedback = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
-                target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
-    
                 role_blocks = []
                 for r in work_list[:12]:
                     if not isinstance(r, dict):
@@ -404,7 +436,7 @@ def handle_fast_paths_actions(
                             "notes": str(getattr(prop, "notes", "") or ""),
                             "created_at": deps.now_iso(),
                         }
-                        meta2["work_experience_proposal_sig"] = job_sig
+                        meta2["work_experience_proposal_sig"] = work_sig
                         meta2["work_experience_proposal_base_sig"] = base_sig
                         stage_updates.append({"step": "work_tailor", "mode": "ai", "ok": True})
                     except Exception as e:
@@ -459,16 +491,16 @@ def handle_fast_paths_actions(
         except Exception as e:
             stage_updates.append({"step": "work_apply", "ok": False, "error": str(e)[:200]})
     
-        # 3) Skills ranking (cacheable per job_sig + base_sig)
+        # 3) Skills ranking (cacheable per job_sig + target_lang + base_sig)
         if (
             isinstance(meta2.get("skills_proposal_block"), dict)
-            and str(meta2.get("skills_proposal_sig") or "") == job_sig
+            and str(meta2.get("skills_proposal_sig") or "") == skills_sig
             and str(meta2.get("skills_proposal_base_sig") or "") == base_sig
         ):
             stage_updates.append({"step": "skills_rank", "mode": "cache", "ok": True})
         else:
             job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
-            job_summary = deps.format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+            job_summary = _job_summary_for_prompt(job_ref)
             tailoring_suggestions = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
             feedback_once_raw = str(meta2.get("work_tailoring_feedback") or "").strip()
             tailoring_feedback = deps.escape_user_input_for_prompt(feedback_once_raw)
@@ -477,7 +509,6 @@ def handle_fast_paths_actions(
                 meta2["work_tailoring_feedback_consumed_at"] = deps.now_iso()
             raw_docx_skills = deps.collect_raw_docx_skills_context(meta=meta2, max_items=20)
             raw_docx_skills_text = "\n".join([f"- {str(s).strip()}" for s in raw_docx_skills if str(s).strip()])
-            target_lang = str(meta2.get("target_language") or cv_data.get("language") or "en").strip().lower()
             work_blocks: list[str] = []
             work_list = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
             for r in (work_list or [])[:8]:
@@ -523,7 +554,7 @@ def handle_fast_paths_actions(
                         "notes": str(getattr(prop, "notes", "") or "")[:500],
                         "created_at": deps.now_iso(),
                     }
-                    meta2["skills_proposal_sig"] = job_sig
+                    meta2["skills_proposal_sig"] = skills_sig
                     meta2["skills_proposal_base_sig"] = base_sig
                     stage_updates.append({"step": "skills_rank", "mode": "ai", "ok": True})
                 except Exception as e:

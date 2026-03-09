@@ -57,6 +57,10 @@ def handle_education_basic_actions(
         cv_data2 = dict(cv_data or {})
         cv_data2["education"] = parsed
         cv_data = cv_data2
+        cf = meta2.get("confirmed_flags") if isinstance(meta2.get("confirmed_flags"), dict) else {}
+        cf = dict(cf or {})
+        cf["education_confirmed"] = False
+        meta2["confirmed_flags"] = cf
         meta2 = deps.wizard_set_stage(meta2, "education")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(

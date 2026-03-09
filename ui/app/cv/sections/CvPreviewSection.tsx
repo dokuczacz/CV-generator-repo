@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { downloadPDF } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,9 @@ export function CvPreviewSection({
   requiredLabel,
 }: CvPreviewSectionProps) {
   const stageLabel = uiAction?.stage || lastStage || '';
+  const isJobDataTableStage =
+    String(uiAction?.stage || '').toUpperCase() === 'JOB_DATA_TABLE' ||
+    String(lastStage || '').toLowerCase() === 'job_data_table';
 
   const renderActionButtons = () => {
     if (!uiAction?.actions?.length) return null;
@@ -87,9 +91,17 @@ export function CvPreviewSection({
     const renderButtons = (items: typeof actions) => (
       <div className="flex flex-wrap gap-2">
         {items.map((a) => {
+          if (a.id === 'DOWNLOAD_PDF' && actions.some((x) => x.id === 'REQUEST_GENERATE_PDF')) {
+            return null;
+          }
           const isSecondary = a.style === 'secondary' || a.style === 'tertiary';
           const isCancel = a.id.endsWith('_CANCEL') || a.id.endsWith('_BACK');
-          const payload = hasEditable && !isCancel ? formDraft : undefined;
+          const payloadBase = hasEditable && !isCancel ? formDraft : undefined;
+          const wizardStage = String(lastStage || '').toLowerCase();
+          const isExplicitWorkRegenerate = a.id === 'WORK_TAILOR_RUN' && (wizardStage === 'work_tailor_review' || wizardStage === 'work_tailor_feedback');
+          const payload = isExplicitWorkRegenerate
+            ? { ...(payloadBase || {}), force_regenerate: true }
+            : payloadBase;
           if (isLanguageSelection && !enabledLanguageActions.has(a.id)) {
             return null;
           }
@@ -113,12 +125,10 @@ export function CvPreviewSection({
               onClick={() => {
                 if (a.id === 'REQUEST_GENERATE_PDF' && hasLocalCvPdf) {
                   downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
+                  void onSendUserAction(a.id, payload);
                   return;
                 }
-                if (a.id === 'COVER_LETTER_GENERATE' && hasLocalCoverPdf) {
-                  downloadPDF(latestCoverLetterPdfBase64!, latestCoverLetterPdfFilename || `CoverLetter_${Date.now()}.pdf`);
-                  return;
-                }
+                // Always call backend for cover-letter generate/download so we don't serve stale local PDF cache.
                 if (a.id === 'DOWNLOAD_PDF' && hasLocalCvPdf) {
                   downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
                   return;
@@ -132,23 +142,6 @@ export function CvPreviewSection({
             </Button>
           );
         })}
-        {isCoverLetterStage && (hasGeneratedPdf || hasLocalCvPdf) ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (hasLocalCvPdf) {
-                downloadPDF(latestCvPdfBase64!, latestCvPdfDownloadName || latestCvPdfFilename || `CV_${Date.now()}.pdf`);
-                return;
-              }
-              void onSendUserAction('DOWNLOAD_PDF');
-            }}
-            disabled={isLoading}
-            data-testid="action-inline-download-cv"
-          >
-            Pobierz CV
-          </Button>
-        ) : null}
       </div>
     );
 
@@ -186,6 +179,19 @@ export function CvPreviewSection({
                       rows={8}
                       placeholder={f.placeholder}
                     />
+                  ) : f.type === 'select' ? (
+                    <select
+                      value={formDraft[f.key] ?? ''}
+                      onChange={(e) => onFormDraftChange(f.key, e.target.value)}
+                      disabled={isLoading}
+                      className="mt-2 w-full rounded-md border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
+                    >
+                      {(Array.isArray(f.options) ? f.options : []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   ) : (
                     <input
                       value={formDraft[f.key] ?? ''}
@@ -197,10 +203,76 @@ export function CvPreviewSection({
                   )
                 ) : (
                   (() => {
-                    const isWorkRolesPreview = String(uiAction.stage || '').toUpperCase() === 'WORK_EXPERIENCE' && f.key === 'roles_preview';
+                    if (f.key === 'job_data_table_json') {
+                      const formatCvDate = (rawValue: string): string => {
+                        const value = String(rawValue || '').trim();
+                        if (!value) return '-';
+                        const dateTime = value.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+                        if (dateTime) return `${dateTime[1]} ${dateTime[2]}`;
+                        const dateOnly = value.match(/^(\d{4}-\d{2}-\d{2})/);
+                        if (dateOnly) return dateOnly[1];
+                        return value;
+                      };
+
+                      let rows: Array<Record<string, string>> = [];
+                      try {
+                        const parsed = JSON.parse(String(f.value || '[]'));
+                        if (Array.isArray(parsed)) {
+                          rows = parsed
+                            .filter((r) => r && typeof r === 'object')
+                            .map((r) => ({
+                              position_name: String((r as Record<string, unknown>).position_name || ''),
+                              company_name: String((r as Record<string, unknown>).company_name || ''),
+                              cv_generated_at: String((r as Record<string, unknown>).cv_generated_at || ''),
+                              updated_at: String((r as Record<string, unknown>).updated_at || ''),
+                              company_address: String((r as Record<string, unknown>).company_address || ''),
+                              company_email: String((r as Record<string, unknown>).company_email || ''),
+                              company_phone: String((r as Record<string, unknown>).company_phone || ''),
+                            }));
+                        }
+                      } catch {
+                        rows = [];
+                      }
+
+                      return (
+                        <div className="mt-2 overflow-x-auto">
+                          <table className="min-w-full border-collapse text-sm text-slate-900" data-testid="job-data-html-table">
+                            <thead>
+                              <tr className="bg-slate-50">
+                                <th className="border border-slate-200 px-2 py-1 text-left">Data CV</th>
+                                <th className="border border-slate-200 px-2 py-1 text-left">Nazwa stanowiska</th>
+                                <th className="border border-slate-200 px-2 py-1 text-left">Nazwa firmy</th>
+                                <th className="border border-slate-200 px-2 py-1 text-left">Adres firmy</th>
+                                <th className="border border-slate-200 px-2 py-1 text-left">Email do firmy</th>
+                                <th className="border border-slate-200 px-2 py-1 text-left">Telefon do firmy</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(rows.length ? rows : [{ position_name: '', company_name: '', company_address: '', company_email: '', company_phone: '', cv_generated_at: '', updated_at: '' }]).map((row, idx) => (
+                                <tr key={idx}>
+                                  <td className="border border-slate-200 px-2 py-1">{formatCvDate(row.cv_generated_at || row.updated_at || '')}</td>
+                                  <td className="border border-slate-200 px-2 py-1">{row.position_name}</td>
+                                  <td className="border border-slate-200 px-2 py-1">{row.company_name}</td>
+                                  <td className="border border-slate-200 px-2 py-1">{row.company_address}</td>
+                                  <td className="border border-slate-200 px-2 py-1">{row.company_email}</td>
+                                  <td className="border border-slate-200 px-2 py-1">{row.company_phone}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    }
+
+                    const isWorkExperienceStage = String(uiAction.stage || '').toUpperCase() === 'WORK_EXPERIENCE';
+                    const isWorkRolesPreview = isWorkExperienceStage && (f.key === 'roles_preview' || f.key === 'proposal_roles_preview');
                     if (!isWorkRolesPreview) {
                       return <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">{f.value || ''}</div>;
                     }
+
+                    const upActionId = f.key === 'proposal_roles_preview' ? 'MOVE_WORK_PROPOSAL_UP' : 'MOVE_WORK_EXPERIENCE_UP';
+                    const downActionId = f.key === 'proposal_roles_preview' ? 'MOVE_WORK_PROPOSAL_DOWN' : 'MOVE_WORK_EXPERIENCE_DOWN';
+                    const testIdPrefix = f.key === 'proposal_roles_preview' ? 'proposal-move' : 'work-move';
 
                     const lines = String(f.value || '')
                       .split('\n')
@@ -226,9 +298,9 @@ export function CvPreviewSection({
                                   variant="secondary"
                                   disabled={isLoading || roleIdx <= 0}
                                   onClick={() => {
-                                    void onSendUserAction('MOVE_WORK_EXPERIENCE_UP', { position_index: roleIdx });
+                                    void onSendUserAction(upActionId, { position_index: roleIdx });
                                   }}
-                                  data-testid={`work-move-up-${roleIdx}`}
+                                  data-testid={`${testIdPrefix}-up-${roleIdx}`}
                                 >
                                   ↑
                                 </Button>
@@ -237,9 +309,9 @@ export function CvPreviewSection({
                                   variant="secondary"
                                   disabled={isLoading || roleIdx >= lines.length - 1}
                                   onClick={() => {
-                                    void onSendUserAction('MOVE_WORK_EXPERIENCE_DOWN', { position_index: roleIdx });
+                                    void onSendUserAction(downActionId, { position_index: roleIdx });
                                   }}
-                                  data-testid={`work-move-down-${roleIdx}`}
+                                  data-testid={`${testIdPrefix}-down-${roleIdx}`}
                                 >
                                   ↓
                                 </Button>
@@ -276,7 +348,7 @@ export function CvPreviewSection({
             </div>
             <div className="flex items-center gap-2">
               {actionNotice ? <span className="text-xs text-indigo-700">{actionNotice}</span> : null}
-              {latestCvPdfBase64 ? (
+              {latestCvPdfBase64 && !(uiAction?.actions || []).some((a) => a.id === 'REQUEST_GENERATE_PDF' || a.id === 'DOWNLOAD_PDF') ? (
                 <Button size="sm" variant="secondary" onClick={onDownloadPdf} data-testid="download-pdf">
                   Pobierz PDF
                 </Button>
@@ -287,7 +359,7 @@ export function CvPreviewSection({
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {sessionId && uiAction ? renderStagePanel() : null}
-          {!sessionId ? (
+          {isJobDataTableStage ? null : !sessionId ? (
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">Brak aktywnej sesji.</div>
           ) : cvPreviewError ? (
             <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">Nie udało się pobrać danych sesji: {cvPreviewError}</div>

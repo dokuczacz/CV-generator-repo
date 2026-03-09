@@ -23,6 +23,9 @@ class JobReference(BaseModel):
     role_title: str = Field(..., description="Target role title")
     company: Optional[str] = Field(None, description="Company name, if explicitly present")
     location: Optional[str] = Field(None, description="Job location, if explicitly present")
+    company_address: Optional[str] = Field(None, description="Company address, if explicitly present")
+    company_email: Optional[str] = Field(None, description="Company contact email, if explicitly present")
+    company_phone: Optional[str] = Field(None, description="Company contact phone, if explicitly present")
     seniority: Optional[str] = Field(None, description="Seniority level (e.g. junior/mid/senior), if present")
     employment_type: Optional[str] = Field(None, description="Employment type (e.g. full-time/contract), if present")
 
@@ -68,31 +71,84 @@ def parse_job_reference(response_json: str | dict) -> JobReference:
     return JobReference.parse_obj(response_json)
 
 
-def format_job_reference_for_display(job_ref: dict) -> str:
-    """Best-effort, compact summary for UI display."""
-
+def _format_job_reference(
+    job_ref: dict,
+    *,
+    section_caps: dict[str, int],
+    include_sections: list[tuple[str, str]],
+) -> str:
     if not isinstance(job_ref, dict) or not job_ref:
         return "(no job reference)"
 
     title = str(job_ref.get("role_title") or "").strip() or "(unknown role)"
     company = str(job_ref.get("company") or "").strip()
     location = str(job_ref.get("location") or "").strip()
+    seniority = str(job_ref.get("seniority") or "").strip()
+    employment_type = str(job_ref.get("employment_type") or "").strip()
+    company_address = str(job_ref.get("company_address") or "").strip()
+    company_email = str(job_ref.get("company_email") or "").strip()
+    company_phone = str(job_ref.get("company_phone") or "").strip()
 
     header_parts = [p for p in [title, company, location] if p]
     lines: List[str] = [" | ".join(header_parts) if header_parts else title]
 
-    def _bullets(key: str, label: str, max_items: int = 8) -> None:
+    meta_parts = [p for p in [seniority, employment_type] if p]
+    if meta_parts:
+        lines.append("Profile: " + " | ".join(meta_parts))
+
+    company_info_parts = [
+        ("Address", company_address),
+        ("Email", company_email),
+        ("Phone", company_phone),
+    ]
+    company_info = [f"{label}: {value}" for label, value in company_info_parts if value]
+    if company_info:
+        lines.append("Company prompt info: " + " | ".join(company_info))
+
+    for key, label in include_sections:
         items = job_ref.get(key)
         if not isinstance(items, list) or not items:
-            return
+            continue
         cleaned = [str(x).strip() for x in items if str(x).strip()]
         if not cleaned:
-            return
-        head = cleaned[:max_items]
-        lines.append(f"{label}: " + "; ".join(head) + ("; …" if len(cleaned) > max_items else ""))
-
-    _bullets("must_haves", "Must-haves")
-    _bullets("tools_tech", "Tools/tech")
-    _bullets("keywords", "Keywords")
+            continue
+        cap = int(section_caps.get(key, 6))
+        head = cleaned[:cap]
+        suffix = "; ..." if len(cleaned) > cap else ""
+        lines.append(f"{label}: " + "; ".join(head) + suffix)
 
     return "\n".join(lines)
+
+
+def format_job_reference_for_display(job_ref: dict) -> str:
+    """Best-effort, compact summary for UI display."""
+    return _format_job_reference(
+        job_ref,
+        section_caps={"must_haves": 6, "tools_tech": 6, "keywords": 6},
+        include_sections=[
+            ("must_haves", "Must-haves"),
+            ("tools_tech", "Tools/tech"),
+            ("keywords", "Keywords"),
+        ],
+    )
+
+
+def format_job_reference_for_prompt(job_ref: dict) -> str:
+    """Richer deterministic summary for model input blocks."""
+    return _format_job_reference(
+        job_ref,
+        section_caps={
+            "responsibilities": 8,
+            "must_haves": 8,
+            "nice_to_haves": 5,
+            "tools_tech": 8,
+            "keywords": 8,
+        },
+        include_sections=[
+            ("responsibilities", "Responsibilities"),
+            ("must_haves", "Must-haves"),
+            ("nice_to_haves", "Nice-to-haves"),
+            ("tools_tech", "Tools/tech"),
+            ("keywords", "Keywords"),
+        ],
+    )

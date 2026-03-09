@@ -85,9 +85,11 @@ Job reference usage:
 - Allowed mentions: company name, site/location, job title, high-level employer domain context.
 - Do not mention employer tools/systems unless present in E0 evidence.
 - Limit job-posting keyword echoes to max 6 occurrences total.
+- Treat job-posting terminology as ranking/reordering guidance only.
 
 Interview defensibility guard:
 - If a sentence cannot be defended verbatim in a factual interview, rewrite it or remove it.
+- Reject any sentence with unsupported metrics, unsupported tools, or unsupported methodology claims.
 
 LENGTH CONTROL:
 - Target 1,800–2,200 characters.

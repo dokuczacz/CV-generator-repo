@@ -23,6 +23,9 @@ def handle_work_basic_actions(
     session_id: str,
     deps: WorkBasicActionDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    # Long operator notes are intentionally allowed; they are later escaped and metadata is shrink/offloaded when needed.
+    WORK_TAILORING_NOTES_MAX_CHARS = 8000
+
     if aid == "WORK_ADD_TAILORING_NOTES":
         meta2 = deps.wizard_set_stage(meta2, "work_notes_edit")
         cv_data, meta2 = deps.persist(cv_data, meta2)
@@ -123,8 +126,11 @@ def handle_work_basic_actions(
 
     if aid == "WORK_NOTES_SAVE":
         payload = user_action_payload or {}
-        notes = str(payload.get("work_tailoring_notes") or "").strip()[:2000]
+        notes = str(payload.get("work_tailoring_notes") or "").strip()[:WORK_TAILORING_NOTES_MAX_CHARS]
         meta2["work_tailoring_notes"] = notes
+        target_language = str(payload.get("target_language") or "").strip().lower()
+        if target_language in ("en", "de"):
+            meta2["target_language"] = target_language
         try:
             deps.append_event(
                 session_id,

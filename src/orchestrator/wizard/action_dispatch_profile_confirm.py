@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src.orchestrator.wizard.execution_strategy import resolve_execution_strategy
+
 
 @dataclass(frozen=True)
 class ProfileConfirmActionDeps:
@@ -73,10 +75,16 @@ def handle_profile_confirm_actions(
         target_lang = str(meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
         source_lang = str(meta2.get("source_language") or cv_data.get("language") or "en").strip().lower()
         explicit_target_lang_selected = bool(meta2.get("target_language"))
+        execution_strategy, _strategy_source = resolve_execution_strategy(
+            payload=client_context if isinstance(client_context, dict) else None,
+            meta=meta2,
+        )
+        unified_mode = execution_strategy == "unified"
         source_hash = deps.hash_bulk_translation_payload(deps.build_bulk_translation_payload(cv_data))
         needs_bulk_translation = (
             aid == "CONFIRM_IMPORT_PREFILL_YES"
             and deps.openai_enabled()
+            and not unified_mode
             and (source_lang != target_lang or explicit_target_lang_selected)
             and not deps.bulk_translation_cache_hit(meta=meta2, target_language=target_lang, source_hash=source_hash)
         )

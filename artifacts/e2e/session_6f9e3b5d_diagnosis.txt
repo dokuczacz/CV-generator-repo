@@ -1,0 +1,84 @@
+
+============================================================
+SESSION DIAGNOSIS: 6f9e3b5d-50d9-41e1-8112-74e7f2d4db23
+============================================================
+
+Created:  2026-03-03 22:48:33
+Updated:  2026-03-03 23:34:16
+Expires:  2026-03-04 22:48:33
+Version:  39
+
+--- CV DATA ---
+Full Name:        (empty)
+Email:            (empty)
+Phone:            (empty)
+Address Lines:    0
+Photo URL:        No (0 chars)
+Profile:          0 chars
+Work Experience:  0 entries
+Education:        0 entries
+Languages:        0 items
+IT/AI Skills:     0 items
+Further Exp:      0 entries
+Interests:        0 chars
+
+--- METADATA ---
+Language:         en
+Created From:     docx
+
+--- PREFILL SUMMARY ---
+Has Name:         True
+Has Email:        True
+Has Phone:        True
+Work Exp Count:   4
+Education Count:  2
+Languages Count:  4
+Skills Count:     8
+
+--- CONFIRMATION STATUS ---
+Contact Confirmed:   True
+Education Confirmed: True
+Confirmed At:        2026-03-03 22:55:53
+
+--- PHOTO BLOB ---
+Container:    cv-photos
+Blob Name:    photos/b368dc71-0031-4578-8a5e-c3173d7f9fbb.png
+Content Type: image/png
+
+--- UNCONFIRMED DOCX PREFILL ---
+Full Name:        Mariusz Horodecki
+Work Experience:  4 entries
+Education:        2 entries
+Languages:        4 items
+Skills:           8 items
+
+--- EVENT LOG (14 events) ---
+  [2026-03-03 22:48:33] get_cv_session
+  [2026-03-03 22:53:08] get_cv_session
+  [2026-03-03 22:55:53] get_cv_session
+  [2026-03-03 22:58:46] get_cv_session
+  [2026-03-03 23:03:58] get_cv_session
+  [2026-03-03 23:03:58] get_cv_session
+  [2026-03-03 23:07:44] get_cv_session
+  [2026-03-03 23:09:19] get_cv_session
+  [2026-03-03 23:09:19] get_cv_session
+  [2026-03-03 23:09:26] get_cv_session
+  [2026-03-03 23:11:18] get_cv_session
+  [2026-03-03 23:18:51] get_cv_session
+  [2026-03-03 23:28:21] get_cv_session
+  [2026-03-03 23:34:16] get_cv_session
+
+--- READINESS CHECK ---
+  full_name: MISSING
+  email: MISSING
+  phone: MISSING
+  work_experience: MISSING
+  education: MISSING
+  contact_confirmed: OK
+  education_confirmed: OK
+
+  CAN GENERATE PDF: NO
+  Missing: ['full_name', 'email', 'phone', 'work_experience', 'education']
+
+============================================================
+

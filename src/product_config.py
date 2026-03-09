@@ -21,6 +21,7 @@ Environment vars (optional overrides):
   CV_MAX_MODEL_CALLS / CV_MAX_TURNS=<int>
   CV_EXECUTION_LATCH=0/1
   CV_DELTA_MODE=0/1
+    CV_EXECUTION_STRATEGY=auto/separate/unified
   CV_PDF_ALWAYS_REGENERATE=0/1
   STORAGE_CONTAINER_PDFS=<str>
   STORAGE_CONTAINER_ARTIFACTS=<str>
@@ -113,6 +114,9 @@ CV_SINGLE_CALL_EXECUTION: bool = _get_bool_config("CV_SINGLE_CALL_EXECUTION", Tr
 USE_STRUCTURED_OUTPUT: bool = _get_bool_config("USE_STRUCTURED_OUTPUT", False)
 CV_EXECUTION_LATCH: bool = _get_bool_config("CV_EXECUTION_LATCH", True)
 CV_DELTA_MODE: bool = _get_bool_config("CV_DELTA_MODE", True)
+CV_EXECUTION_STRATEGY: str = _get_str_config("CV_EXECUTION_STRATEGY", "auto").strip().lower()
+if CV_EXECUTION_STRATEGY not in {"auto", "separate", "unified"}:
+    CV_EXECUTION_STRATEGY = "auto"
 
 # PDF generation
 CV_PDF_ALWAYS_REGENERATE: bool = _get_bool_config("CV_PDF_ALWAYS_REGENERATE", False)
@@ -144,10 +148,38 @@ STORAGE_CONTAINER_ARTIFACTS: str = _get_str_config("STORAGE_CONTAINER_ARTIFACTS"
 CV_OPENAI_TRACE: bool = _get_bool_config("CV_OPENAI_TRACE", False)
 CV_OPENAI_TRACE_DIR: str = _get_str_config("CV_OPENAI_TRACE_DIR", "tmp/openai_trace")
 CV_OPENAI_TRACE_FULL: bool = _get_bool_config("CV_OPENAI_TRACE_FULL", False)
+CV_OPENAI_PRESEND_CAPTURE: bool = _get_bool_config("CV_OPENAI_PRESEND_CAPTURE", True)
+CV_OPENAI_PRESEND_DIR: str = _get_str_config("CV_OPENAI_PRESEND_DIR", "tmp/openai_presend")
 CV_CONTEXT_PACK_MODE: str = _get_str_config("CV_CONTEXT_PACK_MODE", "").lower()
 CV_DEBUG_PROMPT_LOG: bool = _get_bool_config("CV_DEBUG_PROMPT_LOG", False)
 CV_GENERATION_STRICT_TEMPLATE: bool = _get_bool_config("CV_GENERATION_STRICT_TEMPLATE", False)
 CV_ENABLE_DEBUG_EXPORT: bool = _get_bool_config("CV_ENABLE_DEBUG_EXPORT", False)
+
+
+# ============================================================================
+# EXPERIMENT / PREFLIGHT (for orchestration A/B tests)
+# ============================================================================
+
+# baseline | variant_split | variant_unified
+EXPERIMENT_MODE: str = _get_str_config("EXPERIMENT_MODE", "baseline").strip().lower()
+if EXPERIMENT_MODE not in {"baseline", "variant_split", "variant_unified"}:
+    EXPERIMENT_MODE = "baseline"
+
+# Optional model override dedicated to experiments.
+EXPERIMENT_MODEL: str = _get_str_config("EXPERIMENT_MODEL", "").strip()
+
+# Collect experiment metrics artifacts/log summaries.
+EXPERIMENT_METRICS: bool = _get_bool_config("EXPERIMENT_METRICS", False)
+
+# Preflight dry test gate before paid OpenAI calls.
+# required | warn | off
+DRY_TEST_MODE: str = _get_str_config("DRY_TEST_MODE", "required").strip().lower()
+if DRY_TEST_MODE not in {"required", "warn", "off"}:
+    DRY_TEST_MODE = "required"
+
+# Persist dry-test artifacts for debugging capsule/prompt consistency.
+DRY_TEST_ARTIFACTS: bool = _get_bool_config("DRY_TEST_ARTIFACTS", False)
+DRY_TEST_ARTIFACTS_DIR: str = _get_str_config("DRY_TEST_ARTIFACTS_DIR", "tmp/preflight")
 
 # Prompt ID enforcement (for labs/testing)
 REQUIRE_OPENAI_PROMPT_ID: bool = _get_bool_config("REQUIRE_OPENAI_PROMPT_ID", False)

@@ -5,6 +5,17 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src import product_config
+from src.combined_cv_proposal import (
+    get_combined_cv_proposal_response_format,
+    parse_combined_cv_proposal,
+)
+from src.cv_cl_unified_proposal import (
+    get_unified_cv_cl_proposal_response_format,
+    parse_unified_cv_cl_proposal,
+)
+from src.orchestrator.wizard.execution_strategy import resolve_execution_strategy
+
 
 @dataclass(frozen=True)
 class WorkTailorAIActionDeps:
@@ -37,6 +48,7 @@ class WorkTailorAIActionDeps:
     build_work_bullet_violation_payload: Callable[..., dict]
     select_roles_by_violation_indices: Callable[..., list[dict]]
     snapshot_session: Callable[..., Any]
+    format_job_reference_for_prompt: Callable[[dict], str] | None = None
 
 
 def handle_work_tailor_ai_actions(
@@ -49,6 +61,67 @@ def handle_work_tailor_ai_actions(
     trace_id: str,
     deps: WorkTailorAIActionDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    WORK_TAILORING_NOTES_MAX_CHARS = 8000
+
+    def _capitalize_first_alpha(text: str) -> str:
+        s = str(text or "")
+        for i, ch in enumerate(s):
+            if ch.isalpha():
+                return s[:i] + ch.upper() + s[i + 1 :]
+        return s
+
+    def _word_count(text: str) -> int:
+        return len([w for w in str(text or "").strip().split() if w])
+
+    def _job_summary_for_prompt(job_ref: dict | None) -> str:
+        if not isinstance(job_ref, dict):
+            return ""
+        formatter = deps.format_job_reference_for_prompt or deps.format_job_reference_for_display
+        return formatter(job_ref)
+
+    if aid in ("MOVE_WORK_PROPOSAL_UP", "MOVE_WORK_PROPOSAL_DOWN"):
+        payload = user_action_payload or {}
+        try:
+            position_index = int(payload.get("position_index", -1))
+        except Exception:
+            position_index = -1
+
+        proposal_block = meta2.get("work_experience_proposal_block")
+        roles = proposal_block.get("roles") if isinstance(proposal_block, dict) and isinstance(proposal_block.get("roles"), list) else []
+        if not isinstance(proposal_block, dict) or not isinstance(roles, list) or not roles:
+            meta2 = deps.wizard_set_stage(meta2, "work_tailor_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text="No proposal roles to reorder.",
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
+
+        moved = False
+        if aid == "MOVE_WORK_PROPOSAL_UP" and position_index > 0 and position_index < len(roles):
+            roles[position_index], roles[position_index - 1] = roles[position_index - 1], roles[position_index]
+            moved = True
+        if aid == "MOVE_WORK_PROPOSAL_DOWN" and position_index >= 0 and position_index < len(roles) - 1:
+            roles[position_index], roles[position_index + 1] = roles[position_index + 1], roles[position_index]
+            moved = True
+
+        proposal_block2 = dict(proposal_block)
+        proposal_block2["roles"] = roles
+        meta2["work_experience_proposal_block"] = proposal_block2
+        if moved:
+            meta2["work_experience_order_source"] = "proposal_manual_reorder"
+            msg = f"Moved proposed role {position_index + 1}."
+        else:
+            msg = "Cannot move: role is already at the edge or index is invalid."
+
+        meta2 = deps.wizard_set_stage(meta2, "work_tailor_review")
+        cv_data, meta2 = deps.persist(cv_data, meta2)
+        return True, cv_data, meta2, deps.wizard_resp(
+            assistant_text=msg,
+            meta_out=meta2,
+            cv_out=cv_data,
+        )
+
     if aid == "WORK_TAILOR_RUN":
         # Generate one tailored block for the whole work experience section (no inventions).
         work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
@@ -75,7 +148,7 @@ def handle_work_tailor_ai_actions(
         payload = user_action_payload or {}
         force_regenerate = bool(payload.get("force_regenerate")) if isinstance(payload, dict) else False
         if isinstance(payload, dict) and "work_tailoring_notes" in payload:
-            _notes = str(payload.get("work_tailoring_notes") or "").strip()[:2000]
+            _notes = str(payload.get("work_tailoring_notes") or "").strip()[:WORK_TAILORING_NOTES_MAX_CHARS]
             meta2["work_tailoring_notes"] = _notes
             try:
                 deps.append_event(
@@ -91,9 +164,16 @@ def handle_work_tailor_ai_actions(
                 )
             except Exception:
                 pass
+        if isinstance(payload, dict):
+            _target_language = str(payload.get("target_language") or "").strip().lower()
+            if _target_language in ("en", "de"):
+                meta2["target_language"] = _target_language
+            _positioning_mode = str(payload.get("positioning_mode") or "").strip().lower()
+            if _positioning_mode:
+                meta2["positioning_mode"] = _positioning_mode[:80]
     
         job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
-        job_summary = deps.format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+        job_summary = _job_summary_for_prompt(job_ref)
         job_text = str(meta2.get("job_posting_text") or "")
         notes = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
         feedback = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_feedback") or ""))
@@ -122,13 +202,27 @@ def handle_work_tailor_ai_actions(
                     meta2["job_reference"] = jr.dict()
                     meta2["job_reference_status"] = "ok"
                     job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
-                    job_summary = deps.format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+                    job_summary = _job_summary_for_prompt(job_ref)
                 except Exception as e:
                     meta2["job_reference_error"] = str(e)[:400]
                     meta2["job_reference_status"] = "parse_failed"
             else:
                 meta2["job_reference_error"] = str(err_jr)[:400]
                 meta2["job_reference_status"] = "call_failed"
+
+        # Strict mode: job summary must come from parsed job_reference (no fallback synthesis).
+        if (not str(job_summary or "").strip()) and job_text:
+            meta2["work_experience_proposal_error"] = "job_summary_missing_or_unparsed"
+            meta2 = deps.wizard_set_stage(meta2, "work_experience")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text=(
+                    "Job summary is missing or could not be parsed. "
+                    "Please re-analyze the job posting before running tailoring."
+                ),
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
     
         # Serialize existing roles for the model.
         role_blocks = []
@@ -151,6 +245,147 @@ def handle_work_tailor_ai_actions(
             f"[TAILORING_FEEDBACK]\n{feedback}\n\n"
             f"[CURRENT_WORK_EXPERIENCE]\n{roles_text}\n"
         )
+
+        # Execution strategy branch:
+        # - separate: classic staged calls
+        # - unified: one-call path for combined CV (+ optional cover letter)
+        experiment_mode = str(product_config.EXPERIMENT_MODE or "baseline").strip().lower()
+        execution_strategy, execution_strategy_source = resolve_execution_strategy(payload=payload, meta=meta2)
+        meta2["execution_strategy"] = execution_strategy
+        meta2["execution_strategy_source"] = execution_strategy_source
+
+        if execution_strategy == "unified":
+            current_it_ai = cv_data.get("it_ai_skills") if isinstance(cv_data.get("it_ai_skills"), list) else []
+            current_tech = (
+                cv_data.get("technical_operational_skills")
+                if isinstance(cv_data.get("technical_operational_skills"), list)
+                else []
+            )
+            positioning_mode = deps.sanitize_for_prompt(str(meta2.get("positioning_mode") or "").strip())
+            combined_user_text = (
+                f"{user_text}\n"
+                f"[CURRENT_IT_AI_SKILLS]\n"
+                + "\n".join([f"- {deps.sanitize_for_prompt(str(s))}" for s in current_it_ai if str(s).strip()])
+                + "\n\n"
+                f"[CURRENT_TECHNICAL_OPERATIONAL_SKILLS]\n"
+                + "\n".join([f"- {deps.sanitize_for_prompt(str(s))}" for s in current_tech if str(s).strip()])
+                + "\n\n"
+                + f"[POSITIONING_MODE]\n{positioning_mode}\n"
+                + "\n"
+            )
+
+            # Keep backward compatibility with existing split experiment mode.
+            effective_unified_mode = "variant_split" if experiment_mode == "variant_split" else "variant_unified"
+            stage_name = "cv_cl_unified" if effective_unified_mode == "variant_unified" else "cv_combined"
+            response_format = (
+                get_unified_cv_cl_proposal_response_format()
+                if effective_unified_mode == "variant_unified"
+                else get_combined_cv_proposal_response_format()
+            )
+            ok_exp, parsed_exp, err_exp = deps.openai_json_schema_call(
+                system_prompt=deps.build_ai_system_prompt(stage=stage_name, target_language=target_lang),
+                user_text=combined_user_text,
+                trace_id=trace_id,
+                session_id=session_id,
+                response_format=response_format,
+                max_output_tokens=3200 if effective_unified_mode == "variant_split" else 3600,
+                stage=stage_name,
+            )
+            if not ok_exp or not isinstance(parsed_exp, dict):
+                meta2["work_experience_proposal_error"] = str(err_exp)[:400]
+                meta2 = deps.wizard_set_stage(meta2, "work_experience")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text=deps.friendly_schema_error_message(str(err_exp)),
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
+
+            try:
+                if effective_unified_mode == "variant_unified":
+                    unified = parse_unified_cv_cl_proposal(parsed_exp)
+                    combined = unified.combined_cv
+                    cl = unified.cover_letter
+                    cl_block = cl.dict()
+                    # Unified UX fix: enforce sentence-case opening start (model may return lowercase).
+                    cl_block["opening_paragraph"] = _capitalize_first_alpha(str(cl_block.get("opening_paragraph") or ""))
+
+                    # Unified contract guard: keep cover letter length within agreed range.
+                    cl_full_text = " ".join(
+                        [
+                            str(cl_block.get("opening_paragraph") or ""),
+                            " ".join([str(p) for p in (cl_block.get("core_paragraphs") or [])]),
+                            str(cl_block.get("closing_paragraph") or ""),
+                        ]
+                    ).strip()
+                    cl_words = _word_count(cl_full_text)
+                    if cl_words < 220 or cl_words > 320:
+                        raise ValueError(
+                            f"Unified cover letter length out of range: {cl_words} words (expected 220-320)."
+                        )
+
+                    meta2["cover_letter_block"] = cl_block
+                    meta2["alignment_notes"] = str(getattr(unified, "alignment_notes", "") or "")[:2000]
+                    meta2["cover_letter_input_sig"] = deps.sha256_text(
+                        json.dumps(parsed_exp, ensure_ascii=False, sort_keys=True)
+                    )
+                else:
+                    combined = parse_combined_cv_proposal(parsed_exp)
+
+                roles = list(getattr(combined, "roles", []) or [])
+                proposal_roles = [
+                    {
+                        "title": r.title if hasattr(r, "title") else "",
+                        "company": r.company if hasattr(r, "company") else "",
+                        "date_range": r.date_range if hasattr(r, "date_range") else "",
+                        "location": r.location if hasattr(r, "location") else "",
+                        "bullets": list(r.bullets if hasattr(r, "bullets") else []),
+                    }
+                    for r in roles[:5]
+                ]
+
+                meta2["work_experience_proposal_block"] = {
+                    "roles": proposal_roles,
+                    "notes": str(getattr(combined, "notes", "") or ""),
+                    "created_at": deps.now_iso(),
+                    "experiment_mode": effective_unified_mode,
+                    "execution_strategy": execution_strategy,
+                }
+                meta2["skills_proposal_block"] = {
+                    "it_ai_skills": [str(s).strip() for s in list(getattr(combined, "it_ai_skills", []) or []) if str(s).strip()][:8],
+                    "technical_operational_skills": [
+                        str(s).strip()
+                        for s in list(getattr(combined, "technical_operational_skills", []) or [])
+                        if str(s).strip()
+                    ][:8],
+                    "notes": str(getattr(combined, "notes", "") or "")[:500],
+                    "created_at": deps.now_iso(),
+                    "experiment_mode": effective_unified_mode,
+                    "execution_strategy": execution_strategy,
+                }
+                meta2["skills_proposal_input_sig"] = deps.sha256_text(
+                    json.dumps(parsed_exp, ensure_ascii=False, sort_keys=True)
+                )
+                meta2 = deps.wizard_set_stage(meta2, "work_tailor_review")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text=(
+                        "Combined CV proposal ready."
+                        if effective_unified_mode == "variant_split"
+                        else "Unified CV + Cover Letter proposal ready."
+                    ),
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
+            except Exception as exp_parse_err:
+                meta2["work_experience_proposal_error"] = str(exp_parse_err)[:400]
+                meta2 = deps.wizard_set_stage(meta2, "work_experience")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text=deps.friendly_schema_error_message(str(exp_parse_err)),
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
 
         # Guard against accidental repeated runs with identical inputs.
         # This keeps "Regenerate" explicit: change notes/feedback or pass force_regenerate=true.
@@ -178,10 +413,14 @@ def handle_work_tailor_ai_actions(
                 and prev_input_fingerprint == input_fingerprint
                 and stage_now in ("work_tailor_review", "work_notes_edit", "work_tailor_feedback")
             ):
+                # Reuse existing proposal for identical inputs and move user to review.
+                # This avoids a perceived no-op when user clicks "Run" again.
+                meta2 = deps.wizard_set_stage(meta2, "work_tailor_review")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
                 return True, cv_data, meta2, deps.wizard_resp(
                     assistant_text=(
-                        "Proposal is already up to date for current notes/job context. "
-                        "Edit notes/feedback to regenerate, or accept the current proposal."
+                        "Loaded existing work proposal for current notes/job context. "
+                        "Use Regenerate (force) or edit notes/feedback to create a new version."
                     ),
                     meta_out=meta2,
                     cv_out=cv_data,
@@ -421,7 +660,7 @@ def handle_work_tailor_ai_actions(
             try:
                 retry_attempts = 2
                 attempt = 0
-                job_summary = deps.format_job_reference_for_display(meta2.get("job_reference")) if isinstance(meta2.get("job_reference"), dict) else ""
+                job_summary = _job_summary_for_prompt(meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None)
                 notes = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
                 target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
     

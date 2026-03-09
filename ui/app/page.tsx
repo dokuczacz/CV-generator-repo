@@ -466,6 +466,7 @@ export default function CVGenerator() {
             if (resolvedFilename) {
               setLatestCoverLetterPdfFilename(resolvedFilename);
             }
+            downloadPDF(result.pdf_base64, resolvedFilename || latestCoverLetterPdfFilename || `CoverLetter_${Date.now()}.pdf`);
           } else {
             setLatestCvPdfBase64(result.pdf_base64);
             if (resolvedFilename) {

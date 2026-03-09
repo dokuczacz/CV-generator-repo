@@ -9,6 +9,21 @@ from typing import Any, Callable
 from src.blob_store import BlobPointer, CVBlobStore
 
 
+def _ensure_signoff_full_name(block: dict, cv_data: dict) -> dict:
+    out = dict(block or {})
+    full_name = str((cv_data or {}).get("full_name") or "").strip()
+    if not full_name:
+        return out
+    signoff = str(out.get("signoff") or "").strip()
+    if not signoff:
+        out["signoff"] = full_name
+        return out
+    if full_name.casefold() in signoff.casefold():
+        return out
+    out["signoff"] = f"{signoff}\n{full_name}"
+    return out
+
+
 @dataclass(frozen=True)
 class CoverLetterToolDeps:
     cv_enable_cover_letter: bool
@@ -53,6 +68,7 @@ def tool_generate_cover_letter_from_session(
     if not ok_cl or not isinstance(cl_block, dict):
         return 500, {"error": "cover_letter_generation_failed", "details": str(err_cl)[:400]}, "application/json"
 
+    cl_block = _ensure_signoff_full_name(cl_block, cv_data)
     ok2, errs2 = deps.validate_cover_letter_block(block=cl_block, cv_data=cv_data)
     if not ok2:
         return 400, {"error": "cover_letter_validation_failed", "details": errs2[:8]}, "application/json"

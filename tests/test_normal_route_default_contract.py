@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from src.orchestrator.wizard.ui_builder import UiBuilderDeps, build_ui_action
 
 
@@ -65,3 +67,35 @@ def test_normal_route_default_contract_actions_present() -> None:
         assert isinstance(ui_action, dict), f"ui_action missing for stage={stage}"
         ids = _action_ids(ui_action)
         assert expected_action in ids, f"expected action {expected_action} missing for stage={stage}; got={sorted(ids)}"
+
+
+def test_job_data_table_includes_visible_cv_date() -> None:
+    deps = _deps()
+    cv_data = {}
+    meta = {
+        "flow_mode": "wizard",
+        "wizard_stage": "job_data_table",
+        "job_data_table_history": [
+            {
+                "position_name": "Automation Engineer",
+                "company_name": "ACME",
+                "company_address": "Zurich",
+                "company_email": "",
+                "company_phone": "",
+                "cv_generated_at": "2026-03-04T17:18:21.010772",
+                "updated_at": "2026-03-04T17:18:21.010772",
+            }
+        ],
+    }
+    readiness = {"can_generate": True, "confirmed_flags": {"contact_confirmed": True, "education_confirmed": True}}
+
+    ui_action = build_ui_action("job_data_table", cv_data, meta, readiness, deps)
+    assert isinstance(ui_action, dict)
+    fields = ui_action.get("fields") if isinstance(ui_action.get("fields"), list) else []
+    field = next((f for f in fields if isinstance(f, dict) and f.get("key") == "job_data_table_json"), None)
+    assert isinstance(field, dict)
+    rows = json.loads(str(field.get("value") or "[]"))
+    assert isinstance(rows, list) and rows
+    first = rows[0]
+    assert "CV:" not in str(first.get("position_name") or "")
+    assert str(first.get("cv_generated_at") or "")

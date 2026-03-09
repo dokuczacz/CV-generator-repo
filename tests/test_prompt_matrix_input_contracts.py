@@ -10,6 +10,10 @@ import function_app
 class _FakeStore:
     session: dict[str, Any]
 
+    def get_session_with_blob_retrieval(self, session_id: str) -> dict[str, Any] | None:
+        # Mirror production helper used by orchestration path.
+        return self.get_session(session_id)
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         if session_id != "s1":
             return None
@@ -130,9 +134,9 @@ class _OpenAICapture:
                         "recipient_company": "",
                         "recipient_job_title": "",
                     },
-                    "opening_paragraph": "I am applying for the role based on my documented quality and operations experience.",
+                    "opening_paragraph": "I am applying for the role based on my documented experience as Director at GL Solutions.",
                     "core_paragraphs": [
-                        "I led quality and process initiatives across production and infrastructure contexts.",
+                        "At GL Solutions, I led quality and process initiatives across infrastructure delivery and operations.",
                     ],
                     "closing_paragraph": "Thank you for your consideration.",
                     "signoff": "Kind regards",

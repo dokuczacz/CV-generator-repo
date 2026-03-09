@@ -1,6 +1,33 @@
-Extract a compact, ATS-oriented job reference (1-2 pages summary max) from the provided job posting. Preserve key technical and soft skills, domains, certifications, and salary info. Remove unnecessary detail.
+Extract a compact, ATS-oriented job reference from the provided job posting.
 
 Language:
 - Use the same language as the job posting; do not translate.
 
-Output JSON: {job_id, company, title, key_skills[], tech_stack[], min_salary, max_salary, highlights[], domain, contract_type}.
+Evidence and scope:
+- Use only information present in the provided job posting text.
+- Keep content concise and factual.
+- Remove boilerplate and marketing text.
+
+Return strict JSON matching this schema shape exactly:
+{
+	"role_title": "string",
+	"company": "string or null",
+	"location": "string or null",
+	"company_address": "string or null",
+	"company_email": "string or null",
+	"company_phone": "string or null",
+	"seniority": "string or null",
+	"employment_type": "string or null",
+	"responsibilities": ["string"],
+	"must_haves": ["string"],
+	"nice_to_haves": ["string"],
+	"tools_tech": ["string"],
+	"keywords": ["string"]
+}
+
+Rules:
+- Do not invent missing values; use null for unknown scalar fields.
+- Keep array items short, single-line, deduplicated, and ATS-friendly.
+- Keep responsibilities/must_haves focused on role-critical items first.
+- Company contact fields should be extracted only if explicitly present in the job posting.
+- Return JSON only.

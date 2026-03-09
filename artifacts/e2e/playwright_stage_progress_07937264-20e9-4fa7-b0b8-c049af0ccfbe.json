@@ -1,0 +1,76 @@
+{
+  "session_id": "07937264-20e9-4fa7-b0b8-c049af0ccfbe",
+  "generated_at_utc": "2026-03-04T17:19:18.455Z",
+  "steps": [
+    {
+      "step": 1,
+      "stageBefore": "language_selection",
+      "actionId": "LANGUAGE_SELECT_EN",
+      "stageAfter": "import_gate_pending",
+      "elapsedMs": 275
+    },
+    {
+      "step": 2,
+      "stageBefore": "import_gate_pending",
+      "actionId": "CONFIRM_IMPORT_PREFILL_YES",
+      "stageAfter": "contact",
+      "elapsedMs": 13230
+    },
+    {
+      "step": 3,
+      "stageBefore": "contact",
+      "actionId": "CONTACT_CONFIRM",
+      "stageAfter": "education",
+      "elapsedMs": 334
+    },
+    {
+      "step": 4,
+      "stageBefore": "education",
+      "actionId": "EDUCATION_CONFIRM",
+      "stageAfter": "job_posting",
+      "elapsedMs": 268
+    },
+    {
+      "step": 5,
+      "stageBefore": "job_posting",
+      "actionId": "JOB_OFFER_CONTINUE",
+      "stageAfter": "work_notes_edit",
+      "elapsedMs": 8140
+    },
+    {
+      "step": 6,
+      "stageBefore": "work_notes_edit",
+      "actionId": "WORK_NOTES_CANCEL",
+      "stageAfter": "work_experience",
+      "elapsedMs": 273
+    },
+    {
+      "step": 7,
+      "stageBefore": "work_experience",
+      "actionId": "WORK_TAILOR_SKIP",
+      "stageAfter": "it_ai_skills",
+      "elapsedMs": 278
+    },
+    {
+      "step": 8,
+      "stageBefore": "it_ai_skills",
+      "actionId": "SKILLS_TAILOR_RUN",
+      "stageAfter": "skills_tailor_review",
+      "elapsedMs": 8829
+    },
+    {
+      "step": 9,
+      "stageBefore": "skills_tailor_review",
+      "actionId": "SKILLS_TAILOR_ACCEPT",
+      "stageAfter": "review_final",
+      "elapsedMs": 294
+    },
+    {
+      "step": 10,
+      "stageBefore": "review_final",
+      "actionId": "REQUEST_GENERATE_PDF",
+      "stageAfter": "review_final",
+      "elapsedMs": 98
+    }
+  ]
+}

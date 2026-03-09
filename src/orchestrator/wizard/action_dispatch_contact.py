@@ -50,6 +50,10 @@ def handle_contact_and_language_actions(
         if addr:
             cv_data2["address_lines"] = [ln.strip() for ln in addr.splitlines() if ln.strip()]
         cv_data = cv_data2
+        cf = meta2.get("confirmed_flags") if isinstance(meta2.get("confirmed_flags"), dict) else {}
+        cf = dict(cf or {})
+        cf["contact_confirmed"] = False
+        meta2["confirmed_flags"] = cf
         meta2 = deps.wizard_set_stage(meta2, "contact")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(

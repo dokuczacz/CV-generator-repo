@@ -22,7 +22,17 @@ def handle_job_posting_basic_actions(
     meta2: dict,
     deps: JobPostingBasicDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    def _apply_target_language_from_payload(payload: dict | None) -> None:
+        if not isinstance(payload, dict):
+            return
+        raw = str(payload.get("target_language") or "").strip().lower()
+        if raw not in ("en", "de", "pl"):
+            return
+        meta2["target_language"] = raw
+        meta2["language"] = raw
+
     if aid == "JOB_OFFER_PASTE":
+        _apply_target_language_from_payload(user_action_payload if isinstance(user_action_payload, dict) else None)
         meta2 = deps.wizard_set_stage(meta2, "job_posting_paste")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(
@@ -106,6 +116,7 @@ def handle_job_posting_basic_actions(
         )
 
     if aid == "JOB_OFFER_CANCEL":
+        _apply_target_language_from_payload(user_action_payload if isinstance(user_action_payload, dict) else None)
         meta2 = deps.wizard_set_stage(meta2, "job_posting")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(
@@ -115,6 +126,7 @@ def handle_job_posting_basic_actions(
         )
 
     if aid == "JOB_OFFER_SKIP":
+        _apply_target_language_from_payload(user_action_payload if isinstance(user_action_payload, dict) else None)
         meta2 = deps.wizard_set_stage(meta2, "work_experience")
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(

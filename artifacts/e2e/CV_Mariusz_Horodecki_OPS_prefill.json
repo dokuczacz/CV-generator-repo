@@ -1,0 +1,131 @@
+{
+  "full_name": "Mariusz Horodecki",
+  "email": "horodecki.mariusz@gmail.com",
+  "phone": "+41 77 952 24 37",
+  "address_lines": [
+    "Zer Chirchu 20, 3933 Staldenried"
+  ],
+  "profile": "",
+  "work_experience": [
+    {
+      "date_range": "2020-01 - 2025-10",
+      "employer": "",
+      "location": "",
+      "title": "Director, GL Solutions Sp. Z o.o., Zielona Góra, Poland",
+      "bullets": [
+        "Led planning and execution of road construction and infrastructure projects delivering 30–40 k",
+        "EUR jobs, improving on-time delivery and contract compliance.",
+        "Coordinated site compliance to reduce rework and delays via schedules, improving daily operations with machines / tools reducing labor work.",
+        "Managed operational delivery of public and private contracts, maintaining regulatory",
+        "documentation and requirements"
+      ]
+    },
+    {
+      "date_range": "2018-11 - 2020-01",
+      "employer": "",
+      "location": "",
+      "title": "Head of Quality & Product Service, Expondo Polska Sp. z o.o., Zielona Góra, Poland",
+      "bullets": [
+        "Led three departments (35 staff) to standardize procedures and KPI dashboards, improving",
+        "quality oversight and team performance.",
+        "Reduced customer claims by 70% through targeted product fixes and process controls, restoring",
+        "OEM acceptance and supplier reliability.",
+        "Optimized warehouse workflows to halve pick/put steps by reorganizing locations, cutting handling",
+        "time and stock discrepancies."
+      ]
+    },
+    {
+      "date_range": "2016-08 - 2018-11",
+      "employer": "",
+      "location": "",
+      "title": "Quality Manager, SE Bordnetze SRL, Greenfield project Orhei, Moldova",
+      "bullets": [
+        "Established Greenfield plant quality systems and processes, achieving IATF certification at first",
+        "attempt and passing multiple customer audits.",
+        "Implemented VDA, Formel-Q and IATF standards across five sections (80 employees) to raise",
+        "production quality and OEM readiness.",
+        "Served as primary contact for OEM customers and certification bodies, reducing audit",
+        "nonconformities and improving supplier transparency."
+      ]
+    },
+    {
+      "date_range": "2011-03 - 2016-07",
+      "employer": "",
+      "location": "",
+      "title": "Global Process Improvement Specialist, Sumitomo Electric Bordnetze SE, Wolfsburg,",
+      "bullets": [
+        "Germany",
+        "Optimized workstations and processes, conducted time studies",
+        "Reduced costs through efficient production solutions",
+        "Lead auditor (PK) – coordinated global audits, benchmarking, and alignment with customer",
+        "requirements"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "date_range": "2012-2015",
+      "institution": "Poznań University of Technology,",
+      "title": "",
+      "details": [
+        "Master of Science in Electrical Engineering",
+        "specialization: Industrial and automotive systems"
+      ]
+    },
+    {
+      "date_range": "2008-2012",
+      "institution": "Poznań University of Technology,",
+      "title": "",
+      "details": [
+        "Bachelor of Engineering in Electrical Engineering",
+        "specialization: Microprocessor control systems"
+      ]
+    }
+  ],
+  "languages": [
+    "Polish (native)",
+    "English (fluent)",
+    "German (intermediate)",
+    "Russian and Romanian (basic knowledge)"
+  ],
+  "it_ai_skills": [
+    "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+    "Power Point (stakeholder presentations, reporting decks)",
+    "Word (SOPs, work instructions, process documentation)",
+    "Outlook/Calendar (planning, coordination)",
+    "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+    "Data summarization and insight extraction for KPI reviews and problem-solving",
+    "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+    "Responsible use & data privacy (compliance-aware)"
+  ],
+  "technical_operational_skills": [
+    "Project Management (CAPEX/OPEX)",
+    "Process Engineering",
+    "Quality Management (IATF, VDA, Formel-Q)",
+    "Functional specifications and requirements",
+    "KPI dashboards and reporting",
+    "Standardization & Kaizen implementation",
+    "Root cause analysis (FMEA, 5 Why, PDCA)",
+    "Construction/site management"
+  ],
+  "skills_raw_lines": [
+    "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+    "Power Point (stakeholder presentations, reporting decks)",
+    "Word (SOPs, work instructions, process documentation)",
+    "Outlook/Calendar (planning, coordination)",
+    "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+    "Data summarization and insight extraction for KPI reviews and problem-solving",
+    "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+    "Responsible use & data privacy (compliance-aware)",
+    "Project Management (CAPEX/OPEX)",
+    "Process Engineering",
+    "Quality Management (IATF, VDA, Formel-Q)",
+    "Functional specifications and requirements",
+    "KPI dashboards and reporting",
+    "Standardization & Kaizen implementation",
+    "Root cause analysis (FMEA, 5 Why, PDCA)",
+    "Construction/site management"
+  ],
+  "further_experience": [],
+  "interests": "Systems thinking & workflow optimization, process automation & planning architectures, long-distance cycling, outdoor, activities, hiking, fiction (e.g., fantasy/sci-fi) and non-fiction (decision psychology, NLP)"
+}

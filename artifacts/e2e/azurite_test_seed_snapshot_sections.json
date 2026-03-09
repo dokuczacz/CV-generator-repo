@@ -1,0 +1,13 @@
+{
+  "pdf_file": "artifacts\\e2e\\azurite_test_seed_snapshot.pdf",
+  "pages": 2,
+  "section_locations": {
+    "WORK EXPERIENCE": 1,
+    "IT / AI SKILLS": null,
+    "TECHNICAL / OPERATIONAL SKILLS": null,
+    "EDUCATION": 1,
+    "LANGUAGES": null,
+    "INTERESTS": 2,
+    "REFERENCES": 2
+  }
+}

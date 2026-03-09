@@ -1210,16 +1210,45 @@ def _looks_like_job_posting_text(text: str) -> tuple[bool, str]:
         "in expondo",
         "in sumitomo",
     ]
+    web_boilerplate_markers = [
+        "we use cookies",
+        "wir verwenden cookies",
+        "cookie settings",
+        "local storage",
+        "display:none",
+        "clickjack",
+        "utm_campaign",
+        "utm_source",
+        "javascript",
+        "window.",
+        "document.",
+    ]
 
     keyword_hits = sum(1 for kw in job_keywords if kw in low)
     section_hits = sum(1 for kw in section_markers if kw in low)
     note_hits = sum(1 for kw in note_markers if kw in low)
+    boilerplate_hits = sum(1 for kw in web_boilerplate_markers if kw in low)
     first_person_hits = len(re.findall(r"\b(i|my|me|mine)\b", low))
     bullet_lines = len(re.findall(r"(?m)^\s*[-*•]\s+", s))
+    css_rule_hits = len(re.findall(r"\.[a-z0-9_-]+\s*\{", low))
+    script_token_hits = len(
+        re.findall(
+            r"\b(function|var|const|let|window|document|parentnode|getelementbyid|removechild)\b",
+            low,
+        )
+    )
 
     likely_notes = (first_person_hits >= 3) or (note_hits > 0)
     if likely_notes and keyword_hits < 2 and section_hits == 0:
         return False, "looks_like_candidate_notes"
+
+    likely_web_boilerplate = (
+        boilerplate_hits >= 2
+        or css_rule_hits >= 2
+        or script_token_hits >= 4
+    )
+    if likely_web_boilerplate and section_hits == 0 and keyword_hits < 4:
+        return False, "looks_like_web_boilerplate"
 
     if section_hits >= 1:
         return True, "ok_section_marker"
@@ -1531,6 +1560,15 @@ def _build_job_data_table_row(*, cv_data: dict, meta: dict, session_id: str | No
     job_ref = meta.get("job_reference") if isinstance(meta.get("job_reference"), dict) else {}
     work = cv_data.get("work_experience") if isinstance(cv_data.get("work_experience"), list) else []
     first_role = next((r for r in (work or []) if isinstance(r, dict)), {}) if isinstance(work, list) else {}
+    inferred_position = _extract_job_title_from_metadata(meta)
+    inferred_company = _extract_company_from_metadata(meta)
+    has_job_context = bool(
+        (isinstance(job_ref, dict) and len(job_ref) > 0)
+        or str(meta.get("job_posting_text") or "").strip()
+        or str(meta.get("job_posting_url") or "").strip()
+        or inferred_position
+        or inferred_company
+    )
 
     pdf_refs = meta.get("pdf_refs") if isinstance(meta.get("pdf_refs"), dict) else {}
     cv_pdf_created_candidates: list[str] = []
@@ -1555,9 +1593,22 @@ def _build_job_data_table_row(*, cv_data: dict, meta: dict, session_id: str | No
         cv_generated_at = row_updated_at
 
     row = {
-        "position_name": str(job_ref.get("role_title") or first_role.get("title") or first_role.get("position") or "").strip()[:300],
-        "company_name": str(job_ref.get("company") or first_role.get("company") or first_role.get("employer") or "").strip()[:300],
-        "company_address": str(job_ref.get("company_address") or job_ref.get("location") or first_role.get("location") or first_role.get("city") or "").strip()[:300],
+        "position_name": str(
+            job_ref.get("role_title")
+            or inferred_position
+            or ((first_role.get("title") or first_role.get("position") or "") if not has_job_context else "")
+        ).strip()[:300],
+        "company_name": str(
+            job_ref.get("company")
+            or inferred_company
+            or ((first_role.get("company") or first_role.get("employer") or "") if not has_job_context else "")
+        ).strip()[:300],
+        "company_address": str(
+            job_ref.get("company_address")
+            or job_ref.get("location")
+            or meta.get("company_address")
+            or ((first_role.get("location") or first_role.get("city") or "") if not has_job_context else "")
+        ).strip()[:300],
         "company_email": str(meta.get("company_email") or job_ref.get("company_email") or "").strip()[:180],
         "company_phone": str(meta.get("company_phone") or job_ref.get("company_phone") or "").strip()[:80],
         "cv_generated_at": cv_generated_at[:40],
@@ -1724,16 +1775,29 @@ def _sync_job_data_table_history(*, session_id: str, cv_data: dict, meta: dict, 
         ("operational excellence manager", "imbodden ag", "visp, switzerland"),
         ("head of quality & product support", "expondo polska sp. z o.o.", "zielona góra, poland"),
         ("head of quality & product support", "expondo polska sp. z o.o.", "zielona gora, poland"),
+        ("leiter qualität & produktservice", "expondo polska sp. z o.o.", "zielona góra, poland"),
+        ("leiter qualitat & produktservice", "expondo polska sp. z o.o.", "zielona gora, poland"),
     }
 
     def _norm(v: str) -> str:
         return " ".join(str(v or "").strip().lower().split())
 
     def _is_blacklisted(row: dict) -> bool:
+        pos = _norm(str(row.get("position_name") or ""))
+        company = _norm(str(row.get("company_name") or ""))
+        addr = _norm(str(row.get("company_address") or ""))
+
+        # Drop obvious boilerplate captures from noisy pages.
+        if "stellendetails" in pos or "stellendetails" in company:
+            return True
+        # Drop records where company duplicates position and there is no concrete address/contact.
+        if pos and company and pos == company and not addr:
+            return True
+
         key = (
-            _norm(str(row.get("position_name") or "")),
-            _norm(str(row.get("company_name") or "")),
-            _norm(str(row.get("company_address") or "")),
+            pos,
+            company,
+            addr,
         )
         return key in blacklist_keys
 
@@ -1778,6 +1842,44 @@ def _sync_job_data_table_history(*, session_id: str, cv_data: dict, meta: dict, 
             existing.update(row2)
 
     merged.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+
+    # Collapse repeated rows for the same position and keep only the newest one.
+    # Backfill missing company/address/email/phone from older duplicates.
+    def _is_low_quality_value(v: str) -> bool:
+        vl = _norm(v)
+        return (not vl) or ("stellendetails" in vl)
+
+    by_position: dict[str, dict] = {}
+    collapsed: list[dict] = []
+    for row in merged:
+        pos_key = _norm(str(row.get("position_name") or ""))
+        if not pos_key:
+            collapsed.append(row)
+            continue
+
+        current = by_position.get(pos_key)
+        if current is None:
+            by_position[pos_key] = row
+            collapsed.append(row)
+            continue
+
+        cur_company = str(current.get("company_name") or "")
+        cur_position = str(current.get("position_name") or "")
+        row_company = str(row.get("company_name") or "")
+        row_position = str(row.get("position_name") or "")
+
+        cur_company_low = _is_low_quality_value(cur_company) or (_norm(cur_company) == _norm(cur_position))
+        row_company_low = _is_low_quality_value(row_company) or (_norm(row_company) == _norm(row_position))
+        if cur_company_low and (not row_company_low):
+            current["company_name"] = row_company
+
+        for field in ("company_address", "company_email", "company_phone"):
+            cur_v = str(current.get(field) or "")
+            row_v = str(row.get(field) or "")
+            if _is_low_quality_value(cur_v) and (not _is_low_quality_value(row_v)):
+                current[field] = row_v
+
+    merged = collapsed
     merged = merged[:max_items]
     meta2["job_data_table_history"] = merged
     meta2["job_data_table_count"] = len(merged)
@@ -2528,11 +2630,23 @@ def _extract_company_from_metadata(meta: dict) -> str:
             line = line.strip()
             if not line:
                 continue
-            # If the line looks like "Acme Corp — ...", take the first part.
-            for sep in (" — ", " - ", " | ", " @ ", " at "):
+            # Common job-board shape is "<title> — <company> — <address>".
+            # Prefer company-like middle token over the first token (often role title).
+            for sep in (" — ", " – ", " - ", " | "):
+                if sep not in line:
+                    continue
+                parts = [p.strip() for p in line.split(sep) if p and p.strip()]
+                if len(parts) >= 2:
+                    for part in parts[1:]:
+                        pl = part.lower()
+                        if any(tok in pl for tok in (" ag", " gmbh", " ltd", " llc", " sa", " sp.", "inc", "group")):
+                            return part
+                    return parts[1]
+            for sep in (" @ ", " at "):
                 if sep in line:
-                    line = line.split(sep, 1)[0].strip()
-                    break
+                    rhs = line.split(sep, 1)[1].strip()
+                    if rhs:
+                        return rhs
             return line
     # 3) fallback: domain of job_posting_url
     url = meta.get("job_posting_url")

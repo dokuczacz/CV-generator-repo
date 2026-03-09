@@ -1,0 +1,35 @@
+{
+  "session_id": "6f9e3b5d-50d9-41e1-8112-74e7f2d4db23",
+  "stable_session_resume": true,
+  "job_posting_url": "https://www.jobs.ch/de/stellenangebote/detail/30122d7d-32d0-4fad-b690-0a3d7aadb525/",
+  "cv_artifact": "artifacts/e2e/lonza_cv_test_e2e.pdf",
+  "cover_letter_artifact": "artifacts/e2e/lonza_cover_letter_test_e2e.pdf",
+  "cv_size": 3133817,
+  "cover_letter_size": 54368,
+  "cover_attempts": 1,
+  "cover_status": "generated",
+  "cover_timeout_count": 0,
+  "cover_last_error": "",
+  "require_cover_artifact": true,
+  "cv_only_mode": false,
+  "stage_progress": [
+    {
+      "stage": "session_input_quality",
+      "ok": true,
+      "detail": "stable session loaded and job posting validated"
+    },
+    {
+      "stage": "cv_pdf_generation",
+      "ok": true,
+      "detail": "pdf_size=3133817"
+    },
+    {
+      "stage": "cover_letter_generate",
+      "ok": true,
+      "detail": "pdf_size=54368"
+    }
+  ],
+  "max_steps": 60,
+  "max_flow_seconds": 480,
+  "elapsed_seconds": 28.67
+}

@@ -9,6 +9,15 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from datetime import datetime
+import json
+
+from src.normalize import normalize_cv_data
+
+
+def _cv_sig(cv_data: dict) -> str:
+    import function_app
+
+    return function_app._sha256_text(json.dumps(normalize_cv_data(dict(cv_data or {})), ensure_ascii=False, sort_keys=True))
 
 
 def test_latch_prevents_duplicate_pdf_generation():
@@ -26,12 +35,18 @@ def test_latch_prevents_duplicate_pdf_generation():
         },
         "metadata": {
             "language": "en",
+            "confirmed_flags": {
+                "contact_confirmed": True,
+                "education_confirmed": True,
+            },
             "pdf_refs": {
                 "test-session-123-abc123": {
                     "container": "cv-pdfs",
                     "blob_name": "test-session-123/test-session-123-abc123.pdf",
                     "created_at": "2026-01-27T10:00:00",
                     "sha256": "abc123hash",
+                    "cv_sig": "",
+                    "target_language": "en",
                     "size_bytes": 145000,
                     "render_ms": 342,
                     "pages": 2,
@@ -41,6 +56,7 @@ def test_latch_prevents_duplicate_pdf_generation():
             },
         },
     }
+    mock_session["metadata"]["pdf_refs"]["test-session-123-abc123"]["cv_sig"] = _cv_sig(mock_session["cv_data"])
 
     # Import the function
     from function_app import _tool_generate_cv_from_session
@@ -103,13 +119,13 @@ def test_latch_allows_first_pdf_generation():
     from function_app import _tool_generate_cv_from_session
 
     # Mock the PDF rendering and blob upload
-    with patch("function_app.render_pdf") as mock_render, \
+    with patch("src.orchestrator.tools.cv_pdf_tools.render_pdf") as mock_render, \
          patch("function_app._upload_pdf_blob_for_session") as mock_upload, \
          patch("function_app._get_session_store") as mock_store, \
          patch("function_app._compute_readiness") as mock_ready, \
-         patch("function_app.validate_canonical_schema") as mock_schema, \
-         patch("function_app.validate_cv") as mock_validate, \
-         patch("function_app.count_pdf_pages") as mock_count_pages, \
+         patch("src.orchestrator.tools.cv_pdf_tools.validate_canonical_schema") as mock_schema, \
+         patch("src.orchestrator.tools.cv_pdf_tools.validate_cv") as mock_validate, \
+         patch("src.orchestrator.tools.cv_pdf_tools.count_pdf_pages") as mock_count_pages, \
          patch.dict(os.environ, {"CV_EXECUTION_LATCH": "1", "CV_GENERATION_STRICT_TEMPLATE": "0"}):
 
         mock_render.return_value = b"%PDF-1.4 fake pdf bytes"
@@ -132,11 +148,17 @@ def test_latch_allows_first_pdf_generation():
             },
         }
         mock_schema.return_value = (True, [])
-        mock_validate.return_value = SimpleNamespace(is_valid=True)
+        mock_validate.return_value = SimpleNamespace(is_valid=True, errors=[])
         mock_count_pages.return_value = 2
 
         mock_store_instance = Mock()
         mock_store_instance.update_session.return_value = True
+        mock_store_instance.get_session_with_blob_retrieval.return_value = {
+            "cv_data": dict(mock_session.get("cv_data") or {}),
+            "metadata": dict(mock_session.get("metadata") or {}),
+        }
+        mock_store_instance.update_session_with_blob_offload.return_value = True
+        mock_store_instance.verify_pdf_metadata_persisted.return_value = (True, [])
         mock_store.return_value = mock_store_instance
 
         status, payload, content_type = _tool_generate_cv_from_session(
@@ -200,13 +222,13 @@ def test_latch_disabled_allows_regeneration():
     from function_app import _tool_generate_cv_from_session
 
     # Mock the PDF rendering and blob upload
-    with patch("function_app.render_pdf") as mock_render, \
+    with patch("src.orchestrator.tools.cv_pdf_tools.render_pdf") as mock_render, \
          patch("function_app._upload_pdf_blob_for_session") as mock_upload, \
          patch("function_app._get_session_store") as mock_store, \
          patch("function_app._compute_readiness") as mock_ready, \
-         patch("function_app.validate_canonical_schema") as mock_schema, \
-         patch("function_app.validate_cv") as mock_validate, \
-         patch("function_app.count_pdf_pages") as mock_count_pages, \
+         patch("src.orchestrator.tools.cv_pdf_tools.validate_canonical_schema") as mock_schema, \
+         patch("src.orchestrator.tools.cv_pdf_tools.validate_cv") as mock_validate, \
+         patch("src.orchestrator.tools.cv_pdf_tools.count_pdf_pages") as mock_count_pages, \
          patch.dict(os.environ, {"CV_EXECUTION_LATCH": "0", "CV_GENERATION_STRICT_TEMPLATE": "0"}):  # Latch DISABLED
 
         mock_render.return_value = b"%PDF-1.4 new pdf bytes"
@@ -229,11 +251,17 @@ def test_latch_disabled_allows_regeneration():
             },
         }
         mock_schema.return_value = (True, [])
-        mock_validate.return_value = SimpleNamespace(is_valid=True)
+        mock_validate.return_value = SimpleNamespace(is_valid=True, errors=[])
         mock_count_pages.return_value = 2
 
         mock_store_instance = Mock()
         mock_store_instance.update_session.return_value = True
+        mock_store_instance.get_session_with_blob_retrieval.return_value = {
+            "cv_data": dict(mock_session.get("cv_data") or {}),
+            "metadata": dict(mock_session.get("metadata") or {}),
+        }
+        mock_store_instance.update_session_with_blob_offload.return_value = True
+        mock_store_instance.verify_pdf_metadata_persisted.return_value = (True, [])
         mock_store.return_value = mock_store_instance
 
         status, payload, content_type = _tool_generate_cv_from_session(
@@ -263,23 +291,37 @@ def test_latch_returns_latest_pdf_when_multiple():
         },
         "metadata": {
             "language": "en",
+            "confirmed_flags": {
+                "contact_confirmed": True,
+                "education_confirmed": True,
+            },
             "pdf_refs": {
                 "old-pdf-ref": {
                     "created_at": "2026-01-20T10:00:00",
                     "sha256": "oldhash1",
+                    "cv_sig": "",
+                    "target_language": "en",
                 },
                 "newer-pdf-ref": {
                     "created_at": "2026-01-25T15:30:00",
                     "sha256": "newhash2",
+                    "cv_sig": "",
+                    "target_language": "en",
                 },
                 "latest-pdf-ref": {
                     "created_at": "2026-01-27T12:00:00",  # Most recent
                     "sha256": "latesthash3",
+                    "cv_sig": "",
+                    "target_language": "en",
                     "pages": 2,
                 },
             },
         },
     }
+    sig = _cv_sig(mock_session["cv_data"])
+    for _k, _v in (mock_session.get("metadata") or {}).get("pdf_refs", {}).items():
+        if isinstance(_v, dict):
+            _v["cv_sig"] = sig
 
     from function_app import _tool_generate_cv_from_session
 

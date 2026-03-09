@@ -25,6 +25,15 @@ class CVSessionStore:
     TABLE_NAME = "cvsessions"
     DEFAULT_TTL_HOURS = 24
     EVENT_LOG_MAX_ITEMS = 20
+    METADATA_HEAVY_KEYS = (
+        "event_log",
+        "docx_prefill_unconfirmed",
+        "job_data_table_history",
+        "work_experience_proposal_block",
+        "skills_proposal_block",
+        "job_posting_text",
+        "pdf_refs",
+    )
     
     def __init__(self, connection_string: Optional[str] = None):
         """Initialize session store with Azure Table Storage"""
@@ -125,22 +134,11 @@ class CVSessionStore:
         Returns:
             True if updated, False if session not found
         """
-        try:
-            entity = self.table_client.get_entity(partition_key="cv", row_key=session_id)
-        except ResourceNotFoundError:
-            logging.warning(f"Session {session_id} not found for update")
-            return False
-        
-        # Update fields
-        entity["cv_data_json"] = json.dumps(cv_data)
-        if metadata is not None:
-            entity["metadata_json"] = json.dumps(metadata)
-        entity["updated_at"] = datetime.utcnow().isoformat()
-        entity["version"] = entity.get("version", 1) + 1
-        
-        self.table_client.update_entity(entity, mode="replace")
-        logging.info(f"Updated session {session_id}, version {entity['version']}")
-        return True
+        return self.update_session_with_blob_offload(
+            session_id=session_id,
+            cv_data=cv_data,
+            metadata=metadata,
+        )
     
     def update_field(
         self,
@@ -338,6 +336,45 @@ class CVSessionStore:
         logging.info(f"Deleted {deleted} session(s) via delete_all_sessions()")
         return deleted
 
+    def find_latest_session_by_source_docx_hash(self, source_docx_hash: str) -> Optional[str]:
+        """Return latest session_id matching source DOCX hash, or None if not found.
+
+        This enables idempotent upload behavior: re-uploading the same DOCX can
+        resume an existing session instead of creating a brand-new one.
+        """
+        if not source_docx_hash:
+            return None
+
+        best_row_key: Optional[str] = None
+        best_updated_at = ""
+        now_iso = datetime.utcnow().isoformat()
+
+        query = "PartitionKey eq 'cv'"
+        for entity in self.table_client.query_entities(query):
+            metadata_json = entity.get("metadata_json")
+            if not metadata_json:
+                continue
+            try:
+                meta = json.loads(metadata_json)
+            except Exception:
+                continue
+            if not isinstance(meta, dict):
+                continue
+
+            if str(meta.get("source_docx_sha256") or "").strip().lower() != source_docx_hash.lower():
+                continue
+
+            expires_at = str(entity.get("expires_at") or "")
+            if expires_at and expires_at < now_iso:
+                continue
+
+            updated_at = str(entity.get("updated_at") or "")
+            if updated_at >= best_updated_at:
+                best_updated_at = updated_at
+                best_row_key = str(entity.get("RowKey") or "")
+
+        return best_row_key or None
+
     def update_session_with_blob_offload(
         self,
         session_id: str,
@@ -399,7 +436,20 @@ class CVSessionStore:
             entity["cv_data_json"] = cv_data_json
         
         if metadata is not None:
-            entity["metadata_json"] = json.dumps(metadata, ensure_ascii=False)
+            metadata_out = dict(metadata) if isinstance(metadata, dict) else {}
+            metadata_json = json.dumps(metadata_out, ensure_ascii=False)
+            metadata_bytes = len(metadata_json.encode("utf-8"))
+
+            if metadata_bytes > max_table_size:
+                metadata_out = self._offload_heavy_metadata_to_blob(session_id, metadata_out)
+                metadata_json = json.dumps(metadata_out, ensure_ascii=False)
+                metadata_bytes = len(metadata_json.encode("utf-8"))
+
+            if metadata_bytes > max_table_size:
+                metadata_out = self._compact_metadata_for_table(metadata_out)
+                metadata_json = json.dumps(metadata_out, ensure_ascii=False)
+
+            entity["metadata_json"] = metadata_json
         
         entity["updated_at"] = datetime.utcnow().isoformat()
         entity["version"] = entity.get("version", 1) + 1
@@ -442,6 +492,100 @@ class CVSessionStore:
         
         return f"{pointer.container}/{pointer.blob_name}"
 
+    def _offload_heavy_metadata_to_blob(self, session_id: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Move heavy metadata fields to blob and keep only table-safe summaries."""
+        meta_out = dict(metadata or {})
+        heavy_payload: Dict[str, Any] = {}
+        summaries: Dict[str, Any] = {}
+
+        for key in self.METADATA_HEAVY_KEYS:
+            if key not in meta_out:
+                continue
+            value = meta_out.pop(key)
+            heavy_payload[key] = value
+
+            if key == "pdf_refs" and isinstance(value, dict):
+                entries = [(k, v) for k, v in value.items() if isinstance(v, dict)]
+                entries.sort(key=lambda x: str((x[1] or {}).get("created_at") or ""), reverse=True)
+                summaries["pdf_refs_count"] = len(entries)
+                summaries["pdf_refs"] = {
+                    str(k): {
+                        "created_at": v.get("created_at"),
+                        "size_bytes": v.get("size_bytes"),
+                        "target_language": v.get("target_language"),
+                        "download_name": v.get("download_name"),
+                    }
+                    for k, v in entries[:3]
+                }
+            elif key == "event_log" and isinstance(value, list):
+                summaries["event_log_count"] = len(value)
+            elif key == "job_data_table_history" and isinstance(value, list):
+                summaries["job_data_table_history_count"] = len(value)
+            elif key == "job_posting_text" and isinstance(value, str):
+                summaries["job_posting_text_snippet"] = value[:200]
+                summaries["job_posting_text_length"] = len(value)
+
+        if not heavy_payload:
+            return meta_out
+
+        blob_ref = self._offload_metadata_payload_to_blob(session_id, heavy_payload)
+        meta_out.update(summaries)
+        meta_out["metadata_blob_ref"] = blob_ref
+        meta_out["metadata_blob_offloaded_at"] = datetime.utcnow().isoformat()
+        meta_out["metadata_blob_keys"] = sorted(list(heavy_payload.keys()))
+        return meta_out
+
+    def _compact_metadata_for_table(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Last-chance table compaction when metadata is still too large."""
+        meta_out = dict(metadata or {})
+
+        for key in ("work_experience_proposal_block", "skills_proposal_block", "docx_prefill_unconfirmed", "event_log"):
+            meta_out.pop(key, None)
+
+        jpt = meta_out.get("job_posting_text_snippet")
+        if isinstance(jpt, str) and len(jpt) > 120:
+            meta_out["job_posting_text_snippet"] = jpt[:120]
+
+        pdf_refs = meta_out.get("pdf_refs")
+        if isinstance(pdf_refs, dict) and len(pdf_refs) > 1:
+            first_key = next(iter(pdf_refs.keys()))
+            meta_out["pdf_refs"] = {first_key: pdf_refs[first_key]}
+
+        return meta_out
+
+    def _offload_metadata_payload_to_blob(self, session_id: str, payload: Dict[str, Any]) -> str:
+        """Upload heavy metadata payload to blob and return blob reference."""
+        from .blob_store import CVBlobStore
+
+        container = os.environ.get("STORAGE_CONTAINER_ARTIFACTS", "cv-artifacts")
+        blob_store = CVBlobStore(container=container)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        blob_name = f"{session_id}/metadata_heavy_{timestamp}.json"
+
+        pointer = blob_store.upload_json_snapshot(
+            blob_name=blob_name,
+            data=payload,
+            metadata={
+                "session_id": session_id,
+                "snapshot_type": "metadata_heavy_offload",
+                "timestamp": timestamp,
+            },
+        )
+        return f"{pointer.container}/{pointer.blob_name}"
+
+    def _retrieve_metadata_payload_from_blob(self, blob_ref: str) -> Dict[str, Any]:
+        """Download heavy metadata payload from blob reference."""
+        from .blob_store import CVBlobStore, BlobPointer
+
+        parts = blob_ref.split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid blob reference format: {blob_ref}")
+
+        container, blob_name = parts
+        blob_store = CVBlobStore(container=container)
+        pointer = BlobPointer(container=container, blob_name=blob_name, content_type="application/json")
+        return blob_store.download_json_snapshot(pointer)
+
     def get_session_with_blob_retrieval(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
         Get session data, automatically retrieving cv_data from blob if offloaded.
@@ -465,6 +609,22 @@ class CVSessionStore:
                 logging.info(f"Retrieving offloaded cv_data from blob for session {session_id}")
                 cv_data = self._retrieve_cv_data_from_blob(blob_ref)
                 session["cv_data"] = cv_data
+
+        metadata = session.get("metadata")
+        if isinstance(metadata, dict):
+            meta_blob_ref = metadata.get("metadata_blob_ref")
+            if isinstance(meta_blob_ref, str) and meta_blob_ref:
+                try:
+                    heavy_meta = self._retrieve_metadata_payload_from_blob(meta_blob_ref)
+                    if isinstance(heavy_meta, dict):
+                        for key, value in heavy_meta.items():
+                            metadata.setdefault(key, value)
+                except Exception as exc:
+                    logging.warning(
+                        "Failed to hydrate heavy metadata from blob for session %s: %s",
+                        session_id,
+                        str(exc),
+                    )
         
         return session
 

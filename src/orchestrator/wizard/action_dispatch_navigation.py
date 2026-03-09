@@ -29,6 +29,8 @@ def _major(st: str) -> int | None:
         return 6
     if s in ("cover_letter_review", "cover_letter_feedback_edit"):
         return 7
+    if s in ("job_data_table",):
+        return 8
     return None
 
 
@@ -56,10 +58,29 @@ def handle_navigation_actions(
             meta_out=meta2,
             cv_out=cv_data,
         )
-    if tgt_major > cur_major:
+    if tgt_major == 8:
+        target_stage_resolved = "job_data_table"
+        meta2 = deps.wizard_set_stage(meta2, target_stage_resolved)
+        meta2.pop("work_selected_index", None)
         cv_data, meta2 = deps.persist(cv_data, meta2)
         return True, cv_data, meta2, deps.wizard_resp(
-            assistant_text="Cannot jump forward. Finish the current step first.",
+            assistant_text=f"Navigated to {target_stage_resolved}.",
+            meta_out=meta2,
+            cv_out=cv_data,
+        )
+
+    max_major = cur_major
+    try:
+        max_from_meta = int(meta2.get("wizard_max_major") or 0)
+        if max_from_meta > max_major:
+            max_major = max_from_meta
+    except Exception:
+        pass
+
+    if tgt_major > max_major:
+        cv_data, meta2 = deps.persist(cv_data, meta2)
+        return True, cv_data, meta2, deps.wizard_resp(
+            assistant_text="Cannot jump forward. Finish or unlock this step first.",
             meta_out=meta2,
             cv_out=cv_data,
         )
@@ -80,6 +101,7 @@ def handle_navigation_actions(
         5: "it_ai_skills",
         6: "review_final",
         7: "cover_letter_review",
+        8: "job_data_table",
     }
     target_stage_resolved = major_to_stage.get(tgt_major, cur_stage)
     meta2 = deps.wizard_set_stage(meta2, target_stage_resolved)

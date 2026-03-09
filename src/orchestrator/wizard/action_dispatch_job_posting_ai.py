@@ -36,6 +36,29 @@ def handle_job_posting_ai_actions(
     session_id: str,
     deps: JobPostingAIDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    def _invalid_job_input_message(reason: str) -> str:
+        reason_norm = str(reason or "").strip().lower()
+        if reason_norm == "looks_like_web_boilerplate":
+            return (
+                "CRITICAL: fetched page content is website boilerplate (CSS/JS/cookie banner), "
+                "not a real job posting. Use a direct vacancy link (e.g. jobs.ch detail page) "
+                "or paste the full job description text."
+            )
+        if reason_norm == "looks_like_candidate_notes":
+            return "Input looks like candidate notes/achievements, not a job posting. Choose how to proceed."
+        if reason_norm == "too_short":
+            return "Job input is too short. Choose: correct URL, paste proper job text, or continue without summary."
+        return "Provided text cannot be used as job posting source. Choose how to proceed."
+
+    def _apply_target_language_from_payload(payload: dict | None) -> None:
+        if not isinstance(payload, dict):
+            return
+        raw = str(payload.get("target_language") or "").strip().lower()
+        if raw not in ("en", "de", "pl"):
+            return
+        meta2["target_language"] = raw
+        meta2["language"] = raw
+
     if aid == "INTERESTS_TAILOR_RUN":
         if not deps.openai_enabled():
             meta2 = deps.wizard_set_stage(meta2, "interests_edit")
@@ -124,19 +147,21 @@ def handle_job_posting_ai_actions(
         )
 
     if aid == "JOB_OFFER_CONTINUE":
+        _apply_target_language_from_payload(user_action_payload if isinstance(user_action_payload, dict) else None)
         jt = str(meta2.get("job_posting_text") or "")[:20000]
         if jt:
             ok_job_text, reason_job_text = deps.looks_like_job_posting_text(jt)
             if not ok_job_text:
                 meta2["job_input_status"] = "invalid"
                 meta2["job_input_invalid_reason"] = reason_job_text
+                meta2["job_input_critical_error"] = reason_job_text == "looks_like_web_boilerplate"
                 meta2["job_posting_invalid_draft"] = jt[:2000]
                 meta2["job_posting_text"] = ""
                 meta2["job_reference_status"] = "invalid_job_input"
                 meta2 = deps.wizard_set_stage(meta2, "job_posting_invalid_input")
                 cv_data, meta2 = deps.persist(cv_data, meta2)
                 return True, cv_data, meta2, deps.wizard_resp(
-                    assistant_text="Provided text cannot be used as job posting source. Choose how to proceed.",
+                    assistant_text=_invalid_job_input_message(reason_job_text),
                     meta_out=meta2,
                     cv_out=cv_data,
                 )
@@ -174,6 +199,7 @@ def handle_job_posting_ai_actions(
 
     if aid == "JOB_OFFER_ANALYZE":
         payload = user_action_payload or {}
+        _apply_target_language_from_payload(payload if isinstance(payload, dict) else None)
         text = str(payload.get("job_offer_text") or "").strip()
         is_url = deps.is_http_url(text)
 
@@ -198,6 +224,7 @@ def handle_job_posting_ai_actions(
         if job_text_len < 80:
             meta2["job_input_status"] = "invalid"
             meta2["job_input_invalid_reason"] = "too_short"
+            meta2["job_input_critical_error"] = False
             meta2["job_posting_invalid_draft"] = str(meta2.get("job_posting_text") or "")[:2000]
             meta2["job_posting_text"] = ""
             meta2["job_reference_status"] = "invalid_job_input"
@@ -213,13 +240,14 @@ def handle_job_posting_ai_actions(
         if not ok_job_text:
             meta2["job_input_status"] = "invalid"
             meta2["job_input_invalid_reason"] = reason_job_text
+            meta2["job_input_critical_error"] = reason_job_text == "looks_like_web_boilerplate"
             meta2["job_posting_invalid_draft"] = str(meta2.get("job_posting_text") or "")[:2000]
             meta2["job_posting_text"] = ""
             meta2["job_reference_status"] = "invalid_job_input"
             meta2 = deps.wizard_set_stage(meta2, "job_posting_invalid_input")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(
-                assistant_text="Input looks like candidate notes, not a job posting. Choose how to proceed.",
+                assistant_text=_invalid_job_input_message(reason_job_text),
                 meta_out=meta2,
                 cv_out=cv_data,
             )

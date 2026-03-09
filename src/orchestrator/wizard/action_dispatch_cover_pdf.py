@@ -46,6 +46,20 @@ def handle_cover_pdf_actions(
     client_context: dict | None,
     deps: CoverPdfActionDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    def _ensure_signoff_full_name(block: dict, cv: dict) -> dict:
+        out = dict(block or {})
+        full_name = str((cv or {}).get("full_name") or "").strip()
+        if not full_name:
+            return out
+        signoff = str(out.get("signoff") or "").strip()
+        if not signoff:
+            out["signoff"] = full_name
+            return out
+        if full_name.casefold() in signoff.casefold():
+            return out
+        out["signoff"] = f"{signoff}\n{full_name}"
+        return out
+
     def _notes_variant(payload: dict | None, meta: dict) -> str:
         payload_val = str((payload or {}).get("cover_letter_notes_variant") or "").strip().lower()
         meta_val = str(meta.get("cover_letter_notes_variant") or "").strip().lower()
@@ -385,19 +399,12 @@ def handle_cover_pdf_actions(
 
         existing_pdf_ref = str(meta2.get("cover_letter_pdf_ref") or "")
         pdf_refs = meta2.get("pdf_refs") if isinstance(meta2.get("pdf_refs"), dict) else {}
-        if (
-            not force_regenerate
+        reuse_existing_pdf_artifact = bool(
+            (not force_regenerate)
             and existing_pdf_ref
             and isinstance(pdf_refs.get(existing_pdf_ref), dict)
             and str(meta2.get("cover_letter_pdf_input_sig") or "") == input_fingerprint
-        ):
-            meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
-            cv_data, meta2 = deps.persist(cv_data, meta2)
-            return True, cv_data, meta2, deps.wizard_resp(
-                assistant_text="Using existing cover letter PDF artifact for unchanged CV/job context.",
-                meta_out=meta2,
-                cv_out=cv_data,
-            )
+        )
     
         if unified_mode:
             if isinstance(meta2.get("cover_letter_block"), dict):
@@ -410,6 +417,8 @@ def handle_cover_pdf_actions(
                     meta_out=meta2,
                     cv_out=cv_data,
                 )
+        elif reuse_existing_pdf_artifact and isinstance(meta2.get("cover_letter_block"), dict):
+            cl = dict(meta2.get("cover_letter_block") or {})
         elif (
             not force_regenerate
             and isinstance(meta2.get("cover_letter_block"), dict)
@@ -431,6 +440,7 @@ def handle_cover_pdf_actions(
                 return True, cv_data, meta2, deps.wizard_resp(assistant_text=deps.friendly_schema_error_message(str(err_cl)), meta_out=meta2, cv_out=cv_data)
             cl = cl_block
             meta2["cover_letter_input_sig"] = input_fingerprint
+        cl = _ensure_signoff_full_name(cl, cv_data)
         meta2["cover_letter_block"] = cl
     
         ok2, errs2 = deps.validate_cover_letter_block(block=cl, cv_data=cv_data)

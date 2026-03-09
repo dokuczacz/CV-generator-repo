@@ -1,0 +1,514 @@
+{
+  "scenario_id": "2a77abcd-19b3-43b7-8b9d-1998dde50136",
+  "created_at": "2026-02-25T13:31:48.970756",
+  "updated_at": "2026-02-25T13:59:57.480028",
+  "cv_data": {
+    "__blob_ref__": "cv-artifacts/2a77abcd-19b3-43b7-8b9d-1998dde50136/cv_data_20260225_135957.json",
+    "__offloaded__": true,
+    "size_bytes": 3240549
+  },
+  "metadata": {
+    "language": "en",
+    "source_language": "en",
+    "target_language": "en",
+    "created_from": "docx",
+    "stage": "PREPARE",
+    "stage_updated_at": "2026-02-25T13:31:48.970756",
+    "flow_mode": "wizard",
+    "wizard_stage": "cover_letter_review",
+    "wizard_stage_updated_at": "2026-02-25T13:54:11.963785",
+    "prefill_summary": {
+      "has_name": true,
+      "has_email": true,
+      "has_phone": true,
+      "work_experience_count": 4,
+      "education_count": 2,
+      "languages_count": 0,
+      "it_ai_skills_count": 8,
+      "interests_chars": 212
+    },
+    "docx_prefill_unconfirmed": {
+      "full_name": "Mariusz Horodecki",
+      "email": "horodecki.mariusz@gmail.com",
+      "phone": "+41 77 952 24 37",
+      "address_lines": [
+        "Zer Chirchu 20, 3933 Staldenried"
+      ],
+      "profile": "",
+      "work_experience": [
+        {
+          "date_range": "2020-01 - 2025-10",
+          "employer": "",
+          "location": "",
+          "title": "Director, GL Solutions Sp. Z o.o., Zielona Góra, Poland",
+          "bullets": [
+            "Led planning and execution of road construction and infrastructure projects delivering 30–40 k",
+            "EUR jobs, improving on-time delivery and contract compliance.",
+            "Coordinated site compliance to reduce rework and delays via schedules, improving daily operations with machines / tools reducing labor work.",
+            "Managed operational delivery of public and private contracts, maintaining regulatory",
+            "documentation and requirements"
+          ]
+        },
+        {
+          "date_range": "2018-11 - 2020-01",
+          "employer": "",
+          "location": "",
+          "title": "Head of Quality & Product Service, Expondo Polska Sp. z o.o., Zielona Góra, Poland",
+          "bullets": [
+            "Led three departments (35 staff) to standardize procedures and KPI dashboards, improving",
+            "quality oversight and team performance.",
+            "Reduced customer claims by 70% through targeted product fixes and process controls, restoring",
+            "OEM acceptance and supplier reliability.",
+            "Optimized warehouse workflows to halve pick/put steps by reorganizing locations, cutting handling",
+            "time and stock discrepancies."
+          ]
+        },
+        {
+          "date_range": "2016-08 - 2018-11",
+          "employer": "",
+          "location": "",
+          "title": "Quality Manager, SE Bordnetze SRL, Greenfield project Orhei, Moldova",
+          "bullets": [
+            "Established Greenfield plant quality systems and processes, achieving IATF certification at first",
+            "attempt and passing multiple customer audits.",
+            "Implemented VDA, Formel-Q and IATF standards across five sections (80 employees) to raise",
+            "production quality and OEM readiness.",
+            "Served as primary contact for OEM customers and certification bodies, reducing audit",
+            "nonconformities and improving supplier transparency."
+          ]
+        },
+        {
+          "date_range": "2011-03 - 2016-07",
+          "employer": "",
+          "location": "",
+          "title": "Global Process Improvement Specialist, Sumitomo Electric Bordnetze SE, Wolfsburg,",
+          "bullets": [
+            "Germany",
+            "Optimized workstations and processes, conducted time studies",
+            "Reduced costs through efficient production solutions",
+            "Lead auditor (PK) – coordinated global audits, benchmarking, and alignment with customer",
+            "requirements",
+            "IT & AI Skills",
+            "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+            "Power Point (stakeholder presentations, reporting decks)",
+            "Word (SOPs, work instructions, process documentation)",
+            "Outlook/Calendar (planning, coordination)",
+            "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+            "Data summarization and insight extraction for KPI reviews and problem-solving",
+            "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+            "Responsible use & data privacy (compliance-aware)",
+            "Technical & Operational Skills",
+            "Project Management (CAPEX/OPEX)",
+            "Process Engineering",
+            "Quality Management (IATF, VDA, Formel-Q)",
+            "Functional specifications and requirements",
+            "KPI dashboards and reporting",
+            "Standardization & Kaizen implementation",
+            "Root cause analysis (FMEA, 5 Why, PDCA)",
+            "Construction/site management"
+          ]
+        }
+      ],
+      "education": [
+        {
+          "date_range": "2012-2015",
+          "institution": "Poznań University of Technology,",
+          "title": "",
+          "details": [
+            "Master of Science in Electrical Engineering",
+            "specialization: Industrial and automotive systems"
+          ]
+        },
+        {
+          "date_range": "2008-2012",
+          "institution": "Poznań University of Technology,",
+          "title": "",
+          "details": [
+            "Bachelor of Engineering in Electrical Engineering",
+            "specialization: Microprocessor control systems",
+            "Language Skills",
+            "Polish (native)",
+            "English (fluent)",
+            "German (intermediate)",
+            "Russian and Romanian (basic knowledge)",
+            "Interests",
+            "Systems thinking & workflow optimization, process automation & planning architectures, long-distance cycling, outdoor",
+            "activities, hiking, fiction (e.g., fantasy/sci-fi) and non-fiction (decision psychology, NLP)",
+            "References",
+            "Will be announced on request."
+          ]
+        }
+      ],
+      "languages": [],
+      "it_ai_skills": [
+        "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+        "Power Point (stakeholder presentations, reporting decks)",
+        "Word (SOPs, work instructions, process documentation)",
+        "Outlook/Calendar (planning, coordination)",
+        "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+        "Data summarization and insight extraction for KPI reviews and problem-solving",
+        "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+        "Responsible use & data privacy (compliance-aware)"
+      ],
+      "technical_operational_skills": [
+        "Project Management (CAPEX/OPEX)",
+        "Process Engineering",
+        "Quality Management (IATF, VDA, Formel-Q)",
+        "Functional specifications and requirements",
+        "KPI dashboards and reporting",
+        "Standardization & Kaizen implementation",
+        "Root cause analysis (FMEA, 5 Why, PDCA)",
+        "Construction/site management"
+      ],
+      "skills_raw_lines": [
+        "Excel (Pivot Tables, formulas, conditional formatting, data validation, charts, reporting)",
+        "Power Point (stakeholder presentations, reporting decks)",
+        "Word (SOPs, work instructions, process documentation)",
+        "Outlook/Calendar (planning, coordination)",
+        "Prompt engineering (structured prompts, structured output, reusable templates, guardrails)",
+        "Data summarization and insight extraction for KPI reviews and problem-solving",
+        "AI-assisted workflow automation (multi-step task flows, tool-supported assistants, structured reporting outputs)",
+        "Responsible use & data privacy (compliance-aware)",
+        "Project Management (CAPEX/OPEX)",
+        "Process Engineering",
+        "Quality Management (IATF, VDA, Formel-Q)",
+        "Functional specifications and requirements",
+        "KPI dashboards and reporting",
+        "Standardization & Kaizen implementation",
+        "Root cause analysis (FMEA, 5 Why, PDCA)",
+        "Construction/site management"
+      ],
+      "further_experience": [],
+      "interests": "Systems thinking & workflow optimization, process automation & planning architectures, long-distance cycling, outdoor, activities, hiking, fiction (e.g., fantasy/sci-fi) and non-fiction (decision psychology, NLP)"
+    },
+    "confirmed_flags": {
+      "contact_confirmed": true,
+      "education_confirmed": true,
+      "confirmed_at": "2026-02-25T13:32:20.629431"
+    },
+    "job_posting_url": "https://lonza.talent-community.com/app/project/61707",
+    "job_fetch_status": "success",
+    "job_posting_text": "Operational Excellence Manager (f/m/d) 80-100% — Visp 3930 CH\n\nThe actual location of this job is in Visp, Switzerland. Relocation assistance is available for eligible candidates and their families, if needed.     The site in&nbsp; Visp, Switzerland &nbsp;is growing and for our Bioconjugates department, we are currently looking for an&nbsp;Operational Excellence  Manager&nbsp;in  Visp. You will support the various functions in all operational excellence topics and translate the strategy into practice and action. You will lead and coordinate innovation projects using lean six sigma tools. Besides, you will train and coach employees to deliver effective solutions and continuous process improvements.  Become part of this exciting opportunity and apply now!     What you will get:      An agile career and dynamic working culture     A highly collaborative environment that fosters teamwork and inclusion     A range of professional development programs to grow your skills and career     An ethical workplace where tasks are carried out in accordance with relevant procedures     In addition to a competitive salary, you can expect numerous lifestyle, family, and leisure benefits. Benefits in Visp:   https://bit.ly/3wjkoFi         What you will do:      Responsible for Operational Excellence in Bioconjugates Operations     Lead continuous improvement activities of the Lonza Business Management System (e.g. 6S, Value Stream Mapping, DMAIC, Hoshin, Kaizen)     Drive implementation of Lonza operational excellence roadmap, assessing progress and defining actions     Coach and trainer for White-, Yellow-, and Green Belts     Work with functional leaders to establish and achieve continuous improvement goals     Review, report &amp; improve metrics     Leading and coordinating innovation projects while ensuring synergies of local improvements     Drive and coach cultural change       What we are looking for:      Master degree (preferred) or advanced studies in field such as Pharmaceutical Technology, Biotechnology, Chemistry, Process Engineering or equivalent     Significant experience in the pharmaceutical industry, ideally in a Biopharmaceutical environment     Lean Practitioner, certified Green Belt (certified Black Belt desirable), GMP know how will be an advantage     Strong Project Management skills combined with a structured and solution-oriented work approach     Persistence and resilience are necessary for sustainable results     Excellent communication skills, able to convince and interact with all kinds of internal and external customers     Fluency in English, German is an advantage         About Lonza     At Lonza, our people are our greatest strength. With 30+ sites across five continents, our globally connected teams work together every day to manufacture the medicines of tomorrow. Our core values of Collaboration, Accountability, Excellence, Passion and Integrity reflect who we are and how we work together. Everyone’s ideas, big or small, have the potential to improve millions of lives, and that’s the kind of work we want you to be part of.    Innovation thrives when people from all backgrounds bring their unique perspectives to the table. At Lonza, we value diversity and are committed to creating an inclusive environment for all employees. If you’re ready to help turn our customers’ breakthrough ideas into viable therapies, we look forward to welcoming you on board.     Ready to shape the future of life sciences? Apply now.",
+    "job_fetch_timestamp": "2026-02-25T13:31:51.106614",
+    "job_input_status": "ok",
+    "photo_blob": {
+      "container": "cv-photos",
+      "blob_name": "photos/3a483225-5356-458d-9f4e-1030659101a1.png",
+      "content_type": "image/png"
+    },
+    "fast_path_profile": true,
+    "current_job_sig": "6a08eb88ae369a0494c95078cb8f56a2fc84dc3fba4f4d28e6c99754094d0c67",
+    "job_changed_at": "2026-02-25T13:31:51.144309",
+    "pdf_generated": true,
+    "job_reference_sig": "",
+    "work_experience_proposal_sig": "",
+    "skills_proposal_sig": "",
+    "pending_confirmation": null,
+    "event_log": [
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:31:51.185496"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:31:55.875003"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:32:20.663783"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:32:20.692346"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:32:56.249045"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:46:07.710455"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:46:07.725164"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:51:43.004892"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:52:04.146604"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:52:04.155610"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:52:06.554313"
+      },
+      {
+        "type": "get_cv_session",
+        "client_context": null,
+        "ts": "2026-02-25T13:54:12.336853"
+      }
+    ],
+    "bulk_translation_prompt_trace": [
+      {
+        "ts_utc": "2026-02-25T13:32:20.588500",
+        "target_language": "en",
+        "prompt_id_used": "pmpt_696f593c42148195ab41b3a3aaeaa55d029c2c08c553971f",
+        "effective_system_prompt_hash": "93bc6860d8721644981e75e131d9c9d274eab5e08eaf4d1bd92a42884b8e7938",
+        "user_payload_hash": "22950628d7662a90c856f1e030bd52e3b91b22571b2b2c4c836e755337292517",
+        "user_payload_chars": 4337
+      }
+    ],
+    "cv_state_original_hash": "bdbe1085bb1f5a292342941129488af3e17ca5d366f8c226c64500ac5ad83a62",
+    "cv_state_original_ref": "cv-artifacts/2a77abcd-19b3-43b7-8b9d-1998dde50136/cv_original_20260225_133220.json",
+    "bulk_translated_to": "en",
+    "bulk_translation_status": "ok",
+    "bulk_translation_source_hash": "22950628d7662a90c856f1e030bd52e3b91b22571b2b2c4c836e755337292517",
+    "bulk_translation_cache": {
+      "en": "22950628d7662a90c856f1e030bd52e3b91b22571b2b2c4c836e755337292517"
+    },
+    "active_cv_state_id": "translated:en:0cb3fa02d8e4",
+    "active_cv_state_lang": "en",
+    "active_cv_state_hash": "0cb3fa02d8e492211ab1a315acc27c9b5b9b481e9106d761a1ef1cf65b09241c",
+    "cv_state_translated_refs": {
+      "en": "cv-artifacts/2a77abcd-19b3-43b7-8b9d-1998dde50136/cv_translated_en_20260225_133220.json"
+    },
+    "fast_profile_applied": true,
+    "fast_profile_user_id": "f2601a5af1ccec0c1e370ed65af2de2b55d222c2351e03685b46038400c9c870",
+    "fast_profile_saved_at": "2026-02-23T16:45:38.212874",
+    "fast_profile_lang": "en",
+    "job_reference": {
+      "role_title": "Operational Excellence Manager (f/m/d) 80-100% — Visp 3930 CH",
+      "company": "Lonza",
+      "location": "Visp, Switzerland",
+      "seniority": "",
+      "employment_type": "80-100%",
+      "responsibilities": [
+        "Responsible for Operational Excellence in Bioconjugates Operations",
+        "Lead continuous improvement activities of the Lonza Business Management System (e.g. 6S, Value Stream Mapping, DMAIC, Hoshin, Kaizen)",
+        "Drive implementation of Lonza operational excellence roadmap, assessing progress and defining actions",
+        "Coach and trainer for White-, Yellow-, and Green Belts",
+        "Work with functional leaders to establish and achieve continuous improvement goals",
+        "Review, report & improve metrics",
+        "Leading and coordinating innovation projects while ensuring synergies of local improvements",
+        "Drive and coach cultural change"
+      ],
+      "must_haves": [
+        "Master degree preferred or advanced studies in Pharmaceutical Technology, Biotechnology, Chemistry, Process Engineering or equivalent",
+        "Significant experience in the pharmaceutical industry, ideally in a Biopharmaceutical environment",
+        "Lean Practitioner, certified Green Belt (certified Black Belt desirable)",
+        "Strong Project Management skills",
+        "GMP know how advantageous",
+        "Fluency in English"
+      ],
+      "nice_to_haves": [
+        "German language skills advantageous",
+        "Certified Black Belt desirable",
+        "Experience in Bioconjugates operations"
+      ],
+      "tools_tech": [
+        "Lean Six Sigma",
+        "Lonza Business Management System",
+        "6S",
+        "Value Stream Mapping",
+        "DMAIC",
+        "Hoshin",
+        "Kaizen"
+      ],
+      "keywords": [
+        "Operational Excellence",
+        "Continuous Improvement",
+        "Lean",
+        "Six Sigma",
+        "Green Belt",
+        "Black Belt",
+        "DMAIC",
+        "Value Stream Mapping",
+        "Project Management",
+        "GMP",
+        "Biopharmaceutical",
+        "Coaching",
+        "Training",
+        "Cultural Change",
+        "Metrics",
+        "Innovation Projects"
+      ]
+    },
+    "job_reference_status": "ok",
+    "work_tailoring_notes": "1. Director, GL Solutions Sp. Z o.o.: co-partner with building from  scratches construction company capable to deliver 30-40k eur jobs, also for public sector,\n\n2. in Head of Quality & Product Service, Expondo Polska Sp. z o.o.: technically solved issue with 3 years old company headache - good seller - bad quality, claims reduced by 70%, improved multiple workflows, eg. reduction number of steps in warehouse by half by rearranging the locations, after 3 months got rid of old department leftovers (no high-level overdue actions), introduced work classification --> simple job, agency staff, technical work --> technician\n\n3. in Quality Manager, SE Bordnetze SRL, Greenfield project Orhei, Moldova: basically from scraches build quality team taking care of product being actually send to oem production lines, capable to deliver right quality, IATF passed at first try, passed many customer audits, build team from local people, hand over process of position planned and started 6 months ahead, this refer to job positon in moldova quality manager\n\n4. Sumitomo Electric Bordnetze SE — Global Process Improvement Specialist (2011-03 – 2016-07):\naround 60% of time in production plants in random locations,\nfire-fighter - i was being sent to critical status plants to put down fires, usually customer-high-level concerns (eg. lack of output, very bad quality),\nmanaged international project of shop floor standardisation and KAIZEN implementation, highest level expert in concern-wide, eg. agreeing which of japanese shareholders applies to our business branch (technically), agreeing concern audits schedule, being main contact person, advicing implementation ideas,\nleaded very company wide improvements, training systems, production managment \nthis is refering to",
+    "work_experience_proposal_block": {
+      "roles": [
+        {
+          "title": "Director",
+          "company": "GL Solutions Sp. Z o.o.",
+          "date_range": "2020-01 - 2025-10",
+          "location": "Zielona Góra, Poland",
+          "bullets": [
+            "Led end-to-end delivery of road construction and infrastructure contracts sized EUR 30–40k, achieving on-time delivery and improved contract compliance.",
+            "Implemented process controls and site scheduling that reduced rework and construction delays across projects.",
+            "Optimized equipment and crew allocation to lower manual labor needs and improve daily operational throughput.",
+            "Managed regulatory documentation and compliance for public and private contracts to ensure audit readiness."
+          ]
+        },
+        {
+          "title": "Head of Quality & Product Service",
+          "company": "Expondo Polska Sp. z o.o.",
+          "date_range": "2018-11 - 2020-01",
+          "location": "Zielona Góra, Poland",
+          "bullets": [
+            "Led three departments (35 staff) to standardize procedures and KPI dashboards, improving quality oversight and team performance.",
+            "Reduced customer claims by 70% through targeted product fixes and process controls, restoring OEM acceptance.",
+            "Reorganized warehouse locations to halve pick/put steps, cutting handling time and stock discrepancies.",
+            "Introduced work classification and streamlined workflows to eliminate legacy backlog within 3 months."
+          ]
+        },
+        {
+          "title": "Quality Manager",
+          "company": "SE Bordnetze SRL",
+          "date_range": "2016-08 - 2018-11",
+          "location": "Greenfield project Orhei, Moldova",
+          "bullets": [
+            "Built plant quality systems from scratch and achieved IATF certification on first attempt, enabling OEM production supply.",
+            "Implemented VDA, Formel-Q and IATF standards across five sections (80 employees) to raise production quality.",
+            "Established customer and certification body interfaces, reducing audit nonconformities and improving transparency.",
+            "Planned and executed quality team development and handover, initiating succession six months before transition."
+          ]
+        },
+        {
+          "title": "Global Process Improvement Specialist",
+          "company": "Sumitomo Electric Bordnetze SE",
+          "date_range": "2011-03 - 2016-07",
+          "location": "Wolfsburg, Germany",
+          "bullets": [
+            "Led company-wide KAIZEN and shop-floor standardization projects, deploying best practices across multiple plants.",
+            "Served as primary concern contact for audits and implementation decisions, aligning global processes with customer requirements.",
+            "Conducted time studies and workstation optimizations to increase production efficiency and reduce costs.",
+            "Acted as rapid-response specialist at critical plants to resolve high-priority quality and output crises."
+          ]
+        }
+      ],
+      "notes": "Bullets rewritten to emphasize Operational Excellence, Lean/KAIZEN, certification achievements and measurable outcomes; metrics preserved from CV.",
+      "created_at": "2026-02-25T13:46:07.660330"
+    },
+    "work_experience_proposal_input_sig": "ee47d1e321bd5544b601bca086e44fb0135b097139d589f5ce5355e9ff082f90",
+    "work_experience_tailored": true,
+    "work_experience_proposal_accepted_at": "2026-02-25T13:51:42.898030",
+    "skills_proposal_block": {
+      "it_ai_skills": [
+        "Excel reporting & pivot analysis",
+        "KPI dashboards & reporting",
+        "Stakeholder presentations (PowerPoint)",
+        "Prompt engineering for structured outputs",
+        "AI-assisted workflow automation",
+        "Data summarization & insight extraction"
+      ],
+      "technical_operational_skills": [
+        "Quality Management (IATF, VDA, Formel-Q)",
+        "Standardization & KAIZEN implementation",
+        "Root cause analysis (FMEA, 5 Why, PDCA)",
+        "Process engineering",
+        "Project management (CAPEX/OPEX)",
+        "Construction/site management"
+      ],
+      "notes": "Skills chosen only from CV evidence: IT/AI items reflect documented tools, reporting and prompt/AI work; operational items reflect repeated quality, standardization, RCA and delivery roles. Ranked by evidence strength and recency, prioritized for Operational Excellence alignment without claiming uncertified or unlisted competencies.",
+      "openai_response_id": "resp_0452f960a59de1e100699efe7a240c8193bb1b29460ccda8f2",
+      "created_at": "2026-02-25T13:52:04.091279"
+    },
+    "it_ai_skills_tailored": true,
+    "skills_proposal_accepted_at": "2026-02-25T13:52:06.504866",
+    "pdf_refs": {
+      "2a77abcd-19b3-43b7-8b9d-1998dde50136-4ece862c6add45dfb485eb075b7780a1": {
+        "container": "cv-pdfs",
+        "blob_name": "2a77abcd-19b3-43b7-8b9d-1998dde50136/2a77abcd-19b3-43b7-8b9d-1998dde50136-4ece862c6add45dfb485eb075b7780a1.pdf",
+        "created_at": "2026-02-25T13:54:11.800027",
+        "sha256": "b34794c635dd88daab5dab8d6f657ffc38297f0c8215a9484a4d719ddd3cca22",
+        "cv_sig": "67ca8523f4fea3e40023b8f5c4145630d63db0ef9381eeaa3e02bcaa71b1c4c7",
+        "size_bytes": 3120547,
+        "render_ms": 1,
+        "pages": 2,
+        "validation_passed": true,
+        "download_name": "CV_Mariusz_Horodecki_Lonza_2026-02-25.pdf",
+        "target_language": "en",
+        "job_sig": "6a08eb88ae369a0494c95078cb8f56a2fc84dc3fba4f4d28e6c99754094d0c67"
+      },
+      "cover_letter_3c1a2ea1a7": {
+        "kind": "cover_letter",
+        "container": "cv-pdfs",
+        "blob_name": "2a77abcd-19b3-43b7-8b9d-1998dde50136/cover_letter_3c1a2ea1a7.pdf",
+        "download_name": "CoverLetter_Mariusz_Horodecki_Lonza_2026-02-25.pdf",
+        "created_at": "2026-02-25T13:59:57.388618"
+      }
+    },
+    "cv_data_blob_ref": "cv-artifacts/2a77abcd-19b3-43b7-8b9d-1998dde50136/cv_data_20260225_135957.json",
+    "cv_data_offloaded_at": "2026-02-25T13:59:57.480028",
+    "cover_letter_block": {
+      "opening_paragraph": "I am applying for the Operational Excellence Manager position at Lonza in Visp. I have held leadership roles in process improvement and quality management across manufacturing and construction environments and I am interested in work within the biopharmaceutical domain described in the posting.",
+      "core_paragraphs": [
+        "The role emphasizes Operational Excellence and continuous improvement; in my position as Global Process Improvement Specialist at Sumitomo Electric Bordnetze SE I led company-wide KAIZEN and shop-floor standardization projects and acted as rapid-response specialist at critical plants to resolve high-priority quality and output issues.",
+        "The position requires project management and quality system oversight; as Director at GL Solutions I led end-to-end delivery of road construction and infrastructure contracts sized EUR 30–40k, implemented process controls and site scheduling to reduce rework and delays, and as Head of Quality & Product Service at Expondo Polska I led three departments (35 staff) to standardize procedures and KPI dashboards and reduced customer claims by 70% through targeted product fixes and process controls."
+      ],
+      "closing_paragraph": "I am available for interview and for further discussion of how my documented experience in process standardization, KPI reporting and audit readiness relates to Lonza's Operational Excellence objectives. Thank you for considering my application.",
+      "signoff": "Kind regards,\nMariusz Horodecki",
+      "notes": "Cover letter links role topics to explicit CV facts only; no unlisted certifications or pharmaceutical experience are claimed.",
+      "openai_response_id": "resp_0a318b5e677afc6200699f004ec440819e929684b2dbf3c576",
+      "created_at": "2026-02-25T13:59:56.071097"
+    },
+    "cover_letter_pdf_ref": "cover_letter_3c1a2ea1a7"
+  },
+  "job_posting": "",
+  "artifacts": {
+    "photo_blob": {
+      "container": "cv-photos",
+      "blob_name": "photos/3a483225-5356-458d-9f4e-1030659101a1.png",
+      "content_type": "image/png"
+    },
+    "pdf_refs": {
+      "2a77abcd-19b3-43b7-8b9d-1998dde50136-4ece862c6add45dfb485eb075b7780a1": {
+        "container": "cv-pdfs",
+        "blob_name": "2a77abcd-19b3-43b7-8b9d-1998dde50136/2a77abcd-19b3-43b7-8b9d-1998dde50136-4ece862c6add45dfb485eb075b7780a1.pdf",
+        "created_at": "2026-02-25T13:54:11.800027",
+        "sha256": "b34794c635dd88daab5dab8d6f657ffc38297f0c8215a9484a4d719ddd3cca22",
+        "cv_sig": "67ca8523f4fea3e40023b8f5c4145630d63db0ef9381eeaa3e02bcaa71b1c4c7",
+        "size_bytes": 3120547,
+        "render_ms": 1,
+        "pages": 2,
+        "validation_passed": true,
+        "download_name": "CV_Mariusz_Horodecki_Lonza_2026-02-25.pdf",
+        "target_language": "en",
+        "job_sig": "6a08eb88ae369a0494c95078cb8f56a2fc84dc3fba4f4d28e6c99754094d0c67"
+      },
+      "cover_letter_3c1a2ea1a7": {
+        "kind": "cover_letter",
+        "container": "cv-pdfs",
+        "blob_name": "2a77abcd-19b3-43b7-8b9d-1998dde50136/cover_letter_3c1a2ea1a7.pdf",
+        "download_name": "CoverLetter_Mariusz_Horodecki_Lonza_2026-02-25.pdf",
+        "created_at": "2026-02-25T13:59:57.388618"
+      }
+    },
+    "skills_json_path": null
+  },
+  "template_version": "CV_template_2pages_2025",
+  "dod_commands": [
+    "python scripts/diagnose_session.py 2a77abcd-19b3-43b7-8b9d-1998dde50136",
+    "npm run pretest",
+    "pytest tests/test_*.py -v",
+    "npm run test"
+  ]
+}

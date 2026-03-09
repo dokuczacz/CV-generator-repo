@@ -10,6 +10,7 @@
     "deadcode:ui": "npm --prefix ui run lint -- --max-warnings=0",
     "deadcode:all": "npm run deadcode:python && npm run deadcode:ui",
     "test": "playwright test",
+    "test:parity:inline": "pwsh -NoProfile -File scripts/test-inline-parity.ps1",
     "test:openai": "pwsh -NoProfile -File scripts/test-openai-e2e.ps1 -Workers 1",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",

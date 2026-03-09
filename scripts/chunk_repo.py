@@ -59,14 +59,22 @@ ALWAYS_INCLUDE_FILENAMES = {
 }
 
 EXCLUDE_DIR_NAMES = {
+    ".azurite",
     ".git",
     ".github",
     ".next",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
     ".vscode",
     "node_modules",
+    "build",
+    "dist",
     "artifacts",
     "playwright-report",
     "test-results",
+    "tmp",
     "__pycache__",
     "__blobstorage__",
     "__queuestorage__",
@@ -78,6 +86,10 @@ EXCLUDE_DIR_NAMES = {
     ".venv",
     "env",
     "venv",
+}
+
+EXCLUDE_DIR_PREFIXES = {
+    ".azurite_backup",
 }
 
 EXCLUDE_FILE_EXTS = {
@@ -201,7 +213,12 @@ def should_include(file_path: Path) -> bool:
 
 def iter_files(root: Path) -> Iterable[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in EXCLUDE_DIR_NAMES
+            and not any(d.startswith(prefix) for prefix in EXCLUDE_DIR_PREFIXES)
+            and not d.endswith(".egg-info")
+        ]
         for filename in filenames:
             yield Path(dirpath) / filename
 
@@ -269,6 +286,8 @@ def chunk_files(file_entries: List[Dict[str, Any]], root: Path, output: Path, ch
             # If file is larger than chunk budget, split it across multiple chunks.
             available_payload = max(1, chunk_bytes - len(header))
             parts = [data[i:i + available_payload] for i in range(0, len(data), available_payload)]
+            if not parts:
+                parts = [b""]
 
             for part_index, part in enumerate(parts):
                 entry_label = rel_path if len(parts) == 1 else f"{rel_path} (part {part_index + 1}/{len(parts)})"

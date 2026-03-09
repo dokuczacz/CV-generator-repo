@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src import product_config
+from src.orchestrator.wizard.execution_strategy import resolve_execution_strategy
+
 
 @dataclass(frozen=True)
 class SkillsActionDeps:
@@ -25,6 +28,7 @@ class SkillsActionDeps:
     dedupe_strings_case_insensitive: Callable[..., list[str]]
     find_work_bullet_hard_limit_violations: Callable[..., list[str]]
     snapshot_session: Callable[..., Any]
+    format_job_reference_for_prompt: Callable[[dict], str] | None = None
 
 
 def handle_skills_actions(
@@ -37,6 +41,12 @@ def handle_skills_actions(
     trace_id: str,
     deps: SkillsActionDeps,
 ) -> tuple[bool, dict, dict, tuple[int, dict] | None]:
+    def _job_summary_for_prompt(job_ref: dict | None) -> str:
+        if not isinstance(job_ref, dict):
+            return ""
+        formatter = deps.format_job_reference_for_prompt or deps.format_job_reference_for_display
+        return formatter(job_ref)
+
     if aid == "SKILLS_ADD_NOTES":
         # Persist inline work tailoring context before navigating away.
         payload = user_action_payload or {}
@@ -171,9 +181,30 @@ def handle_skills_actions(
             meta2 = deps.wizard_set_stage(meta2, "it_ai_skills")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(assistant_text="AI ranking is not configured.", meta_out=meta2, cv_out=cv_data)
+
+        # Inline shortcut: when one-call strategy already produced skills,
+        # do not trigger another paid model call in skills stage.
+        experiment_mode = str(product_config.EXPERIMENT_MODE or "baseline").strip().lower()
+        execution_strategy, _strategy_source = resolve_execution_strategy(payload=payload, meta=meta2)
+        meta2["execution_strategy"] = execution_strategy
+        proposal_block_existing = meta2.get("skills_proposal_block")
+        if (
+            (execution_strategy == "unified" or experiment_mode in ("variant_split", "variant_unified"))
+            and isinstance(proposal_block_existing, dict)
+        ):
+            if isinstance(proposal_block_existing.get("it_ai_skills"), list) and isinstance(
+                proposal_block_existing.get("technical_operational_skills"), list
+            ):
+                meta2 = deps.wizard_set_stage(meta2, "skills_tailor_review")
+                cv_data, meta2 = deps.persist(cv_data, meta2)
+                return True, cv_data, meta2, deps.wizard_resp(
+                    assistant_text="Loaded combined skills proposal from experiment run.",
+                    meta_out=meta2,
+                    cv_out=cv_data,
+                )
     
         job_ref = meta2.get("job_reference") if isinstance(meta2.get("job_reference"), dict) else None
-        job_summary = deps.format_job_reference_for_display(job_ref) if isinstance(job_ref, dict) else ""
+        job_summary = _job_summary_for_prompt(job_ref)
         tailoring_suggestions = deps.escape_user_input_for_prompt(str(meta2.get("work_tailoring_notes") or ""))
         feedback_once_raw = str(meta2.get("work_tailoring_feedback") or "").strip()
         tailoring_feedback = deps.escape_user_input_for_prompt(feedback_once_raw)
@@ -205,6 +236,41 @@ def handle_skills_actions(
             f"[WORK_EXPERIENCE_TAILORED]\n{work_text}\n\n"
             f"[RAW_DOCX_SKILLS]\n{raw_docx_skills_text}\n"
         )
+
+        # Reuse existing proposal for identical inputs unless user explicitly forces regeneration.
+        force_regenerate = bool(payload.get("force_regenerate")) if isinstance(payload, dict) else False
+        input_fingerprint = deps.sha256_text(
+            "||".join(
+                [
+                    target_lang,
+                    deps.sha256_text(job_summary),
+                    deps.sha256_text(tailoring_suggestions),
+                    deps.sha256_text(tailoring_feedback),
+                    deps.sha256_text(work_text),
+                    deps.sha256_text(raw_docx_skills_text),
+                ]
+            )
+        )
+        prev_input_fingerprint = str(meta2.get("skills_proposal_input_sig") or "")
+        has_cached_proposal = isinstance(meta2.get("skills_proposal_block"), dict)
+        stage_now = str(meta2.get("wizard_stage") or "").strip().lower()
+        if (
+            not force_regenerate
+            and has_cached_proposal
+            and prev_input_fingerprint
+            and prev_input_fingerprint == input_fingerprint
+            and stage_now in ("it_ai_skills", "skills_notes_edit", "skills_tailor_review")
+        ):
+            meta2 = deps.wizard_set_stage(meta2, "skills_tailor_review")
+            cv_data, meta2 = deps.persist(cv_data, meta2)
+            return True, cv_data, meta2, deps.wizard_resp(
+                assistant_text=(
+                    "Loaded existing skills proposal for current CV/job context. "
+                    "Edit notes/context (or use force regenerate) to create a new version."
+                ),
+                meta_out=meta2,
+                cv_out=cv_data,
+            )
     
         ok, parsed, err = deps.openai_json_schema_call(
             system_prompt=deps.build_ai_system_prompt(stage="it_ai_skills", target_language=target_lang),
@@ -232,6 +298,7 @@ def handle_skills_actions(
                 "openai_response_id": str(parsed.get("_openai_response_id") or "")[:120],
                 "created_at": deps.now_iso(),
             }
+            meta2["skills_proposal_input_sig"] = input_fingerprint
             meta2 = deps.wizard_set_stage(meta2, "skills_tailor_review")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(assistant_text="Skills ranking ready.", meta_out=meta2, cv_out=cv_data)

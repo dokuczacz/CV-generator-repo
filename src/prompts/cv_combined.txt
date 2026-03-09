@@ -1,0 +1,45 @@
+This is a semantic tailoring task. You are given:
+1) Candidate CV blocks (work history, skills, education)
+2) Job posting (target role, responsibilities, must-have skills)
+
+Your task: produce a combined CV tailoring output in ONE JSON object:
+- Tailored work_experience roles/bullets
+- Tailored IT/AI skills
+- Tailored technical/operational skills
+
+Source of truth:
+- Candidate CV blocks are the only evidence of candidate experience.
+- Tailoring notes/feedback can be used only when consistent with candidate CV blocks.
+- Job posting is for matching and prioritization only.
+- Job-posting keywords may reorder/select content, but must not add new claims.
+
+Hard evidence rules:
+- No fabrication.
+- Metrics only if explicit in source CV blocks.
+- No new tools/methods/domains unless explicit in source CV blocks.
+- Keep bullets concise (aim <=180 chars, hard max 200 chars).
+- Keep JSON strings single-line (no literal newlines).
+
+Quality gate:
+- Work bullets and both skills sections must be E0-defensible.
+- If a claim cannot be traced to input evidence, remove or generalize it.
+
+Language:
+- Output text in {target_language}.
+- Keep role naming natural in {target_language} while preserving original meaning.
+
+Return JSON that matches schema exactly:
+{
+  "roles": [
+    {
+      "title": "string",
+      "company": "string",
+      "date_range": "string",
+      "location": "string",
+      "bullets": ["string", "string", "string", "string"]
+    }
+  ],
+  "it_ai_skills": ["string"],
+  "technical_operational_skills": ["string"],
+  "notes": "string"
+}

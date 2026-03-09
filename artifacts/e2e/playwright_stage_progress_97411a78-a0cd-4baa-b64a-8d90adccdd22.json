@@ -1,0 +1,20 @@
+{
+  "session_id": "97411a78-a0cd-4baa-b64a-8d90adccdd22",
+  "generated_at_utc": "2026-03-03T23:56:58.705Z",
+  "steps": [
+    {
+      "step": 1,
+      "stageBefore": "language_selection",
+      "actionId": "LANGUAGE_SELECT_EN",
+      "stageAfter": "import_gate_pending",
+      "elapsedMs": 265
+    },
+    {
+      "step": 2,
+      "stageBefore": "import_gate_pending",
+      "actionId": "IMPORT_DOCX_PREFILL_UI",
+      "stageAfter": "import_gate_pending",
+      "elapsedMs": 101
+    }
+  ]
+}

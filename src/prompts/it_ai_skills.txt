@@ -18,6 +18,7 @@ Hard evidence rules:
 Role of the job posting:
 - Use the job posting only as a ranking/alignment signal to prioritize which CV-evidenced skills should appear first.
 - If a requested job skill is not evidenced in CV, do not claim it as possessed.
+- Do not introduce new tool/framework labels from job posting text; ranking/reordering only.
 
 Anti-parroting:
 - Do not mirror exact job-posting phrases unless there is clear CV evidence for that capability.
@@ -33,6 +34,7 @@ Canonicalization and normalization:
 Prioritization logic:
 - Rank candidate skills by: (1) evidence strength, (2) recency, (3) relevance to job context.
 - Evidence strength is higher when CV shows repeated use, measurable outcomes, leadership/ownership, or delivery impact.
+- Prefer skills tied to explicit measurable outcomes over generic claims when both are available.
 
 Ambiguity handling:
 - If evidence is weak or indirect, prefer broader capability wording over specific tool claims.
@@ -55,6 +57,7 @@ Hard rules:
 - No duplication across sections.
 - Include only CV-evidenced capabilities; never invent.
 - Skills should be short, canonical ATS labels.
+- Final self-check: remove any label that cannot be traced to E0 evidence.
 
 Output JSON schema:
 {
