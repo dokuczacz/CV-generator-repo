@@ -94,11 +94,24 @@ jobs:
       - name: Prepare local settings
         run: cp local.settings.template.json local.settings.json
 
+      - name: Start frontend for mocked Playwright
+        run: |
+          node scripts/playwright-start-frontend.js > tmp-playwright-frontend.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000 > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Frontend did not become ready in time"
+          cat tmp-playwright-frontend.log || true
+          exit 1
+
       - name: Run mocked Playwright gate
         env:
           CI: "1"
           CV_ENABLE_AI: "0"
-        run: npx playwright test tests/e2e/stage-sot-mocked.spec.ts
+        run: npx playwright test --config=playwright.noserver.config.ts tests/e2e/stage-sot-mocked.spec.ts
 
       - name: Upload Playwright report
         if: always()
