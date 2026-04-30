@@ -138,6 +138,12 @@ def main():
     print("Stopping processes on ports:", args.ports)
     stop_processes_on_ports(args.ports)
 
+    openai_key = str(os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not openai_key:
+        print("Warning: OPENAI_API_KEY is not set in the current environment.")
+        print("Set it before starting local services, e.g. in PowerShell:")
+        print("  $env:OPENAI_API_KEY='your-openai-api-key'")
+
     # Check for .venv
     venv_path = repo_root / '.venv'
     activate = venv_path / 'Scripts' / 'Activate.ps1'
