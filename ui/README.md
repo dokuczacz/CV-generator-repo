@@ -1,6 +1,6 @@
 # CV Generator UI
 
-Minimal Next.js UI for CV Generator - connects directly to Azure Functions backend.
+Minimal Next.js UI for CV Generator. The UI calls the local Next.js API route, which proxies to the Python Azure Functions backend.
 
 ## Quick Start
 
@@ -16,17 +16,20 @@ Open http://localhost:3000
 
 - ✅ Minimal UI (only essential fields)
 - ✅ DOCX upload for photo extraction
-- ✅ Direct Azure Functions integration
+- ✅ Thin API proxy to Azure Functions
 - ✅ PDF download (base64 decode)
 - ✅ Real-time status updates
 
 ## Environment
 
-Copy `.env.local`:
+Use server-side environment variables for backend endpoints and secrets:
 ```env
-NEXT_PUBLIC_AZURE_FUNCTIONS_URL=https://cv-generator-6695.azurewebsites.net/api
-NEXT_PUBLIC_AZURE_FUNCTIONS_KEY=cPAXdShMyzLGDhiwjeo9weDy2OZQfLrGpn-nmphSNh_WAzFuCloICA==
+AZURE_FUNCTIONS_BASE_URL=http://127.0.0.1:7071/api
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_PROMPT_ID=your-openai-prompt-id
 ```
+
+Do not expose Azure Functions keys with `NEXT_PUBLIC_`.
 
 ## Structure
 

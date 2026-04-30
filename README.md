@@ -29,31 +29,23 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment guide.
          │ POST /api/process-cv
          ▼
 ┌─────────────────┐
-│  OpenAI Prompt  │ ← Configured in dashboard with tools
-│  + Tool Calling │
+│ Next.js API     │ ← Thin proxy: POST /api/process-cv
+│ route           │
 └────────┬────────┘
-         │ Tool calls (extract_and_store_cv, get_cv_session, update_cv_field, validate_cv, generate_cv_from_session, ...)
+         │ HTTP request
          ▼
 ┌─────────────────┐
-│  Backend (Node) │ ← Routes tool calls to Azure Functions
-│  Tool Handler   │
-└────────┬────────┘
-         │ HTTP requests
-         ▼
-┌─────────────────┐
-│ Azure Functions │ ← Python backend (CV processing)
-│  (cv-generator) │
+│ Azure Functions │ ← Python backend owns orchestration,
+│  Python         │    state, validation, and PDF rendering
 └─────────────────┘
 ```
 
 **Flow:**
 1. User uploads CV → UI converts to base64
-2. UI sends to `/api/process-cv` with message
-3. Backend calls OpenAI with `store: false` by default (uses prompt from dashboard via `OPENAI_PROMPT_ID`)
-4. OpenAI decides which tools to call (session workflow; PDF generation is gated by readiness + confirmations)
-5. Backend executes tool calls via Azure Functions
-6. Returns results to OpenAI, continues conversation
-7. Final PDF returned to user
+2. UI sends to `/api/process-cv` with message, file data, and optional job context
+3. Next.js API route forwards the request to Python Azure Functions
+4. Python backend owns wizard state, OpenAI calls, tool allowlists, validation, and PDF generation
+5. Final PDF metadata/base64 is returned to the UI for download
 
 ---
 
@@ -104,10 +96,9 @@ pip install -r requirements.txt
 
 Create `ui/.env.local`:
 ```env
-OPENAI_API_KEY=sk-proj-...
-OPENAI_PROMPT_ID=pmpt_696f593c42148195ab41b3a3aaeaa55d029c2c08c553971f
-NEXT_PUBLIC_AZURE_FUNCTIONS_URL=https://cv-generator-6695.azurewebsites.net/api
-NEXT_PUBLIC_AZURE_FUNCTIONS_KEY=cPAXdShMyzLGDhiwjeo9weDy2OZQfLrGpn-nmphSNh_WAzFuCloICA==
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_PROMPT_ID=your-openai-prompt-id
+AZURE_FUNCTIONS_BASE_URL=http://127.0.0.1:7071/api
 ```
 
 ### 3. Configure OpenAI Prompt

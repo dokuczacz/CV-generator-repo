@@ -7,22 +7,23 @@
 Edit `ui/.env.local` and replace the empty `OPENAI_API_KEY`:
 
 ```env
-OPENAI_API_KEY=sk-proj-...your-key-here...
+OPENAI_API_KEY=your-openai-api-key
 ```
 
 Get your API key from: https://platform.openai.com/api-keys
 
-### 2. Azure Functions (Already Configured)
+### 2. Azure Functions
 
 ```env
-NEXT_PUBLIC_AZURE_FUNCTIONS_URL=https://cv-generator-6695.azurewebsites.net/api
-NEXT_PUBLIC_AZURE_FUNCTIONS_KEY=cPAXdShMyzLGDhiwjeo9weDy2OZQfLrGpn-nmphSNh_WAzFuCloICA==
+AZURE_FUNCTIONS_BASE_URL=http://127.0.0.1:7071/api
 ```
 
-### 3. OpenAI Prompt ID (Already Set)
+Use server-side environment variables for backend endpoints and secrets. Do not expose function keys with `NEXT_PUBLIC_`.
+
+### 3. OpenAI Prompt ID
 
 ```env
-OPENAI_PROMPT_ID=pmpt_696f593c42148195ab41b3a3aaeaa55d029c2c08c553971f
+OPENAI_PROMPT_ID=your-openai-prompt-id
 ```
 
 ## How to Run

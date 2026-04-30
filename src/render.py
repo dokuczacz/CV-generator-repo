@@ -15,17 +15,21 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates" / "html"
 TEMPLATE_NAME = "cv_template_2pages_2025.html"
 TEMPLATE_NAME_DE = "cv_template_2pages_2025_de.html"
+TEMPLATE_NAME_FR = "cv_template_2pages_2025_fr.html"
 CSS_NAME = "cv_template_2pages_2025.css"
 CL_TEMPLATE_NAME = "cover_letter_template_2025.html"
 CL_TEMPLATE_NAME_DE = "cover_letter_template_2025_de.html"
+CL_TEMPLATE_NAME_FR = "cover_letter_template_2025_fr.html"
 CL_CSS_NAME = "cover_letter_template_2025.css"
 
 CV_TEMPLATE_BY_LANGUAGE = {
     "de": TEMPLATE_NAME_DE,
+    "fr": TEMPLATE_NAME_FR,
 }
 
 CL_TEMPLATE_BY_LANGUAGE = {
     "de": CL_TEMPLATE_NAME_DE,
+    "fr": CL_TEMPLATE_NAME_FR,
 }
 
 

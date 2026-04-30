@@ -6,7 +6,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
 const INPUT_DOCX = path.join(
   __dirname,
-  '../../archive/wzory/Lebenslauf_Mariusz_Horodecki_CH.docx'
+  '../../samples/Lebenslauf_Mariusz_Horodecki_CH.docx'
 );
 
 const JOB_URL = 'https://www.jobs.ch/en/vacancies/detail/faa45fb1-e562-43b3-a4dd-be9717ed2074/';
@@ -32,7 +32,7 @@ type ConfirmedFlags = {
 
 type MockState = {
   session_id: string | null;
-  language: 'en' | null;
+  language: 'en' | 'fr' | null;
   docx_base64_len: number;
   job_posting_url: string | null;
   job_reference: Record<string, any> | null;
@@ -129,7 +129,7 @@ function createProcessCvSoTMock() {
       const isUserMessage = typeof req.message === 'string' && req.message.trim().length > 0;
       const hasDocx = typeof req.docx_base64 === 'string' && req.docx_base64.length > 1000;
 
-      if (isFirstTurn && isUserMessage) {
+      if (isFirstTurn && (isUserMessage || hasDocx)) {
         if (!hasDocx) {
           await respond(
             route,
@@ -159,6 +159,7 @@ function createProcessCvSoTMock() {
             fields: [],
             actions: [
               { id: 'LANGUAGE_SELECT_EN', label: 'English', style: 'primary' },
+              { id: 'LANGUAGE_SELECT_FR', label: 'French', style: 'secondary' },
             ],
             disable_free_text: true,
           },
@@ -204,6 +205,32 @@ function createProcessCvSoTMock() {
               ],
               disable_free_text: true,
             },
+          });
+          return;
+        }
+
+        case 'LANGUAGE_SELECT_FR': {
+          state.language = 'fr';
+          await respond(route, {
+            success: true,
+            response: 'Great — French selected. Import the DOCX prefill?',
+            session_id: state.session_id,
+            job_posting_url: state.job_posting_url || '',
+            ui_action: {
+              kind: 'review_form',
+              stage: 'IMPORT_PREFILL',
+              title: 'Import DOCX data?',
+              text: 'Please confirm whether to import the DOCX prefill.',
+              fields: [
+                { key: 'docx_stats', label: 'DOCX received', value: `base64_len=${state.docx_base64_len}` },
+              ],
+              actions: [
+                { id: 'IMPORT_PREFILL_YES', label: 'Import DOCX prefill', style: 'primary' },
+                { id: 'IMPORT_PREFILL_NO', label: 'Skip import', style: 'secondary' },
+              ],
+              disable_free_text: true,
+            },
+            stage: 'import_gate_pending',
           });
           return;
         }
@@ -635,6 +662,42 @@ function createProcessCvSoTMock() {
 }
 
 test.describe('Stage SoT scenarios (mocked backend state machine)', () => {
+  test('language selection: French action dispatches and advances to import gate', async ({ page }) => {
+    test.setTimeout(60_000);
+
+    test.skip(!fs.existsSync(INPUT_DOCX), `Missing input DOCX: ${INPUT_DOCX}`);
+
+    const mock = createProcessCvSoTMock();
+    await mock.setup(page);
+
+    await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+
+    await page.getByTestId('job-url-input').fill(JOB_URL);
+    await page.getByTestId('job-text-input').fill('prepare my CV in French');
+    await page.locator('input[type="file"]').setInputFiles(INPUT_DOCX);
+    await page.getByTestId('use-loaded-cv').click();
+
+    const stagePanel = page.getByTestId('stage-panel');
+    await expect(stagePanel.getByTestId('action-LANGUAGE_SELECT_FR')).toBeVisible({ timeout: 10_000 });
+
+    const reqPromise = page.waitForRequest(
+      (req) =>
+        req.url().includes('/api/process-cv') &&
+        req.method() === 'POST' &&
+        String(req.postData() || '').includes('LANGUAGE_SELECT_FR'),
+      { timeout: 30_000 }
+    );
+
+    await stagePanel.getByTestId('action-LANGUAGE_SELECT_FR').click();
+
+    const req = await reqPromise;
+    const body = JSON.parse(req.postData() || '{}');
+
+    expect(body.user_action?.id).toBe('LANGUAGE_SELECT_FR');
+    expect(mock.state.language).toBe('fr');
+    await expect(stagePanel.getByText('Import DOCX data?')).toBeVisible({ timeout: 10_000 });
+  });
+
   test('happy path: job offer + notes + tailoring runs + pdf', async ({ page }) => {
     test.setTimeout(120_000);
 
@@ -645,73 +708,68 @@ test.describe('Stage SoT scenarios (mocked backend state machine)', () => {
 
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
-    // Upload CV (this also clears any previously-entered job URL in UI).
+    await page.getByTestId('job-url-input').fill(JOB_URL);
+    await page.getByTestId('job-text-input').fill('przygotuj moje cv pod te oferte pracy (all in english)');
     await page.locator('input[type="file"]').setInputFiles(INPUT_DOCX);
-
-    // Provide job URL (stored by UI and sent in payload).
-    await page.getByPlaceholder('https://...').fill(JOB_URL);
-
-    // Start message.
-    await page.locator('textarea').first().fill('przygotuj moje cv pod te oferte pracy (all in english)');
-    await page.locator('textarea').first().press('Enter');
+    await page.getByTestId('use-loaded-cv').click();
 
     // Language selection.
-    await expect(page.getByText('Language Selection')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText('Language Selection')).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: 'English' }).click();
     expect(mock.state.language).toBe('en');
     expect(mock.state.docx_base64_len).toBeGreaterThan(1000);
     expect(mock.state.job_posting_url).toBe(JOB_URL);
 
     // Import.
-    await expect(page.getByText('Import DOCX data?')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText('Import DOCX data?')).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Import DOCX prefill/i }).click();
 
     // Contact + Education.
-    await expect(page.getByText(/Stage 1\/6.*Contact/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 1\/6.*Contact/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Confirm & lock/i }).click();
     expect(mock.state.confirmed_flags.contact_confirmed).toBe(true);
 
-    await expect(page.getByText(/Stage 2\/6.*Education/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 2\/6.*Education/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Confirm & lock/i }).click();
     expect(mock.state.confirmed_flags.education_confirmed).toBe(true);
 
     // Job offer analyze.
-    await expect(page.getByText(/Stage 3\/6.*Job offer/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 3\/6.*Job offer/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Analyze/i }).click();
     expect(mock.state.counters.job_offer_analyze).toBe(1);
     expect(mock.state.job_reference).toBeTruthy();
 
     // Work notes edit + save.
-    await expect(page.getByText(/Stage 4\/6.*Work experience/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 4\/6.*Work experience/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Add tailoring notes/i }).click();
 
-    await expect(page.getByText('Work tailoring notes')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText('Work tailoring notes')).toBeVisible({ timeout: 10_000 });
     await page.locator('textarea').first().fill(TAILORING_NOTES);
     await page.getByRole('button', { name: /Save notes/i }).click();
     expect(mock.state.work_tailoring_notes).toContain('claims reduced by 70%');
 
     // Work tailoring run.
-    await expect(page.getByText(/Stage 4\/6.*Work experience/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 4\/6.*Work experience/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Run tailoring/i }).click();
     expect(mock.state.counters.work_tailor_run).toBe(1);
     expect(mock.state.cv_data.work_experience[0].bullets[0]).toMatch(/Reduced claims by 70%/i);
 
     // Stage 5a → 5b.
-    await expect(page.getByText(/Stage 5a\/6.*Technical projects/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 5a\/6.*Technical projects/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Continue/i }).click();
 
-    await expect(page.getByText(/Stage 5b\/6.*Skills.*FÄHIGKEITEN/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 5b\/6.*Skills.*FÄHIGKEITEN/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Generate ranked skills/i }).click();
     expect(mock.state.counters.skills_tailor_run).toBe(1);
     expect(mock.state.cv_data.it_ai_skills.length).toBeGreaterThan(0);
 
     // Generate PDF.
-    await expect(page.getByText(/Stage 6\/6.*Generate/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 6\/6.*Generate/i)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /Generate PDF/i }).click();
     await expect(page.getByText('Generate PDF?').first()).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /^Generate PDF$/i }).click();
 
-    await expect(page.getByRole('button', { name: /Download PDF/i })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /Pobierz PDF|Pobierz CV|Download PDF/i })).toBeVisible({ timeout: 10_000 });
   });
 
   test('error path: WORK_TAILOR_RUN fails closed without job reference', async ({ page }) => {
@@ -724,11 +782,10 @@ test.describe('Stage SoT scenarios (mocked backend state machine)', () => {
 
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
+    await page.getByTestId('job-url-input').fill(JOB_URL);
+    await page.getByTestId('job-text-input').fill('przygotuj moje cv pod te oferte pracy (all in english)');
     await page.locator('input[type="file"]').setInputFiles(INPUT_DOCX);
-    await page.getByPlaceholder('https://...').fill(JOB_URL);
-
-    await page.locator('textarea').first().fill('przygotuj moje cv pod te oferte pracy (all in english)');
-    await page.locator('textarea').first().press('Enter');
+    await page.getByTestId('use-loaded-cv').click();
 
     await page.getByRole('button', { name: 'English' }).click();
     await page.getByRole('button', { name: /Import DOCX prefill/i }).click();
@@ -737,12 +794,12 @@ test.describe('Stage SoT scenarios (mocked backend state machine)', () => {
 
     // Skip job offer, then try work tailoring.
     await page.getByRole('button', { name: /Skip/i }).click();
-    await expect(page.getByText(/Stage 4\/6.*Work experience/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('stage-panel').getByText(/Stage 4\/6.*Work experience/i)).toBeVisible({ timeout: 10_000 });
 
     await page.getByRole('button', { name: /Run tailoring/i }).click();
 
     // UI displays server error message.
-    await expect(page.getByText(/❌ Error: Server error: 500/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Server error: 500/i)).toHaveCount(1, { timeout: 10_000 });
     expect(mock.state.counters.work_tailor_run).toBe(1);
     expect(mock.state.job_reference).toBeNull();
   });
@@ -757,11 +814,10 @@ test.describe('Stage SoT scenarios (mocked backend state machine)', () => {
 
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
+    await page.getByTestId('job-url-input').fill(JOB_URL);
+    await page.getByTestId('job-text-input').fill('przygotuj moje cv pod te oferte pracy (all in english)');
     await page.locator('input[type="file"]').setInputFiles(INPUT_DOCX);
-    await page.getByPlaceholder('https://...').fill(JOB_URL);
-
-    await page.locator('textarea').first().fill('przygotuj moje cv pod te oferte pracy (all in english)');
-    await page.locator('textarea').first().press('Enter');
+    await page.getByTestId('use-loaded-cv').click();
 
     await page.getByRole('button', { name: 'English' }).click();
     await page.getByRole('button', { name: /Import DOCX prefill/i }).click();
@@ -773,7 +829,7 @@ test.describe('Stage SoT scenarios (mocked backend state machine)', () => {
 
     // Try to re-run parse from the next stage; mock must reject and UI must show error.
     await page.getByRole('button', { name: /Re-analyze job offer/i }).click();
-    await expect(page.getByText(/❌ Error: Server error: 400/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Server error: 400/i)).toHaveCount(1, { timeout: 10_000 });
     expect(mock.state.counters.job_offer_analyze).toBe(1);
   });
 });

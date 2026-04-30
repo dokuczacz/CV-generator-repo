@@ -65,6 +65,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                 "actions": [
                     {"id": "LANGUAGE_SELECT_EN", "label": "English", "style": "primary"},
                     {"id": "LANGUAGE_SELECT_DE", "label": "Deutsch", "style": "secondary"},
+                    {"id": "LANGUAGE_SELECT_FR", "label": "Français", "style": "secondary"},
                 ],
                 "disable_free_text": True,
             }
@@ -221,6 +222,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                     "options": [
                         {"value": "en", "label": "English"},
                         {"value": "de", "label": "Deutsch"},
+                        {"value": "fr", "label": "Français"},
                     ],
                 }
             )
@@ -285,6 +287,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                         "options": [
                             {"value": "en", "label": "English"},
                             {"value": "de", "label": "Deutsch"},
+                            {"value": "fr", "label": "Français"},
                         ],
                     },
                 ],
@@ -434,7 +437,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
             )
             allow_run = bool(has_job_context and deps.openai_enabled())
             current_target_lang = str(meta.get("target_language") or meta.get("language") or "en").strip().lower()
-            if current_target_lang not in ("en", "de"):
+            if current_target_lang not in ("en", "de", "fr"):
                 current_target_lang = "en"
             actions = [
                 {"id": "WORK_NOTES_CANCEL", "label": "Cancel", "style": "secondary"},
@@ -459,6 +462,7 @@ def build_ui_action(stage: str, cv_data: dict, meta: dict, readiness: dict, deps
                         "options": [
                             {"value": "en", "label": "English"},
                             {"value": "de", "label": "Deutsch"},
+                            {"value": "fr", "label": "Français"},
                         ],
                     },
                     {

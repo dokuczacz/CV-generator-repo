@@ -73,6 +73,16 @@ def handle_work_tailor_ai_actions(
     def _word_count(text: str) -> int:
         return len([w for w in str(text or "").strip().split() if w])
 
+    def _cover_letter_word_count_from_block(block: dict) -> int:
+        cl_full_text = " ".join(
+            [
+                str(block.get("opening_paragraph") or ""),
+                " ".join([str(p) for p in (block.get("core_paragraphs") or [])]),
+                str(block.get("closing_paragraph") or ""),
+            ]
+        ).strip()
+        return _word_count(cl_full_text)
+
     def _job_summary_for_prompt(job_ref: dict | None) -> str:
         if not isinstance(job_ref, dict):
             return ""
@@ -166,7 +176,7 @@ def handle_work_tailor_ai_actions(
                 pass
         if isinstance(payload, dict):
             _target_language = str(payload.get("target_language") or "").strip().lower()
-            if _target_language in ("en", "de"):
+            if _target_language in ("en", "de", "fr"):
                 meta2["target_language"] = _target_language
             _positioning_mode = str(payload.get("positioning_mode") or "").strip().lower()
             if _positioning_mode:
@@ -276,15 +286,18 @@ def handle_work_tailor_ai_actions(
                 if effective_unified_mode == "variant_unified"
                 else get_combined_cv_proposal_response_format()
             )
-            ok_exp, parsed_exp, err_exp = deps.openai_json_schema_call(
-                system_prompt=deps.build_ai_system_prompt(stage=stage_name, target_language=target_lang),
-                user_text=combined_user_text,
-                trace_id=trace_id,
-                session_id=session_id,
-                response_format=response_format,
-                max_output_tokens=3200 if effective_unified_mode == "variant_split" else 3600,
-                stage=stage_name,
-            )
+            def _run_unified_call(*, user_text_override: str | None = None):
+                return deps.openai_json_schema_call(
+                    system_prompt=deps.build_ai_system_prompt(stage=stage_name, target_language=target_lang),
+                    user_text=user_text_override if user_text_override is not None else combined_user_text,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    response_format=response_format,
+                    max_output_tokens=3200 if effective_unified_mode == "variant_split" else 3600,
+                    stage=stage_name,
+                )
+
+            ok_exp, parsed_exp, err_exp = _run_unified_call()
             if not ok_exp or not isinstance(parsed_exp, dict):
                 meta2["work_experience_proposal_error"] = str(err_exp)[:400]
                 meta2 = deps.wizard_set_stage(meta2, "work_experience")
@@ -305,14 +318,34 @@ def handle_work_tailor_ai_actions(
                     cl_block["opening_paragraph"] = _capitalize_first_alpha(str(cl_block.get("opening_paragraph") or ""))
 
                     # Unified contract guard: keep cover letter length within agreed range.
-                    cl_full_text = " ".join(
-                        [
-                            str(cl_block.get("opening_paragraph") or ""),
-                            " ".join([str(p) for p in (cl_block.get("core_paragraphs") or [])]),
-                            str(cl_block.get("closing_paragraph") or ""),
-                        ]
-                    ).strip()
-                    cl_words = _word_count(cl_full_text)
+                    cl_words = _cover_letter_word_count_from_block(cl_block)
+                    if cl_words < 220 or cl_words > 320:
+                        retry_instruction = (
+                            "\n[RETRY_CONSTRAINT]\n"
+                            "Previous attempt violated the cover-letter length contract.\n"
+                            f"Return the same JSON shape, but make the cover letter strictly 220-320 words total. "
+                            f"The previous draft was {cl_words} words. "
+                            "Keep all claims evidence-grounded and consistent with the CV.\n"
+                        )
+                        deps.log_info(
+                            "Unified CV+CL retry due to cover letter length session=%s target_lang=%s words=%s",
+                            session_id,
+                            target_lang,
+                            cl_words,
+                        )
+                        ok_retry, parsed_retry, err_retry = _run_unified_call(
+                            user_text_override=combined_user_text + retry_instruction
+                        )
+                        if not ok_retry or not isinstance(parsed_retry, dict):
+                            raise ValueError(
+                                f"Unified cover letter length retry failed: {str(err_retry or 'invalid_retry_payload')[:200]}"
+                            )
+                        unified = parse_unified_cv_cl_proposal(parsed_retry)
+                        combined = unified.combined_cv
+                        cl = unified.cover_letter
+                        cl_block = cl.dict()
+                        cl_block["opening_paragraph"] = _capitalize_first_alpha(str(cl_block.get("opening_paragraph") or ""))
+                        cl_words = _cover_letter_word_count_from_block(cl_block)
                     if cl_words < 220 or cl_words > 320:
                         raise ValueError(
                             f"Unified cover letter length out of range: {cl_words} words (expected 220-320)."

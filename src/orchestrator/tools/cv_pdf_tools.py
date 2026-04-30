@@ -220,28 +220,60 @@ def tool_generate_cv_from_session(
             if not cv_refs:
                 cv_refs = {}
 
+            latest_ref, latest_info = None, None
+            current_job_sig = str(meta.get("current_job_sig") or "").strip()
+            current_lang = str(meta.get("target_language") or meta.get("language") or lang).strip().lower()
+
             sorted_refs = sorted(
                 cv_refs.items(),
                 key=lambda x: x[1].get("created_at", "") if isinstance(x[1], dict) else "",
                 reverse=True
             )
             if sorted_refs:
-                latest_ref, latest_info = sorted_refs[0]
-                current_job_sig = str(meta.get("current_job_sig") or "").strip()
-                latest_job_sig = str(latest_info.get("job_sig") or "") if isinstance(latest_info, dict) else ""
+                candidate_refs = sorted_refs
+                if pdf_action == "download_only" and current_lang:
+                    lang_matched_refs = [
+                        (ref_key, ref_info)
+                        for ref_key, ref_info in sorted_refs
+                        if isinstance(ref_info, dict)
+                        and str(ref_info.get("target_language") or "").strip().lower() == current_lang
+                    ]
+                    if lang_matched_refs:
+                        candidate_refs = lang_matched_refs
+                        logging.info(
+                            "Execution latch: download_only filtered cached CV PDFs by language session_id=%s target_language=%s candidates=%d",
+                            session_id,
+                            current_lang,
+                            len(lang_matched_refs),
+                        )
+                    else:
+                        logging.info(
+                            "Execution latch: download_only found no language-matched cached CV PDF session_id=%s target_language=%s",
+                            session_id,
+                            current_lang,
+                        )
+                        candidate_refs = []
+
+                if candidate_refs:
+                    latest_ref, latest_info = candidate_refs[0]
+                else:
+                    latest_ref, latest_info = None, None
+
+            if latest_ref and isinstance(latest_info, dict):
+                latest_job_sig = str(latest_info.get("job_sig") or "")
                 latest_cv_sig = str(latest_info.get("cv_sig") or "") if isinstance(latest_info, dict) else ""
-                current_lang = str(meta.get("target_language") or meta.get("language") or lang).strip().lower()
                 latest_lang = str(latest_info.get("target_language") or "").strip().lower() if isinstance(latest_info, dict) else ""
 
                 should_serve_cached = False
                 if pdf_action == "download_only":
                     # DOWNLOAD_PDF must remain side-effect free: serve latest cached CV artifact
-                    # without triggering translation/regeneration.
+                    # that matches the current target language, without triggering regeneration.
                     should_serve_cached = True
                     logging.info(
-                        "Execution latch: download_only serving latest cached CV PDF session_id=%s pdf_ref=%s",
+                        "Execution latch: download_only serving cached CV PDF session_id=%s pdf_ref=%s target_language=%s",
                         session_id,
                         latest_ref,
+                        current_lang,
                     )
                 elif current_job_sig and latest_job_sig and current_job_sig != latest_job_sig:
                     logging.info(

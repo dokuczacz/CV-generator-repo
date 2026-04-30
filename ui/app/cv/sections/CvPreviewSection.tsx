@@ -83,8 +83,8 @@ export function CvPreviewSection({
 
     const isLanguageSelection = String(uiAction.stage || '').toUpperCase() === 'LANGUAGE_SELECTION';
     const isCoverLetterStage = String(uiAction.stage || '').toUpperCase() === 'COVER_LETTER';
-    const enabledLanguageActions = new Set(['LANGUAGE_SELECT_EN', 'LANGUAGE_SELECT_DE']);
-    const languageNote = isLanguageSelection ? 'Wybrany język docelowy ustawia wariant template PDF (EN/DE). Dla PL opcja jest jeszcze niedostępna.' : null;
+    const enabledLanguageActions = new Set(['LANGUAGE_SELECT_EN', 'LANGUAGE_SELECT_DE', 'LANGUAGE_SELECT_FR']);
+    const languageNote = isLanguageSelection ? 'Wybrany język docelowy ustawia wariant template PDF (EN/DE/FR). Dla PL opcja jest jeszcze niedostępna.' : null;
     const hasLocalCvPdf = !!latestCvPdfBase64;
     const hasLocalCoverPdf = !!latestCoverLetterPdfBase64;
 

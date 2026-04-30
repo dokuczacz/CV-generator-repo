@@ -20,6 +20,7 @@ def test_translations_load():
     assert "en" in translations, "English translations missing"
     assert "de" in translations, "German translations missing"
     assert "pl" in translations, "Polish translations missing"
+    assert "fr" in translations, "French translations missing"
     print("✓ Translations loaded successfully")
     return True
 
@@ -30,9 +31,10 @@ def test_cover_letter_signoffs():
         ("en", "Kind regards"),
         ("de", "Mit freundlichen Grüßen"),
         ("pl", "Z poważaniem"),
+        ("fr", "Cordialement"),
         ("DE", "Mit freundlichen Grüßen"),  # Test uppercase
         ("En", "Kind regards"),  # Test mixed case
-        ("fr", "Kind regards"),  # Test fallback to English
+        ("it", "Kind regards"),  # Test fallback to English
     ]
     
     for lang, expected in test_cases:
@@ -63,6 +65,14 @@ def test_signoff_formatting():
     expected = "Kind regards,\nMariusz Horodecki"
     assert signoff == expected, f"Expected '{expected}', got '{signoff}'"
     print(f"✓ English signoff formatting: {repr(signoff)}")
+
+    # Test French
+    target_language = "fr"
+    signoff_phrase = get_cover_letter_signoff(target_language)
+    signoff = f"{signoff_phrase},\n{full_name}"
+    expected = "Cordialement,\nMariusz Horodecki"
+    assert signoff == expected, f"Expected '{expected}', got '{signoff}'"
+    print(f"✓ French signoff formatting: {repr(signoff)}")
     
     return True
 

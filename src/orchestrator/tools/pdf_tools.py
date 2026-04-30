@@ -50,8 +50,8 @@ def tool_generate_cover_letter_from_session(
     meta2 = dict(meta or {})
 
     target_lang = str(language or meta2.get("target_language") or meta2.get("language") or "en").strip().lower()
-    if target_lang not in ("en", "de"):
-        return 400, {"error": "cover_letter_lang_unsupported", "details": "Cover letter generation is EN/DE only for now."}, "application/json"
+    if target_lang not in ("en", "de", "fr"):
+        return 400, {"error": "cover_letter_lang_unsupported", "details": "Cover letter generation is EN/DE/FR only for now."}, "application/json"
     if not deps.cv_enable_cover_letter:
         return 403, {"error": "cover_letter_disabled"}, "application/json"
     if not deps.openai_enabled():

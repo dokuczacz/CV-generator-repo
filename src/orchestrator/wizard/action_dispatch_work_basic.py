@@ -129,7 +129,7 @@ def handle_work_basic_actions(
         notes = str(payload.get("work_tailoring_notes") or "").strip()[:WORK_TAILORING_NOTES_MAX_CHARS]
         meta2["work_tailoring_notes"] = notes
         target_language = str(payload.get("target_language") or "").strip().lower()
-        if target_language in ("en", "de"):
+        if target_language in ("en", "de", "fr"):
             meta2["target_language"] = target_language
         try:
             deps.append_event(

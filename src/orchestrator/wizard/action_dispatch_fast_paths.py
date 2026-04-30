@@ -102,7 +102,7 @@ def handle_fast_paths_actions(
                 meta2["skills_ranking_notes"] = str(payload.get("skills_ranking_notes") or "").strip()[:2000]
             if isinstance(payload, dict) and "target_language" in payload:
                 target_language_raw = str(payload.get("target_language") or "").strip().lower()
-                if target_language_raw in ("en", "de", "pl"):
+                if target_language_raw in ("en", "de", "pl", "fr"):
                     meta2["target_language"] = target_language_raw
                     meta2["language"] = target_language_raw
         except Exception:
@@ -276,7 +276,7 @@ def handle_fast_paths_actions(
                 stage_updates.append({"step": "job_reference", "ok": False, "error": str(e)[:200]})
     
         target_lang = str(meta2.get("target_language") or cv_data.get("language") or meta2.get("language") or "en").strip().lower()
-        if target_lang not in ("en", "de", "pl"):
+        if target_lang not in ("en", "de", "pl", "fr"):
             target_lang = "en"
         work_sig = deps.sha256_text(f"{job_sig}|{target_lang}")
         skills_sig = deps.sha256_text(f"{job_sig}|{target_lang}")

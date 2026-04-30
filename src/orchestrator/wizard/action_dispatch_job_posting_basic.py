@@ -26,7 +26,7 @@ def handle_job_posting_basic_actions(
         if not isinstance(payload, dict):
             return
         raw = str(payload.get("target_language") or "").strip().lower()
-        if raw not in ("en", "de", "pl"):
+        if raw not in ("en", "de", "pl", "fr"):
             return
         meta2["target_language"] = raw
         meta2["language"] = raw

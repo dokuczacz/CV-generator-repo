@@ -31,7 +31,7 @@ export async function validateCV(cvData: any): Promise<any> {
 
 export async function generateCV(
   cvData: any,
-  language: 'en' | 'de' | 'pl' = 'en',
+  language: 'en' | 'de' | 'pl' | 'fr' = 'en',
   sourceDocxBase64?: string
 ): Promise<any> {
   return callAzure('/generate-cv-action', {

@@ -62,8 +62,13 @@ def handle_contact_and_language_actions(
             cv_out=cv_data,
         )
 
-    if aid in ("LANGUAGE_SELECT_EN", "LANGUAGE_SELECT_DE", "LANGUAGE_SELECT_PL"):
-        lang_map = {"LANGUAGE_SELECT_EN": "en", "LANGUAGE_SELECT_DE": "de", "LANGUAGE_SELECT_PL": "pl"}
+    if aid in ("LANGUAGE_SELECT_EN", "LANGUAGE_SELECT_DE", "LANGUAGE_SELECT_PL", "LANGUAGE_SELECT_FR"):
+        lang_map = {
+            "LANGUAGE_SELECT_EN": "en",
+            "LANGUAGE_SELECT_DE": "de",
+            "LANGUAGE_SELECT_PL": "pl",
+            "LANGUAGE_SELECT_FR": "fr",
+        }
         target_lang = lang_map.get(aid, "en")
 
         deps.log_info(

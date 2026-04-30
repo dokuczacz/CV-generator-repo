@@ -35,6 +35,13 @@ def test_render_html_uses_german_template_for_de_language() -> None:
     assert "Work experience" not in html
 
 
+def test_render_html_uses_french_template_for_fr_language() -> None:
+    html = render_html(_minimal_cv("fr"), inline_css=False)
+    assert '<html lang="fr">' in html
+    assert "Expérience professionnelle" in html
+    assert "Work experience" not in html
+
+
 def test_render_cover_letter_uses_english_template_by_default() -> None:
     payload = {
         "sender_name": "Max Mustermann",
@@ -62,3 +69,18 @@ def test_render_cover_letter_uses_german_template_for_de_language() -> None:
     html = render_cover_letter_html(payload, inline_css=False)
     assert '<html lang="de">' in html
     assert "<title>Anschreiben</title>" in html
+
+
+def test_render_cover_letter_uses_french_template_for_fr_language() -> None:
+    payload = {
+        "language": "fr",
+        "sender_name": "Max Mustermann",
+        "date": "2026-03-03",
+        "opening_paragraph": "Bonjour",
+        "core_paragraphs": ["Coeur"],
+        "closing_paragraph": "Conclusion",
+        "signoff": "Cordialement,\nMax Mustermann",
+    }
+    html = render_cover_letter_html(payload, inline_css=False)
+    assert '<html lang="fr">' in html
+    assert "<title>Lettre de motivation</title>" in html

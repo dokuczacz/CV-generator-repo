@@ -90,7 +90,7 @@ def handle_cover_pdf_actions(
         notes_variant = _notes_variant(payload, meta2)
         meta2["cover_letter_notes_variant"] = notes_variant
         target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
-        allowed_langs = {"en", "de"}
+        allowed_langs = {"en", "de", "fr"}
         try:
             deps.log_info(
                 "COVER_ACTION aid=%s session=%s stage_before=%s target_lang=%s",
@@ -106,7 +106,7 @@ def handle_cover_pdf_actions(
             return True, cv_data, meta2, deps.wizard_resp(assistant_text="Cover letter is disabled.", meta_out=meta2, cv_out=cv_data)
         if target_lang not in allowed_langs:
             cv_data, meta2 = deps.persist(cv_data, meta2)
-            return True, cv_data, meta2, deps.wizard_resp(assistant_text="Cover letter is available only for English (EN) or German (DE) for now.", meta_out=meta2, cv_out=cv_data)
+            return True, cv_data, meta2, deps.wizard_resp(assistant_text="Cover letter is available only for English (EN), German (DE), or French (FR) for now.", meta_out=meta2, cv_out=cv_data)
         if not deps.openai_enabled():
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(assistant_text="AI is not configured. Cover letter generation is unavailable.", meta_out=meta2, cv_out=cv_data)
@@ -293,12 +293,12 @@ def handle_cover_pdf_actions(
         meta2["cover_letter_feedback_capsule"] = capsule_context
 
         target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
-        allowed_langs = {"en", "de"}
+        allowed_langs = {"en", "de", "fr"}
         if target_lang not in allowed_langs:
             meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(
-                assistant_text="Cover letter is available only for English (EN) or German (DE) for now.",
+                assistant_text="Cover letter is available only for English (EN), German (DE), or French (FR) for now.",
                 meta_out=meta2,
                 cv_out=cv_data,
             )
@@ -348,7 +348,7 @@ def handle_cover_pdf_actions(
         notes_variant = _notes_variant(payload, meta2)
         meta2["cover_letter_notes_variant"] = notes_variant
         target_lang = str(meta2.get("target_language") or meta2.get("language") or language or "en").strip().lower()
-        allowed_langs = {"en", "de"}
+        allowed_langs = {"en", "de", "fr"}
         try:
             deps.log_info(
                 "COVER_ACTION aid=%s session=%s stage_before=%s target_lang=%s mode=reuse_or_regenerate",
@@ -363,7 +363,7 @@ def handle_cover_pdf_actions(
             meta2 = deps.wizard_set_stage(meta2, "cover_letter_review")
             cv_data, meta2 = deps.persist(cv_data, meta2)
             return True, cv_data, meta2, deps.wizard_resp(
-                assistant_text="Cover letter is available only for English (EN) or German (DE) for now.",
+                assistant_text="Cover letter is available only for English (EN), German (DE), or French (FR) for now.",
                 meta_out=meta2,
                 cv_out=cv_data,
             )

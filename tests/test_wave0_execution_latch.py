@@ -296,6 +296,75 @@ def test_download_only_reuses_cached_pdf_despite_job_sig_mismatch() -> None:
     assert isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
 
 
+def test_download_only_prefers_cached_pdf_matching_target_language() -> None:
+    mock_session = {
+        "session_id": "test-session-download-only-fr",
+        "cv_data": {
+            "full_name": "Jean Dupont",
+            "email": "jean@example.com",
+            "phone": "+33123456789",
+            "work_experience": [{"employer": "Acme"}],
+            "education": [{"institution": "Sorbonne"}],
+        },
+        "metadata": {
+            "language": "en",
+            "target_language": "fr",
+            "confirmed_flags": {
+                "contact_confirmed": True,
+                "education_confirmed": True,
+            },
+            "pdf_refs": {
+                "cv_ref_en_latest": {
+                    "container": "cv-pdfs",
+                    "blob_name": "test-session-download-only-fr/cv_ref_en_latest.pdf",
+                    "created_at": "2026-04-29T11:40:00",
+                    "cv_sig": "",
+                    "target_language": "en",
+                    "size_bytes": 145000,
+                    "render_ms": 300,
+                    "pages": 2,
+                    "validation_passed": True,
+                    "download_name": "Jean_Dupont_CV_EN.pdf",
+                },
+                "cv_ref_fr_older": {
+                    "container": "cv-pdfs",
+                    "blob_name": "test-session-download-only-fr/cv_ref_fr_older.pdf",
+                    "created_at": "2026-04-29T11:30:00",
+                    "cv_sig": "",
+                    "target_language": "fr",
+                    "size_bytes": 144000,
+                    "render_ms": 310,
+                    "pages": 2,
+                    "validation_passed": True,
+                    "download_name": "Jean_Dupont_CV_FR.pdf",
+                },
+            },
+        },
+    }
+    for entry in mock_session["metadata"]["pdf_refs"].values():
+        entry["cv_sig"] = _cv_sig(mock_session["cv_data"])
+
+    from function_app import _tool_generate_cv_from_session
+
+    with patch("src.orchestrator.tools.cv_pdf_tools.CVBlobStore.download_bytes") as mock_download, patch.dict(
+        os.environ, {"CV_EXECUTION_LATCH": "1"}
+    ):
+        mock_download.return_value = b"%PDF-1.4 cached cv fr"
+        status, payload, content_type = _tool_generate_cv_from_session(
+            session_id="test-session-download-only-fr",
+            language="en",
+            client_context={"pdf_action": "download_only"},
+            session=mock_session,
+        )
+
+    assert status == 200
+    assert content_type == "application/pdf"
+    assert isinstance(payload, dict)
+    assert payload.get("pdf_metadata", {}).get("pdf_ref") == "cv_ref_fr_older"
+    assert payload.get("pdf_metadata", {}).get("download_name") == "Jean_Dupont_CV_FR.pdf"
+    assert isinstance(payload.get("pdf_bytes"), (bytes, bytearray))
+
+
 def test_latch_disabled_allows_regeneration():
     """Test that disabling latch allows re-generation even with existing PDF."""
 

@@ -70,5 +70,29 @@
     "cover_letter": {
       "signoff": "Z poważaniem"
     }
+  },
+  "fr": {
+    "sections": {
+      "profile": "Profil professionnel",
+      "work_experience": "Expérience professionnelle",
+      "further_experience": "Expérience complémentaire",
+      "education": "Formation",
+      "languages": "Langues",
+      "it_ai_skills": "Compétences IT et IA",
+      "certifications": "Certifications",
+      "interests": "Centres d'intérêt",
+      "references": "Références",
+      "data_privacy": "Consentement au traitement des données"
+    },
+    "labels": {
+      "email": "E-mail",
+      "phone": "Téléphone",
+      "location": "Lieu",
+      "present": "Aujourd'hui",
+      "references_available": "Disponibles sur demande"
+    },
+    "cover_letter": {
+      "signoff": "Cordialement"
+    }
   }
 }

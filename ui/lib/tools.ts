@@ -14,7 +14,7 @@ export const CV_TOOLS = [
           },
           language: {
             type: 'string',
-            enum: ['en', 'de', 'pl'],
+            enum: ['en', 'de', 'pl', 'fr'],
             description: 'CV language (default: en)',
           },
           extract_photo: {
@@ -133,7 +133,7 @@ export const CV_TOOLS = [
           },
           language: {
             type: 'string',
-            enum: ['en', 'de', 'pl'],
+            enum: ['en', 'de', 'pl', 'fr'],
             description: 'Optional language override',
           },
         },
@@ -184,7 +184,7 @@ export const CV_TOOLS_RESPONSES = [
         },
         language: {
           type: 'string' as const,
-          enum: ['en', 'de', 'pl'],
+          enum: ['en', 'de', 'pl', 'fr'],
           description: 'CV language (default: en)',
         },
         extract_photo: {
@@ -299,7 +299,7 @@ export const CV_TOOLS_RESPONSES = [
         },
         language: {
           type: 'string' as const,
-          enum: ['en', 'de', 'pl'],
+          enum: ['en', 'de', 'pl', 'fr'],
           description: 'Optional language override',
         },
       },
