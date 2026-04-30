@@ -1,0 +1,105 @@
+name: CV Generator CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run focused backend regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_render_template_by_language.py \
+            tests/test_cover_letter_translation.py \
+            tests/test_wave0_execution_latch.py -k "download_only"
+
+  ui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install UI dependencies
+        working-directory: ./ui
+        run: npm ci
+
+      - name: Run UI tests
+        working-directory: ./ui
+        run: npm test
+
+  playwright-mocked:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, ui-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install UI dependencies
+        working-directory: ./ui
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Prepare local settings
+        run: cp local.settings.template.json local.settings.json
+
+      - name: Run mocked Playwright gate
+        env:
+          CI: "1"
+          CV_ENABLE_AI: "0"
+        run: npx playwright test tests/e2e/stage-sot-mocked.spec.ts
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
