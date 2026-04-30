@@ -5,9 +5,6 @@
 name: Build and deploy Python project to Azure Function App - cv-generator-6695
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 env:

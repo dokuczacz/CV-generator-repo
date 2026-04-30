@@ -1,8 +1,6 @@
 name: Deploy CV Generator to Azure Functions
 
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch: {}
 
 env:
